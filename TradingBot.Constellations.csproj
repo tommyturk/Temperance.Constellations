@@ -7,12 +7,20 @@
   <ItemGroup>
     <Compile Remove="TradingBot.Data\**" />
     <Compile Remove="TradingBot.Services\**" />
+    <Compile Remove="TradingBot.Settings\**" />
+    <Compile Remove="TradingBot.Utilities\**" />
     <Content Remove="TradingBot.Data\**" />
     <Content Remove="TradingBot.Services\**" />
+    <Content Remove="TradingBot.Settings\**" />
+    <Content Remove="TradingBot.Utilities\**" />
     <EmbeddedResource Remove="TradingBot.Data\**" />
     <EmbeddedResource Remove="TradingBot.Services\**" />
+    <EmbeddedResource Remove="TradingBot.Settings\**" />
+    <EmbeddedResource Remove="TradingBot.Utilities\**" />
     <None Remove="TradingBot.Data\**" />
     <None Remove="TradingBot.Services\**" />
+    <None Remove="TradingBot.Settings\**" />
+    <None Remove="TradingBot.Utilities\**" />
   </ItemGroup>
 
   <ItemGroup>
@@ -21,5 +29,10 @@
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="9.0.4" />
     <PackageReference Include="Swashbuckle.AspNetCore" Version="8.1.1" />
     <PackageReference Include="System.Linq" Version="4.3.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="TradingBot.Data\TradingBot.Data.csproj" />
+    <ProjectReference Include="TradingBot.Services\TradingBot.Services.csproj" />
   </ItemGroup>
 </Project>

@@ -17,7 +17,8 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\TradingApp.Settings\TradingBot.Settings.csproj" />
+    <ProjectReference Include="..\TradingBot.Data\TradingBot.Data.csproj" />
+    <ProjectReference Include="..\TradingBot.Settings\TradingBot.Settings.csproj" />
   </ItemGroup>
 
 </Project>

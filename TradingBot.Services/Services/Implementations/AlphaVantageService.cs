@@ -2,7 +2,7 @@
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using System.Net;
-using TradingApp.src.Settings;
+using TradingBot.Settings;
 using TradingBot.Data.Models.HistoricalPriceData;
 using TradingBot.Data.Models.Securities.BalanceSheet;
 using TradingBot.Data.Models.Securities.Earnings;
