@@ -5,9 +5,9 @@ VisualStudioVersion = 17.13.35931.197
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TradingBot.Constellations", "TradingBot.Constellations.csproj", "{1D94CF91-4FBC-4E00-99EA-C33D16F690B6}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TradingBot.Data", "..\TradingBot.Data\TradingBot.Data.csproj", "{02D08F6C-05FB-82D6-8482-7DDE35BF07BF}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TradingBot.Services", "TradingBot.Services\TradingBot.Services.csproj", "{1406ABEC-500A-FF37-9C20-9ECE5331E64F}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TradingBot.Services", "..\TradingBot.Services\TradingBot.Services.csproj", "{BCE81AD6-E692-3230-41B6-9EC208933EF2}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TradingBot.Data", "TradingBot.Data\TradingBot.Data.csproj", "{E58719D3-B906-22C0-30B2-BB43BD7C96DA}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -19,14 +19,14 @@ Global
 		{1D94CF91-4FBC-4E00-99EA-C33D16F690B6}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{1D94CF91-4FBC-4E00-99EA-C33D16F690B6}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{1D94CF91-4FBC-4E00-99EA-C33D16F690B6}.Release|Any CPU.Build.0 = Release|Any CPU
-		{02D08F6C-05FB-82D6-8482-7DDE35BF07BF}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{02D08F6C-05FB-82D6-8482-7DDE35BF07BF}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{02D08F6C-05FB-82D6-8482-7DDE35BF07BF}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{02D08F6C-05FB-82D6-8482-7DDE35BF07BF}.Release|Any CPU.Build.0 = Release|Any CPU
-		{BCE81AD6-E692-3230-41B6-9EC208933EF2}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{BCE81AD6-E692-3230-41B6-9EC208933EF2}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{BCE81AD6-E692-3230-41B6-9EC208933EF2}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{BCE81AD6-E692-3230-41B6-9EC208933EF2}.Release|Any CPU.Build.0 = Release|Any CPU
+		{1406ABEC-500A-FF37-9C20-9ECE5331E64F}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{1406ABEC-500A-FF37-9C20-9ECE5331E64F}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{1406ABEC-500A-FF37-9C20-9ECE5331E64F}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{1406ABEC-500A-FF37-9C20-9ECE5331E64F}.Release|Any CPU.Build.0 = Release|Any CPU
+		{E58719D3-B906-22C0-30B2-BB43BD7C96DA}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{E58719D3-B906-22C0-30B2-BB43BD7C96DA}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{E58719D3-B906-22C0-30B2-BB43BD7C96DA}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{E58719D3-B906-22C0-30B2-BB43BD7C96DA}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
