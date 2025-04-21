@@ -49,9 +49,7 @@ namespace TradingApp.src.Core.Strategies.MeanReversion.Implementations
         {
             // Ensure enough data based on initialized parameters
             if (historicalDataWindow.Count < _movingAveragePeriod || historicalDataWindow.Count < _rsiPeriod + 1)
-            {
                 return SignalDecision.Hold;
-            }
 
             // --- Bollinger Band Calculation ---
             // Use only the required window for calculation efficiency if needed, but using full history passed is often fine.
@@ -142,10 +140,57 @@ namespace TradingApp.src.Core.Strategies.MeanReversion.Implementations
             return activeTrade;
         }
 
+        public decimal GetAllocationAmount(HistoricalPriceModel currentBar, IReadOnlyList<HistoricalPriceModel> historicalDataWindow, decimal maxTradeAllocation)
+        {
+            if (historicalDataWindow.Count < _movingAveragePeriod || historicalDataWindow.Count < _rsiPeriod + 1)
+                return 0;
 
+            var bbWindowPrices = historicalDataWindow.TakeLast(_movingAveragePeriod).Select(h => h.ClosePrice).ToList();
+            if (bbWindowPrices.Count < _movingAveragePeriod) return 0;
 
-        // --- Calculation Helpers (Copied & adapted from your TradingEngine) ---
-        // Consider moving these to a static Utils class if shared across strategies
+            decimal simpleMovingAverage = bbWindowPrices.Average();
+            decimal standardDeviation = CalculateStdDev(bbWindowPrices);
+            decimal upperBollingerBand = simpleMovingAverage + _stdDevMultiplier * standardDeviation;
+            decimal lowerBollingerBand = simpleMovingAverage - _stdDevMultiplier * standardDeviation;
+
+            var rsiWindowPrices = historicalDataWindow.Select(h => h.ClosePrice).ToList();
+            List<decimal> rsiValues = CalculateRSI(rsiWindowPrices, _rsiPeriod);
+            if (rsiValues.Count == 0 || rsiValues.Count < historicalDataWindow.Count)
+                return 0;
+
+            decimal currentRelativeStrengthIndex = rsiValues.Last();
+
+            SignalDecision signal = GenerateSignal(currentBar, historicalDataWindow);
+
+            decimal calculatedAllocation = 0;
+
+            if (signal == SignalDecision.Buy)
+            {
+                decimal distanceBelowLowerBand = Math.Max(0, lowerBollingerBand - currentBar.ClosePrice);
+
+                decimal distanceBelowRSIOversold = Math.Max(0, _rsiOversoldThreshold - currentRelativeStrengthIndex);
+
+                if (distanceBelowRSIOversold > 0 && currentBar.ClosePrice < lowerBollingerBand)
+                {
+                    decimal rsiScalingFactor = Math.Min(1.0m, distanceBelowRSIOversold / (_rsiOversoldThreshold - 0m));
+                    calculatedAllocation = maxTradeAllocation * rsiScalingFactor;
+                }
+            }
+            else if (signal == SignalDecision.Sell)
+            {
+                decimal distanceAboveUpperBand = Math.Max(0, currentBar.ClosePrice - upperBollingerBand);
+
+                decimal distanceAboveRSIOverbought = Math.Max(0, currentRelativeStrengthIndex - _rsiOverboughtThreshold);
+
+                if (distanceAboveRSIOverbought > 0 && currentBar.ClosePrice > upperBollingerBand)
+                {
+                    decimal rsiScalingFactor = Math.Min(1.0m, distanceAboveRSIOverbought / (100m - _rsiOverboughtThreshold));
+                    calculatedAllocation = maxTradeAllocation * rsiScalingFactor;
+                }
+            }
+
+            return Math.Min(calculatedAllocation, maxTradeAllocation);
+        }
 
         private decimal CalculateStdDev(List<decimal> values)
         {

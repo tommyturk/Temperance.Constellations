@@ -129,7 +129,6 @@ namespace TradingApp.src.Core.Services.Implementations
 
         public async Task<List<HistoricalPriceModel>> GetHistoricalPrices(string symbol, string interval)
         {
-            var securityId = await _securitiesOverviewService.GetSecurityId(symbol);
             var data = await _historicalPricesRepository.GetSecurityHistoricalPrices(symbol, interval);
             return data;
         }

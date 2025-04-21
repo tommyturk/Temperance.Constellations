@@ -83,7 +83,7 @@ namespace TradingBot.Services.BackTesting.Implementations
                         var dataFetchStartDate = config.StartDate.AddYears(-20);
                         _logger.LogDebug("RunId: {RunId} - Attempting to fetch data for {Symbol} [{Interval}] from {FetchStart} to {FetchEnd}", runId, symbol, interval, dataFetchStartDate, config.EndDate);
 
-                        List<HistoricalPriceModel> historicalData = await _historicalPriceService.GetHistoricalPrices(symbol, interval); 
+                        List<HistoricalPriceModel> historicalData = await _historicalPriceService.GetHistoricalPrices(symbol, interval);
 
                         if (historicalData == null || !historicalData.Any())
                         {
@@ -132,6 +132,24 @@ namespace TradingBot.Services.BackTesting.Implementations
 
                             if (currentPosition == null && signal != SignalDecision.Hold)
                             {
+                                decimal maxTradeAllocation = config.InitialCapital * 0.02m;
+
+                                decimal actualAllocationAmount = strategyInstance.GetAllocationAmount(currentBar, dataWindow, maxTradeAllocation);
+
+                                if (actualAllocationAmount <= 0 && currentBar.ClosePrice < 0)
+                                {
+                                    _logger.LogWarning("RunId: {RunId} - Invalid allocation amount for {Symbol} [{Interval}] at {Timestamp}. Allocation: {Allocation}", runId, symbol, interval, currentBar.Timestamp, actualAllocationAmount);
+                                    continue;
+                                }
+
+                                int calculatedQuantity = (int)Math.Round(actualAllocationAmount / currentBar.ClosePrice);
+
+                                if (calculatedQuantity <= 0)
+                                {
+                                    _logger.LogWarning("RunId: {RunId} - Invalid position size for {Symbol} [{Interval}] at {Timestamp}. Quantity: {Quantity}", runId, symbol, interval, currentBar.Timestamp, calculatedQuantity);
+                                    continue;
+                                }
+
                                 activeTrade = new TradeSummary
                                 {
                                     EntryDate = currentBar.Timestamp,
@@ -143,15 +161,15 @@ namespace TradingBot.Services.BackTesting.Implementations
                                 {
                                     EntryPrice = currentBar.ClosePrice,
                                     EntryDate = currentBar.Timestamp,
-                                    Quantity = (int)config.InitialCapital,
+                                    Quantity = calculatedQuantity,
                                     Direction = signal == SignalDecision.Buy ? PositionDirection.Long : PositionDirection.Short
                                 };
 
                                 await _tradesService.SaveBacktestResults(runId, new BacktestResult { Trades = new List<TradeSummary> { activeTrade } }, symbol, interval);
-                            }
 
-                            _logger.LogInformation("RunId: {RunId}, Symbol: {Symbol}, Interval: {Interval}, Timestamp: {Timestamp}, Signal: {Signal}",
-                                runId, symbol, interval, currentBar.Timestamp, signal);
+                                _logger.LogInformation("RunId: {RunId}, Symbol: {Symbol}, Interval: {Interval}, Timestamp: {Timestamp}, Signal: {Signal}",
+                                    runId, symbol, interval, currentBar.Timestamp, signal);
+                            }
 
                             if (currentPosition != null && strategyInstance.ShouldExitPosition(currentPosition, currentBar, dataWindow))
                             {

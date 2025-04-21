@@ -19,6 +19,8 @@ namespace TradingBot.Services.Trading.Strategies
         bool ShouldExitPosition(Position position, HistoricalPriceModel currentBar, IReadOnlyList<HistoricalPriceModel> historaicalDataWindow);
 
         int GetRequiredLookbackPeriod();
+
+        decimal GetAllocationAmount(HistoricalPriceModel currentBar, IReadOnlyList<HistoricalPriceModel> historicalDataWindow, decimal maxTradeAllocation);
     }
 }
     
