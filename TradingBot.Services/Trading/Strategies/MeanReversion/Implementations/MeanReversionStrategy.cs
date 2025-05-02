@@ -47,7 +47,6 @@ namespace TradingApp.src.Core.Strategies.MeanReversion.Implementations
 
         public SignalDecision GenerateSignal(HistoricalPriceModel currentBar, IReadOnlyList<HistoricalPriceModel> historicalDataWindow)
         {
-            // Ensure enough data based on initialized parameters
             if (historicalDataWindow.Count < _movingAveragePeriod || historicalDataWindow.Count < _rsiPeriod + 1)
                 return SignalDecision.Hold;
 
@@ -61,15 +60,12 @@ namespace TradingApp.src.Core.Strategies.MeanReversion.Implementations
             decimal upperBollingerBand = simpleMovingAverage + _stdDevMultiplier * standardDeviation;
             decimal lowerBollingerBand = simpleMovingAverage - _stdDevMultiplier * standardDeviation;
 
-            // --- RSI Calculation ---
             var rsiWindowPrices = historicalDataWindow.Select(h => h.ClosePrice).ToList();
             List<decimal> rsiValues = CalculateRSI(rsiWindowPrices, _rsiPeriod);
             if (rsiValues.Count == 0 || rsiValues.Count < historicalDataWindow.Count)
-            {
+                return SignalDecision.Hold;
 
-                return SignalDecision.Hold; // Need robust RSI calculation first
-            }
-            decimal currentRelativeStrengthIndex = rsiValues.Last(); // Assumes last RSI corresponds to currentBar
+            decimal currentRelativeStrengthIndex = rsiValues.Last();
 
             // --- Signal Logic ---
             if (currentBar.ClosePrice < lowerBollingerBand && currentRelativeStrengthIndex < _rsiOversoldThreshold)
@@ -85,8 +81,6 @@ namespace TradingApp.src.Core.Strategies.MeanReversion.Implementations
         {
             var currentSignal = GenerateSignal(currentBar, historicalDataWindow);
 
-            // --- Exit Logic ---
-            // Exit on opposite signal
             if (position.Direction == PositionDirection.Long && currentSignal == SignalDecision.Sell)
             {
                 return true;
@@ -96,19 +90,15 @@ namespace TradingApp.src.Core.Strategies.MeanReversion.Implementations
                 return true;
             }
 
-            // --- Add other exit conditions here ---
-            // e.g., Stop Loss:
-            // decimal stopLossPrice = CalculateStopLoss(position); // Implement this logic
-            // if (position.Direction == PositionDirection.Long && currentBar.LowPrice <= stopLossPrice) return true;
-            // if (position.Direction == PositionDirection.Short && currentBar.HighPrice >= stopLossPrice) return true;
+            decimal stopLossPrice = CalculateStopLoss(position); // Implement this logic
+            if (position.Direction == PositionDirection.Long && currentBar.LowPrice <= stopLossPrice) return true;
+            if (position.Direction == PositionDirection.Short && currentBar.HighPrice >= stopLossPrice) return true;
 
-            // e.g., Take Profit:
-            // decimal takeProfitPrice = CalculateTakeProfit(position); // Implement this logic
-            // if (position.Direction == PositionDirection.Long && currentBar.HighPrice >= takeProfitPrice) return true;
-            // if (position.Direction == PositionDirection.Short && currentBar.LowPrice <= takeProfitPrice) return true;
+            decimal takeProfitPrice = CalculateTakeProfit(position); // Implement this logic
+            if (position.Direction == PositionDirection.Long && currentBar.HighPrice >= takeProfitPrice) return true;
+            if (position.Direction == PositionDirection.Short && currentBar.LowPrice <= takeProfitPrice) return true;
 
-            // e.g., Time-based exit:
-            // if (currentBar.Timestamp >= position.EntryDate.AddHours(X)) return true;
+            if (currentBar.Timestamp >= position.EntryDate.AddHours(X)) return true;
 
             return false;
         }
@@ -267,6 +257,26 @@ namespace TradingApp.src.Core.Strategies.MeanReversion.Implementations
             var padding = Enumerable.Repeat(50m, prices.Count - rsiValues.Count).ToList();
             padding.AddRange(rsiValues);
             return padding; // Returns list of same size as input 'prices'
+        }
+
+        protected decimal CalculateStopLoss(Position position)
+        {
+            decimal stopLossPercentage = 0.05m; 
+
+            if (position.Direction == PositionDirection.Long)
+                return position.EntryPrice * (1 - stopLossPercentage);
+            else
+                return position.EntryPrice * (1 + stopLossPercentage);
+        }
+
+        protected decimal CalculateTakeProfit(Position position)
+        {
+            decimal takeProfitPercentage = 0.05m;
+
+            if (position.Direction == PositionDirection.Long)
+                return position.EntryPrice * (1 + takeProfitPercentage);
+            else
+                return position.EntryPrice * (1 - takeProfitPercentage);
         }
     }
 }
