@@ -41,18 +41,15 @@ namespace TradingApp.src.Core.Strategies.MeanReversion.Implementations
 
         public int GetRequiredLookbackPeriod()
         {
-            return Math.Max(_movingAveragePeriod, _rsiPeriod + 1) + 1; // Add buffer
+            return Math.Max(_movingAveragePeriod, _rsiPeriod + 1) + 1;
         }
 
 
         public SignalDecision GenerateSignal(HistoricalPriceModel currentBar, IReadOnlyList<HistoricalPriceModel> historicalDataWindow)
         {
-            // Ensure enough data based on initialized parameters
             if (historicalDataWindow.Count < _movingAveragePeriod || historicalDataWindow.Count < _rsiPeriod + 1)
                 return SignalDecision.Hold;
 
-            // --- Bollinger Band Calculation ---
-            // Use only the required window for calculation efficiency if needed, but using full history passed is often fine.
             var bbWindowPrices = historicalDataWindow.TakeLast(_movingAveragePeriod).Select(h => h.ClosePrice).ToList();
             if (bbWindowPrices.Count < _movingAveragePeriod) return SignalDecision.Hold; // Double check
 
@@ -61,22 +58,18 @@ namespace TradingApp.src.Core.Strategies.MeanReversion.Implementations
             decimal upperBollingerBand = simpleMovingAverage + _stdDevMultiplier * standardDeviation;
             decimal lowerBollingerBand = simpleMovingAverage - _stdDevMultiplier * standardDeviation;
 
-            // --- RSI Calculation ---
             var rsiWindowPrices = historicalDataWindow.Select(h => h.ClosePrice).ToList();
             List<decimal> rsiValues = CalculateRSI(rsiWindowPrices, _rsiPeriod);
             if (rsiValues.Count == 0 || rsiValues.Count < historicalDataWindow.Count)
-            {
+                return SignalDecision.Hold;
 
-                return SignalDecision.Hold; // Need robust RSI calculation first
-            }
-            decimal currentRelativeStrengthIndex = rsiValues.Last(); // Assumes last RSI corresponds to currentBar
+            decimal currentRelativeStrengthIndex = rsiValues.Last();
 
-            // --- Signal Logic ---
             if (currentBar.ClosePrice < lowerBollingerBand && currentRelativeStrengthIndex < _rsiOversoldThreshold)
                 return SignalDecision.Buy;
 
             if (currentBar.ClosePrice > upperBollingerBand && currentRelativeStrengthIndex > _rsiOverboughtThreshold)
-                return SignalDecision.Sell; // Signal to Enter Short or Exit Long
+                return SignalDecision.Sell;
 
             return SignalDecision.Hold;
         }
@@ -86,13 +79,9 @@ namespace TradingApp.src.Core.Strategies.MeanReversion.Implementations
             var currentSignal = GenerateSignal(currentBar, historicalDataWindow);
 
             if (position.Direction == PositionDirection.Long && currentSignal == SignalDecision.Sell)
-            {
                 return true;
-            }
             if (position.Direction == PositionDirection.Short && currentSignal == SignalDecision.Buy)
-            {
                 return true;
-            }
 
             decimal stopLossPrice = CalculateStopLoss(position);
             if (position.Direction == PositionDirection.Long && currentBar.LowPrice <= stopLossPrice) return true;
@@ -119,13 +108,10 @@ namespace TradingApp.src.Core.Strategies.MeanReversion.Implementations
             decimal profitLoss = 0;
 
             if (activeTrade.Direction == "Long")
-            {
                 profitLoss = (activeTrade.ExitPrice.Value - activeTrade.EntryPrice) * activeTrade.Quantity;
-            }
+
             else if (activeTrade.Direction == "Short")
-            {
                 profitLoss = (activeTrade.EntryPrice - activeTrade.ExitPrice.Value) * activeTrade.Quantity;
-            }
 
             activeTrade.ProfitLoss = profitLoss;
 
@@ -190,7 +176,6 @@ namespace TradingApp.src.Core.Strategies.MeanReversion.Implementations
                 return 0;
 
             decimal average = values.Average();
-            // Use double for intermediate sum to avoid overflow with large numbers or many items
             double sumOfSquares = values.Sum(val => Math.Pow((double)(val - average), 2));
             return (decimal)Math.Sqrt(sumOfSquares / (values.Count - 1));
         }
@@ -198,17 +183,12 @@ namespace TradingApp.src.Core.Strategies.MeanReversion.Implementations
         private List<decimal> CalculateRSI(List<decimal> prices, int period)
         {
             var rsiValues = new List<decimal>();
-            if (prices == null || prices.Count <= period) // Need at least period+1 prices for first calculation
-            {
-                // Return empty or list of neutrals (e.g., 50) matching input size?
-                // Returning empty is safer if downstream checks count.
+            if (prices == null || prices.Count <= period)
                 return rsiValues;
-            }
 
             decimal gains = 0;
             decimal losses = 0;
 
-            // Calculate initial average gain/loss for the first period
             for (int j = 1; j <= period; j++)
             {
                 decimal change = prices[j] - prices[j - 1];
@@ -219,18 +199,11 @@ namespace TradingApp.src.Core.Strategies.MeanReversion.Implementations
             decimal avgGain = gains / period;
             decimal avgLoss = losses / period;
 
-            // Use Wilder's smoothing for subsequent periods (common RSI practice)
-            // Or simple SMA as per original code? Assuming SMA for now based on original calc method structure.
-            // A proper Wilder's smoothing would carry avgGain/avgLoss forward.
-            // Recalculating SMA each time is less standard for RSI but matches original loop structure.
-
-            // Calculate RSI for remaining points
             for (int i = period; i < prices.Count; i++)
             {
-                // Recalculate gains/losses over the EXACT preceding 'period' bars (Simple, non-smoothed approach)
                 gains = 0;
                 losses = 0;
-                for (int j = i - period + 1; j <= i; j++) // Window of 'period' length ending at 'i'
+                for (int j = i - period + 1; j <= i; j++)
                 {
                     decimal change = prices[j] - prices[j - 1];
                     if (change > 0) gains += change;
@@ -239,12 +212,8 @@ namespace TradingApp.src.Core.Strategies.MeanReversion.Implementations
                 avgGain = gains / period;
                 avgLoss = losses / period;
 
-
-                // Original RSI calculation logic
                 if (avgLoss == 0)
-                {
-                    rsiValues.Add(100); // Avoid division by zero, strong uptrend
-                }
+                    rsiValues.Add(100);
                 else
                 {
                     decimal relativeStrength = avgGain / avgLoss;
@@ -253,12 +222,9 @@ namespace TradingApp.src.Core.Strategies.MeanReversion.Implementations
                 }
             }
 
-            // Pad the beginning with a neutral value (e.g., 50) or skip calculation for initial bars
-            // Padding to match input length makes indexing easier for caller.
-            // Add `period` count of initial values. Using 50 as neutral.
             var padding = Enumerable.Repeat(50m, prices.Count - rsiValues.Count).ToList();
             padding.AddRange(rsiValues);
-            return padding; // Returns list of same size as input 'prices'
+            return padding;
         }
 
         protected decimal CalculateStopLoss(Position position)
