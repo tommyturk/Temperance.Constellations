@@ -2,8 +2,8 @@ version: "3.8"
 
 services:
   tradingbot-constellations:
-    image: tradingbot-constellations:latest
-    container_name: tradingbot-api-constellations
+    image: temperance-constellations:latest
+    container_name: temperance-api-constellations
     ports:
       - "8082:8080"
       - "8083:8081"
