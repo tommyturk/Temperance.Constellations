@@ -1,11 +1,11 @@
 ﻿using Hangfire;
 using Microsoft.AspNetCore.Mvc;
 using TradingApp.src.Core.Services.Interfaces;
-using TradingBot.Data.Models.Backtest;
-using TradingBot.Services.BackTesting.Interfaces;
-using TradingBot.Services.Factories.Interfaces;
+using Temperance.Data.Models.Backtest;
+using Temperance.Services.BackTesting.Interfaces;
+using Temperance.Services.Factories.Interfaces;
 
-namespace TradingBot.Constellations.Controllers
+namespace Temperance.Constellations.Controllers
 {
     [ApiController]
     [Route("api/[controller]")]
@@ -36,13 +36,12 @@ namespace TradingBot.Constellations.Controllers
             if (_strategyFactory.CreateStrategy(configuration.StrategyName, configuration.StrategyParameters) == null)
                 return BadRequest($"Invalid configuration: Strategy '{configuration.StrategyName}' not found.");
 
-            var runId = Guid.NewGuid(); // Generate unique ID
+            var runId = Guid.NewGuid(); 
 
             await _tradeService.InitializeBacktestRunAsync(configuration, runId);
 
-            // Step 2: Enqueue the actual processing job with Hangfire
             var jobId = _backgroundJobClient.Enqueue<IBacktestRunner>(runner =>
-                           runner.RunBacktestAsync(configuration, runId)); // Note: Passing config and runId
+                           runner.RunBacktestAsync(configuration, runId));
 
             _logger.LogInformation("Enqueued backtest RunId: {RunId}, Hangfire JobId: {JobId}", runId, jobId);
 

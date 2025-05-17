@@ -10,8 +10,8 @@ services:
     environment:
       ASPNETCORE_URLS: "http://+:8080;http://+:8081"
       ASPNETCORE_ENVIRONMENT: "Development"
-      ConnectionStrings__DefaultConnection: "Server=host.docker.internal\\TRADINGBOTSERVER,1433;Database=TradingBotDb;User ID=developer;Password=K3n5alr1532025!!;Encrypt=True;TrustServerCertificate=True;MultipleActiveResultSets=True;"
+      ConnectionStrings__DefaultConnection: "Server=host.docker.internal\\TRADINGBOTSERVER,1433;Database=TemperanceDb;User ID=developer;Password=K3n5alr1532025!!;Encrypt=True;TrustServerCertificate=True;MultipleActiveResultSets=True;"
       ConnectionStrings__HistoricalPricesConnection: "Server=host.docker.internal\\TRADINGBOTSERVER,1433;Database=Historical;User ID=developer;Password=K3n5alr1532025!!;Encrypt=True;TrustServerCertificate=True;MultipleActiveResultSets=True;"
       AlphaVantageSettings__ApiKey: "Q63WJB6QXCD0USO7"
-      ConnectionStrings__HangfireConnection: "Server=host.docker.internal\\TRADINGBOTSERVER;Database=TradingBotDb;User ID=developer;Password=K3n5alr1532025!!;Encrypt=False;TrustServerCertificate=True;"
+      ConnectionStrings__HangfireConnection: "Server=host.docker.internal\\TRADINGBOTSERVER;Database=TemperanceDb;User ID=developer;Password=K3n5alr1532025!!;Encrypt=False;TrustServerCertificate=True;"
     restart: unless-stopped

@@ -1,6 +1,6 @@
 using Microsoft.AspNetCore.Mvc;
 
-namespace TradingBot.Constellations.Controllers
+namespace Temperance.Constellations.Controllers
 {
     [ApiController]
     [Route("[controller]")]

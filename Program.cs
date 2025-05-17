@@ -1,26 +1,26 @@
-using TradingApp.src.Core.Services.Implementations; // For TradesService
-using TradingBot.Data.Data.Repositories.Trade.Implementations; // For TradeRepository
-using TradingBot.Data.Data.Repositories.Trade.Interfaces;
-using TradingApp.src.Data.Repositories.HistoricalPrices.Interfaces; // For IHistoricalPriceRepository
 using Hangfire;
 using Hangfire.SqlServer;
 using Microsoft.OpenApi.Models;
 using System.Text.Json.Serialization;
-using TradingBot.Services.Services.Interfaces;
-using TradingBot.Services.Factories.Interfaces;
-using TradingBot.Services.Factories.Implementations;
-using TradingBot.Services.BackTesting.Interfaces;
-using TradingBot.Services.BackTesting.Implementations;
+using Temperance.Data.Data.Repositories.BalanceSheet.Implementation;
+using Temperance.Data.Data.Repositories.BalanceSheet.Interface;
+using Temperance.Data.Data.Repositories.Securities.Implementations;
+using Temperance.Data.Data.Repositories.Securities.Interfaces;
+using Temperance.Data.Data.Repositories.Trade.Implementations; // For TradeRepository
+using Temperance.Data.Data.Repositories.Trade.Interfaces;
+using Temperance.Data.Repositories.Securities.Implementations;
+using Temperance.Services.BackTesting.Implementations;
+using Temperance.Services.BackTesting.Interfaces;
+using Temperance.Services.Factories.Implementations;
+using Temperance.Services.Factories.Interfaces;
+using Temperance.Services.Services.Implementations;
+using Temperance.Services.Services.Interfaces;
+using Temperance.Settings.Settings;
+using Temperance.Utilities.Helpers;
+using TradingApp.src.Core.Services.Implementations; // For TradesService
 using TradingApp.src.Core.Services.Interfaces;
-using TradingBot.Services.Services.Implementations;
 using TradingApp.src.Data.Repositories.HistoricalPrices.Implementations;
-using TradingBot.Settings.Settings;
-using TradingBot.Data.Data.Repositories.Securities.Implementations;
-using TradingBot.Data.Data.Repositories.Securities.Interfaces;
-using TradingBot.Utilities.Helpers;
-using TradingBot.Data.Data.Repositories.BalanceSheet.Implementation;
-using TradingBot.Data.Data.Repositories.BalanceSheet.Interface;
-using TradingBot.Data.Repositories.Securities.Implementations;
+using TradingApp.src.Data.Repositories.HistoricalPrices.Interfaces;
 
 var builder = WebApplication.CreateBuilder(args);
 

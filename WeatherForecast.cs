@@ -1,4 +1,4 @@
-namespace TradingBot.Constellations
+namespace Temperance.Constellations
 {
     public class WeatherForecast
     {
