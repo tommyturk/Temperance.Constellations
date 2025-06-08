@@ -1,12 +1,13 @@
 using Hangfire;
 using Hangfire.SqlServer;
+using Microsoft.Extensions.Options;
 using Microsoft.OpenApi.Models;
 using System.Text.Json.Serialization;
 using Temperance.Data.Data.Repositories.BalanceSheet.Implementation;
 using Temperance.Data.Data.Repositories.BalanceSheet.Interface;
 using Temperance.Data.Data.Repositories.Securities.Implementations;
 using Temperance.Data.Data.Repositories.Securities.Interfaces;
-using Temperance.Data.Data.Repositories.Trade.Implementations; // For TradeRepository
+using Temperance.Data.Data.Repositories.Trade.Implementations;
 using Temperance.Data.Data.Repositories.Trade.Interfaces;
 using Temperance.Data.Repositories.Securities.Implementations;
 using Temperance.Services.BackTesting.Implementations;
@@ -17,7 +18,7 @@ using Temperance.Services.Services.Implementations;
 using Temperance.Services.Services.Interfaces;
 using Temperance.Settings.Settings;
 using Temperance.Utilities.Helpers;
-using TradingApp.src.Core.Services.Implementations; // For TradesService
+using TradingApp.src.Core.Services.Implementations;
 using TradingApp.src.Core.Services.Interfaces;
 using TradingApp.src.Data.Repositories.HistoricalPrices.Implementations;
 using TradingApp.src.Data.Repositories.HistoricalPrices.Interfaces;
@@ -42,18 +43,20 @@ builder.Services.AddControllers()
         options.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter());
     });
 
-// External Data Services (Replace Placeholders with Real Implementations)
+builder.Services.Configure<ConductorSettings>(builder.Configuration.GetSection("ConductorSettings"));
+builder.Services.AddSingleton(sp => sp.GetRequiredService<IOptions<ConductorSettings>>().Value);
+
 builder.Services.AddScoped<IHistoricalPriceService, HistoricalPriceService>();
 builder.Services.AddScoped<ISecuritiesOverviewService, SecuritiesOverviewService>();
-builder.Services.AddScoped<IHistoricalPriceRepository, HistoricalPriceRepository>(); // Needed by TradeRepository
+builder.Services.AddScoped<IHistoricalPriceRepository, HistoricalPriceRepository>();
 builder.Services.AddHttpClient<IAlphaVantageService, AlphaVantageService>();
 
 builder.Services.AddSingleton(new DefaultConnectionString(connectionString));
 builder.Services.AddSingleton(new HistoricalPriceConnectionString(historicalConnectionString));
-// Backtesting Core Services
-builder.Services.AddSingleton<IStrategyFactory, StrategyFactory>(); // Factory can be singleton
+
+builder.Services.AddSingleton<IStrategyFactory, StrategyFactory>();
 builder.Services.AddScoped<IPerformanceCalculator, PerformanceCalculator>();
-builder.Services.AddScoped<IBacktestRunner, BacktestRunner>(); // Scoped is fine for background jobs too
+builder.Services.AddScoped<IBacktestRunner, BacktestRunner>();
 builder.Services.AddSingleton<ISecuritiesOverviewRepository, SecuritiesOverviewRepository>();
 builder.Services.AddScoped<IHistoricalPriceService, HistoricalPriceService>();
 builder.Services.AddScoped<ISecuritiesOverviewService, SecuritiesOverviewService>();
@@ -64,12 +67,13 @@ builder.Services.AddScoped<IPriceService, PriceService>();
 builder.Services.AddScoped<IHistoricalPriceService, HistoricalPriceService>();
 builder.Services.AddScoped<IEarningsRepository, EarningsRepository>();
 builder.Services.AddScoped<IBalanceSheetRepository, BalanceSheetRepository>();
-
 builder.Services.AddScoped<ITradeRepository>(provider =>
     new TradeRepository(
         historicalConnectionString,
         provider.GetRequiredService<ILogger<TradeRepository>>()
     ));
+
+builder.Services.AddSingleton<IConductorService, ConductorService>();
 
 builder.Services.AddScoped<ITradeService, TradesService>();
 

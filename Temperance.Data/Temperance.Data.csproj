@@ -17,6 +17,7 @@
   <ItemGroup>
     <Folder Include="Data\Repositories\AlphaVantage\Implementations\" />
     <Folder Include="Data\Repositories\AlphaVantage\Interfacers\" />
+    <Folder Include="Models\MeanReversion\" />
   </ItemGroup>
 
   <ItemGroup>

@@ -1,5 +1,4 @@
-﻿using TradingApp.src.Core.Models.MeanReversion;
-using Temperance.Data.Models.HistoricalPriceData;
+﻿using Temperance.Data.Models.HistoricalPriceData;
 using Temperance.Data.Models.Trading;
 
 namespace Temperance.Services.Trading.Strategies

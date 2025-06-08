@@ -1,16 +1,14 @@
 ﻿using Hangfire;
-using System.Linq;
 using Microsoft.Extensions.Logging;
 using System.Collections.Concurrent;
-using TradingApp.src.Core.Models.MeanReversion;
-using TradingApp.src.Core.Services.Interfaces;
 using Temperance.Data.Models.Backtest;
+using Temperance.Data.Models.HistoricalPriceData;
 using Temperance.Data.Models.Trading;
 using Temperance.Services.BackTesting.Interfaces;
 using Temperance.Services.Factories.Interfaces;
 using Temperance.Services.Services.Interfaces;
 using Temperance.Services.Trading.Strategies;
-using Temperance.Data.Models.HistoricalPriceData;
+using TradingApp.src.Core.Services.Interfaces;
 
 namespace Temperance.Services.BackTesting.Implementations
 {

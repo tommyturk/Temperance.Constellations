@@ -1,15 +1,9 @@
 ﻿using Microsoft.Extensions.Logging; // Inject ILogger
-using System;
-using System.Collections.Generic;
-using System.Diagnostics;
-using System.Linq;
 using System.Text.Json; // For deserializing config if needed
-using System.Threading.Tasks;
-using TradingApp.src.Core.Models.MeanReversion;
-using TradingApp.src.Core.Services.Interfaces;
 using Temperance.Data.Data.Repositories.Trade.Interfaces;
 using Temperance.Data.Models.Backtest;
 using Temperance.Data.Models.Trading;
+using TradingApp.src.Core.Services.Interfaces;
 
 namespace TradingApp.src.Core.Services.Implementations
 {

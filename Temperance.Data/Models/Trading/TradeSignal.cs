@@ -1,4 +1,6 @@
-﻿namespace TradingApp.src.Core.Models.MeanReversion
+﻿using Temperance.Data.Models.Trading;
+
+namespace Temperance.Data.Models.Trading
 {
     public class TradeSignal
     {

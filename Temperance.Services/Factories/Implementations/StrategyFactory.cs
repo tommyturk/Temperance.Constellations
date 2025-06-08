@@ -27,7 +27,7 @@ namespace Temperance.Services.Factories.Implementations
                 // return (ITradingStrategy?)ActivatorUtilities.CreateInstance(_serviceProvider, strategyType);
 
                 // If strategies have parameterless constructors:
-                return (ITradingStrategy?)Activator.CreateInstance(strategyType);
+                return (ITradingStrategy?)Activator.CreateInstance(strategyType, parameters);
             }
             // Log error: Strategy not found
             Console.WriteLine($"Error: Strategy '{strategyName}' not found in registry.");

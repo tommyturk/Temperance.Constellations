@@ -1,5 +1,4 @@
-﻿using TradingApp.src.Core.Models.MeanReversion;
-using Temperance.Data.Models.HistoricalPriceData;
+﻿using Temperance.Data.Models.HistoricalPriceData;
 using Temperance.Data.Models.Trading;
 using Temperance.Services.Trading.Strategies;
 
@@ -29,12 +28,11 @@ namespace TradingApp.src.Core.Strategies.MeanReversion.Implementations
 
         public void Initialize(decimal initialCapital, Dictionary<string, object> parameters)
         {
-            var defaultParams = GetDefaultParameters();
-            _movingAveragePeriod = (int)defaultParams["MovingAveragePeriod"];
-            _stdDevMultiplier = (decimal)defaultParams["StdDevMultiplier"];
-            _rsiPeriod = (int)defaultParams["RSIPeriod"];
-            _rsiOversoldThreshold = (decimal)defaultParams["RSIOversold"];
-            _rsiOverboughtThreshold = (decimal)defaultParams["RSIOverbought"];
+            _movingAveragePeriod = (int)parameters["MovingAveragePeriod"];
+            _stdDevMultiplier = (decimal)parameters["StdDevMultiplier"];
+            _rsiPeriod = (int)parameters["RSIPeriod"];
+            _rsiOversoldThreshold = (decimal)parameters["RSIOversold"];
+            _rsiOverboughtThreshold = (decimal)parameters["RSIOverbought"];
 
             Console.WriteLine($"Initializing {Name} with MA:{_movingAveragePeriod}, SDMult:{_stdDevMultiplier}, RSI:{_rsiPeriod}, RSI Levels:{_rsiOversoldThreshold}/{_rsiOverboughtThreshold}");
         }

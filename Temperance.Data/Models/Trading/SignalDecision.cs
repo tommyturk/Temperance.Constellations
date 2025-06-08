@@ -1,4 +1,4 @@
-﻿namespace TradingApp.src.Core.Models.MeanReversion
+﻿namespace Temperance.Data.Models.Trading
 {
     public enum SignalDecision
     {
