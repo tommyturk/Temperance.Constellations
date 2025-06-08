@@ -155,7 +155,7 @@ namespace Temperence.Services.Trading.Strategies.Omniscient.Implementation
             return activeTrade!; // Ensure non-null if interface expects it
         }
 
-        public decimal GetAllocationAmount(HistoricalPriceModel currentBar, IReadOnlyList<HistoricalPriceModel> historicalDataWindow, decimal maxTradeAllocation)
+        public decimal GetAllocationAmountAi(HistoricalPriceModel currentBar, IReadOnlyList<HistoricalPriceModel> historicalDataWindow, decimal maxTradeAllocation)
         {
             // Quantity/Allocation is determined by Claude's output and validated by the orchestrator.
             _logger.LogWarning("{StrategyName}.GetAllocationAmount() called - allocation derived from Claude's suggested quantity.", Name);
@@ -183,6 +183,21 @@ namespace Temperence.Services.Trading.Strategies.Omniscient.Implementation
                   ""decisions"": [ { ""symbol"": ""XYZ"", ""action"": ""BUY"", ""quantity"": 0, ""reasoning"": ""Fallback prompt used."" } ],
                   ""overall_reasoning_memo"": ""Fallback prompt activated due to missing template file.""
                 }";
+        }
+
+        public decimal GetAllocationAmount(HistoricalPriceModel currentBar, IReadOnlyList<HistoricalPriceModel> historicalDataWindow, decimal maxTradeAllocation)
+        {
+            throw new NotImplementedException();
+        }
+
+        public decimal GetAllocationAmount(HistoricalPriceModel currentBar, IReadOnlyList<HistoricalPriceModel> historicalDataWindow, decimal maxTradeAllocationInitialCapital, decimal currentTotalEquity, decimal kellyHalfFraction)
+        {
+            throw new NotImplementedException();
+        }
+
+        public long GetMinimumAverageDailyVolume()
+        {
+            throw new NotImplementedException();
         }
     }
 }

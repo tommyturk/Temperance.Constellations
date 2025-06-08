@@ -22,6 +22,12 @@ namespace Temperance.Data.Models.Backtest
         public decimal? WinRate { get; set; } // As percentage
         public string? ErrorMessage { get; set; } // Store errors
 
+        public int WinningTrades { get; set; }
+        public int LosingTrades { get; set; }
+        public decimal PayoffRatio { get; set; }
+        public decimal KellyFraction { get; set; }
+        public decimal KellyHalfFraction { get; set; }
+
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] // Avoid large payload unless requested
         public List<KeyValuePair<DateTime, decimal>>? EquityCurve { get; set; }
 

@@ -7,6 +7,6 @@ namespace Temperance.Services.BackTesting.Interfaces
     public interface IBacktestRunner
     {
         [Hangfire.JobDisplayName("Run Backtest {0}")]
-        Task RunBacktestAsync(BacktestConfiguration config, Guid runId);
+        Task RunBacktestAsync(string configJson, Guid runId);
     }
 }

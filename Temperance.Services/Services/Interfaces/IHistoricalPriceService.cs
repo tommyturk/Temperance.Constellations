@@ -7,6 +7,7 @@ namespace Temperance.Services.Services.Interfaces
     {
         Task<List<HistoricalPriceModel>> GetHistoricalPrices(string symbol, string interval);
         Task<List<HistoricalPriceModel>> GetAllHistoricalPrices(List<string> symbols, List<string> intervals);
+        Task<List<HistoricalPriceModel>> GetHistoricalPrices(string symbol, string interval, DateTime startDate, DateTime endDate);
         IEnumerable<BackfillStatus> GetActiveBackfills();
         Task<bool> RunBacktestAsync(string symbol, string interval);
         Task RunBacktestInternalAsync(string symbol, string interval, CancellationToken ct, BackfillStatus status);

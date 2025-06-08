@@ -1,10 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-
-namespace Temperance.Data.Models.Trading
+﻿namespace Temperance.Data.Models.Trading
 {
     public class TradeSummary
     {
@@ -20,5 +14,6 @@ namespace Temperance.Data.Models.Trading
         public string Direction { get; set; } = string.Empty;
         public int Quantity { get; set; }
         public DateTime HoldingPeriod { get; set; }
+        public decimal TransactionCost { get; set; }
     }
 }

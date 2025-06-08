@@ -59,6 +59,9 @@ builder.Services.AddScoped<IPerformanceCalculator, PerformanceCalculator>();
 builder.Services.AddScoped<IBacktestRunner, BacktestRunner>();
 builder.Services.AddSingleton<ISecuritiesOverviewRepository, SecuritiesOverviewRepository>();
 builder.Services.AddScoped<IHistoricalPriceService, HistoricalPriceService>();
+builder.Services.AddSingleton<ITransactionCostService, TransactionCostService>();
+builder.Services.AddScoped<ILiquidityService, LiquidityService>();
+builder.Services.AddScoped<IPortfolioManager, PortfolioManager>();
 builder.Services.AddScoped<ISecuritiesOverviewService, SecuritiesOverviewService>();
 builder.Services.AddScoped<IAlphaVantageService, AlphaVantageService>();
 builder.Services.AddScoped<IEarningsService, EarningsService>();
@@ -128,7 +131,7 @@ builder.Services.AddHangfire(configuration => configuration
 
 builder.Services.AddHangfireServer(options =>
 {
-    options.WorkerCount = Environment.ProcessorCount;
+    options.WorkerCount = Environment.ProcessorCount / 4;
     options.Queues = new[] { "default" };
 });
 

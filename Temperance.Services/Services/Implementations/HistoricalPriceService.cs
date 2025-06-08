@@ -133,6 +133,10 @@ namespace TradingApp.src.Core.Services.Implementations
             return data;
         }
 
+        public async Task<List<HistoricalPriceModel>> GetHistoricalPrices(string symbol, string interval, DateTime startDate, DateTime endDate)
+        {
+            return await _historicalPricesRepository.GetHistoricalPrices(symbol, interval);
+        }
 
         public async Task<bool> UpdateHistoricalPrices(string symbol, string interval, int year, int month)
         {
@@ -150,21 +154,6 @@ namespace TradingApp.src.Core.Services.Implementations
             }
             return false;
         }
-
-        //public async Task<bool> InsertLiveMarketData(string symbol, string interval)
-        //{
-        //    var securityId = await _securitiesOverviewService.GetSecurityId(symbol);
-        //    var existingData = await _historicalPricesRepository.GetLatestPriceAsync(symbol, interval=);
-        //    if (existingData.Any(d => d.Timestamp.Year == year && d.Timestamp.Month == month))
-        //        return false;
-        //    var data = await _alphaVantageService.GetIntradayDataBatch(symbol, interval, $"{year}-{month:D2}");
-        //    if (data != null)
-        //    {
-        //        await _historicalPricesRepository.UpdateHistoricalPrices(data, symbol, interval);
-        //        return true;
-        //    }
-        //    return false;
-        //}
 
         public async Task<bool> UpdateHistoricalPrices(List<HistoricalPriceModel> latestData, string symbol, string interval)
         {

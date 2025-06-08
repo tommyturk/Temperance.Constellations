@@ -33,15 +33,17 @@ namespace Temperance.Constellations.Controllers
             if (configuration == null || string.IsNullOrWhiteSpace(configuration.StrategyName))
                 return BadRequest("Invalid configuration: StrategyName is required.");
 
-            if (_strategyFactory.CreateStrategy(configuration.StrategyName, configuration.StrategyParameters) == null)
-                return BadRequest($"Invalid configuration: Strategy '{configuration.StrategyName}' not found.");
+            //if (_strategyFactory.CreateStrategy(configuration.StrategyName, configuration.StrategyParameters) == null)
+            //    return BadRequest($"Invalid configuration: Strategy '{configuration.StrategyName}' not found.");
 
             var runId = Guid.NewGuid(); 
 
             await _tradeService.InitializeBacktestRunAsync(configuration, runId);
 
+            string configJson = System.Text.Json.JsonSerializer.Serialize(configuration);
+
             var jobId = _backgroundJobClient.Enqueue<IBacktestRunner>(runner =>
-                           runner.RunBacktestAsync(configuration, runId));
+                           runner.RunBacktestAsync(configJson, runId));
 
             _logger.LogInformation("Enqueued backtest RunId: {RunId}, Hangfire JobId: {JobId}", runId, jobId);
 

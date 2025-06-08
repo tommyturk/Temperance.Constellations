@@ -130,13 +130,27 @@ namespace TradingApp.src.Data.Repositories.HistoricalPrices.Implementations
         {
             var tableName = _sqlHelper.SanitizeTableName(symbol, interval);
 
-            
-
             try
             {
                 return (await _connection.QueryAsync<HistoricalPriceModel>(
                     $@"SELECT * FROM {tableName} 
                    ORDER BY Timestamp")).ToList();
+            }
+            catch (SqlException ex) when (ex.Number == 208)
+            {
+                return new List<HistoricalPriceModel>();
+            }
+        }
+
+        public async Task<List<HistoricalPriceModel>> GetHistoricalPrices(string symbol, string interval, DateTime startDate, DateTime endDate)
+        {
+            var tableName = _sqlHelper.SanitizeTableName(symbol, interval);
+            try
+            {
+                return (await _connection.QueryAsync<HistoricalPriceModel>(
+                    $@"SELECT * FROM {tableName} 
+                   WHERE Timestamp >= @StartDate AND Timestamp <= @EndDate
+                   ORDER BY Timestamp", new { StartDate = startDate, EndDate = endDate })).ToList();
             }
             catch (SqlException ex) when (ex.Number == 208)
             {

@@ -20,6 +20,17 @@ namespace Temperance.Services.Trading.Strategies
         int GetRequiredLookbackPeriod();
 
         decimal GetAllocationAmount(HistoricalPriceModel currentBar, IReadOnlyList<HistoricalPriceModel> historicalDataWindow, decimal maxTradeAllocation);
+
+        decimal GetAllocationAmount(
+           HistoricalPriceModel currentBar,
+           IReadOnlyList<HistoricalPriceModel> historicalDataWindow,
+           decimal maxTradeAllocationInitialCapital,
+           decimal currentTotalEquity,
+           decimal kellyHalfFraction);
+
+        long GetMinimumAverageDailyVolume();
+
+        
     }
 }
     

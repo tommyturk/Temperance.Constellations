@@ -1,35 +1,45 @@
-﻿using TradingApp.src.Core.Strategies.MeanReversion.Implementations;
+﻿using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Temperance.Services.Factories.Interfaces;
 using Temperance.Services.Trading.Strategies;
+using Temperance.Services.Trading.Strategies.MeanReversion.Implementation;
 
 namespace Temperance.Services.Factories.Implementations
 {
     public class StrategyFactory : IStrategyFactory
     {
-        private readonly IServiceProvider _serviceProvider;
+        private readonly IServiceProvider _serviceProvider; // This provides access to the DI container
+        private readonly Dictionary<string, Type> _strategyRegistry;
+        private readonly ILogger<StrategyFactory> _logger;
 
-        private readonly Dictionary<string, Type> _strategyRegistry = new()
+
+        private void RegisterStrategies()
         {
-            { "MeanReversion_BB_RSI", typeof(MeanReversionStrategy) }
-            // Add other strategies here: { "MyOtherStrategy", typeof(MyOtherStrategy) }
-        };
+            _strategyRegistry.Add("MeanReversion_BB_RSI", typeof(MeanReversionStrategy));
+        }
 
-        public StrategyFactory(IServiceProvider serviceProvider)
+        public StrategyFactory(IServiceProvider serviceProvider, ILogger<StrategyFactory> logger)
         {
             _serviceProvider = serviceProvider;
+            _logger = logger;
+            _strategyRegistry = new Dictionary<string, Type>(StringComparer.OrdinalIgnoreCase);
+            RegisterStrategies(); 
+            _logger.LogInformation("StrategyFactory initialized with DI.");
         }
 
         public ITradingStrategy? CreateStrategy(string strategyName, Dictionary<string, object> parameters)
         {
-            if (_strategyRegistry.TryGetValue(strategyName, out var strategyType))
+            if(_strategyRegistry.TryGetValue(strategyName, out var strategyType))
             {
-                // Use ActivatorUtilities if strategy has constructor dependencies managed by DI
-                // return (ITradingStrategy?)ActivatorUtilities.CreateInstance(_serviceProvider, strategyType);
+                var strategy = (ITradingStrategy?)ActivatorUtilities.CreateInstance(_serviceProvider, strategyType);
 
-                // If strategies have parameterless constructors:
-                return (ITradingStrategy?)Activator.CreateInstance(strategyType, parameters);
+                if (strategy == null)
+                    _logger.LogError("Failed to create an instance of strategy '{StrategyName}'.", strategyName);
+                else
+                    _logger.LogDebug("Strategy '{StrategyName}' created successfully.", strategyName);
+
+                return strategy;
             }
-            // Log error: Strategy not found
             Console.WriteLine($"Error: Strategy '{strategyName}' not found in registry.");
             return null;
         }

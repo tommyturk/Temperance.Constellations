@@ -10,8 +10,8 @@ namespace TradingApp.src.Data.Repositories.HistoricalPrices.Interfaces
         Task<bool> UpdateHistoricalPrices(List<HistoricalPriceModel> prices, string symbol, string timeInterval);
         Task<List<HistoricalPriceModel>> GetSecurityHistoricalPrices(string symbol, string interval);
         Task<List<HistoricalPriceModel>> GetHistoricalPrices(string symbol, string interval);
+        Task<List<HistoricalPriceModel>> GetHistoricalPrices(string symbol, string interval, DateTime startDate, DateTime endDate);
         Task<bool> CheckIfBackfillExists(string symbol, string interval);
-
         Task<DateTime?> GetMostRecentTimestamp(string symbol, string interval);
         Task<bool> DeleteHistoricalPrices(string symbol, string interval);
     }
