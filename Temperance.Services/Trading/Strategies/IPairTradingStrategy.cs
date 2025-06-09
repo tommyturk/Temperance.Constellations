@@ -1,23 +1,21 @@
-﻿using Temperance.Data.Models.HistoricalPriceData;
+﻿using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Text;
+using System.Threading.Tasks;
+using Temperance.Data.Models.HistoricalPriceData;
 using Temperance.Data.Models.Trading;
 
 namespace Temperance.Services.Trading.Strategies
 {
-    public interface ITradingStrategy
+    public interface IPairTradingStrategy : IBaseStrategy
     {
-        string Name { get; }
-
-        Dictionary<string, object> GetDefaultParameters();
-
-        void Initialize(decimal initialCapital, Dictionary<string, object> parameters);
-
-        SignalDecision GenerateSignal(HistoricalPriceModel currentBar, IReadOnlyList<HistoricalPriceModel> historicalData);
-
+        int GetRequiredLookbackPeriod();
+        SignalDecision GenerateSignal(HistoricalPriceModel currentBarA, HistoricalPriceModel currentBarB, IReadOnlyList<HistoricalPriceModel> historicalDataA,
+                                      IReadOnlyList<HistoricalPriceModel> historicalDataB);
         TradeSummary ClosePosition(TradeSummary activeTrade, HistoricalPriceModel currentBar, SignalDecision exitSignal);
 
         bool ShouldExitPosition(Position position, HistoricalPriceModel currentBar, IReadOnlyList<HistoricalPriceModel> historaicalDataWindow);
-
-        int GetRequiredLookbackPeriod();
 
         decimal GetAllocationAmount(HistoricalPriceModel currentBar, IReadOnlyList<HistoricalPriceModel> historicalDataWindow, decimal maxTradeAllocation);
 
@@ -29,8 +27,5 @@ namespace Temperance.Services.Trading.Strategies
            decimal kellyHalfFraction);
 
         long GetMinimumAverageDailyVolume();
-
-        
     }
 }
-    

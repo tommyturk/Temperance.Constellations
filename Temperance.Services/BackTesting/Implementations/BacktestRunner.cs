@@ -346,7 +346,7 @@ namespace Temperance.Services.BackTesting.Implementations
             }
         }
 
-        private int CalculatePositionSize(decimal currentBalance, decimal entryPrice, BacktestConfiguration config, ITradingStrategy strategy)
+        private int CalculatePositionSize(decimal currentBalance, decimal entryPrice, BacktestConfiguration config, ISingleAssetStrategy strategy)
         {
             // Placeholder - Implement actual position sizing logic
             // Examples:

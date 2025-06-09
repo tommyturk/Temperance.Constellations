@@ -21,8 +21,4 @@
     <ProjectReference Include="..\Temperance.Settings\Temperance.Settings.csproj" />
   </ItemGroup>
 
-  <ItemGroup>
-    <Folder Include="Trading\Strategies\MeanReversion\" />
-  </ItemGroup>
-
 </Project>

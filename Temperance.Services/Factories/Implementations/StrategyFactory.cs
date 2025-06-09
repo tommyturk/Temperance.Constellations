@@ -27,11 +27,11 @@ namespace Temperance.Services.Factories.Implementations
             _logger.LogInformation("StrategyFactory initialized with DI.");
         }
 
-        public ITradingStrategy? CreateStrategy(string strategyName, Dictionary<string, object> parameters)
+        public ISingleAssetStrategy? CreateStrategy(string strategyName, Dictionary<string, object> parameters)
         {
             if(_strategyRegistry.TryGetValue(strategyName, out var strategyType))
             {
-                var strategy = (ITradingStrategy?)ActivatorUtilities.CreateInstance(_serviceProvider, strategyType);
+                var strategy = (ISingleAssetStrategy?)ActivatorUtilities.CreateInstance(_serviceProvider, strategyType);
 
                 if (strategy == null)
                     _logger.LogError("Failed to create an instance of strategy '{StrategyName}'.", strategyName);

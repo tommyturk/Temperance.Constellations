@@ -7,7 +7,7 @@ using Temperance.Services.Trading.Strategies;
 
 namespace Temperence.Services.Trading.Strategies.Omniscient.Implementation
 {
-    public class ClaudeDecisionStrategy : ITradingStrategy
+    public class ClaudeDecisionStrategy : ISingleAssetStrategy
     {
         public string Name => "Claude_PaperTrading_Companion_V1";
         private readonly IConductorService _conductorService;

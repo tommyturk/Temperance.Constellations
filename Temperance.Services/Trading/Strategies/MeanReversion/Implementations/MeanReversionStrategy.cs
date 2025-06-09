@@ -7,7 +7,7 @@ using Temperance.Services.Trading.Strategies;
 
 namespace Temperance.Services.Trading.Strategies.MeanReversion.Implementation
 {
-    public class MeanReversionStrategy : ITradingStrategy
+    public class MeanReversionStrategy : ISingleAssetStrategy
     {
         public string Name => "MeanReversion_BB_RSI";
 
