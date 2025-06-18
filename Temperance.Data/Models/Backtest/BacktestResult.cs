@@ -16,20 +16,20 @@ namespace Temperance.Data.Models.Backtest
 
         public List<TradeSummary> Trades { get; set; } = new List<TradeSummary>();
         public int TotalTrades { get; set; }
-        public decimal? TotalProfitLoss { get; set; } // Added raw P/L
-        public decimal? TotalReturn { get; set; } // As percentage
-        public decimal? MaxDrawdown { get; set; } // As percentage
-        public decimal? WinRate { get; set; } // As percentage
+        public double? TotalProfitLoss { get; set; } // Added raw P/L
+        public double? TotalReturn { get; set; } // As percentage
+        public double? MaxDrawdown { get; set; } // As percentage
+        public double? WinRate { get; set; } // As percentage
         public string? ErrorMessage { get; set; } // Store errors
 
         public int WinningTrades { get; set; }
         public int LosingTrades { get; set; }
-        public decimal PayoffRatio { get; set; }
-        public decimal KellyFraction { get; set; }
-        public decimal KellyHalfFraction { get; set; }
+        public double PayoffRatio { get; set; }
+        public double KellyFraction { get; set; }
+        public double KellyHalfFraction { get; set; }
 
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] // Avoid large payload unless requested
-        public List<KeyValuePair<DateTime, decimal>>? EquityCurve { get; set; }
+        public List<KeyValuePair<DateTime, double>>? EquityCurve { get; set; }
 
         // Add other aggregated metrics: AvgWin, AvgLoss, ProfitFactor, Sharpe, Sortino etc.
     }

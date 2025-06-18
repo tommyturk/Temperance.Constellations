@@ -4,12 +4,13 @@ namespace Temperance.Services.Services.Interfaces
 {
     public interface ITransactionCostService
     {
-        decimal CalculateEntryCost(decimal entryPrice, SignalDecision signal);
-        decimal CalculateExitCost(decimal exitPrice, PositionDirection positionDirection);
-        decimal CalculateTotalCost(decimal entryPrice, decimal exitPrice, SignalDecision entrySignal, PositionDirection exitPositionDirection, int quantity);
-        Task<decimal> CalculateEntryCost(decimal entryPrice, SignalDecision signal, string symbol, string interval, DateTime timestamp);
-        Task<decimal> CalculateExitCost(decimal exitPrice, PositionDirection positionDirection, string symbol, string interval, DateTime timestamp);
-        Task<decimal> GetSpreadCost(decimal price, int quantity, string symbol, string interval, DateTime timestamp);
-        Task<decimal> CalculateTotalTradeCost(decimal entryPrice, decimal exitPrice, SignalDecision entrySignal, PositionDirection exitPositionDirection, int quantity, string symbol, string interval, DateTime entryTimestamp, DateTime exitTimestamp);
+        double CalculateEntryCost(double entryPrice, SignalDecision signal);
+        double CalculateExitCost(double exitPrice, PositionDirection positionDirection);
+        double CalculateTotalCost(double entryPrice, double exitPrice, SignalDecision entrySignal, PositionDirection exitPositionDirection, int quantity);
+        Task<double> CalculateEntryCost(double entryPrice, SignalDecision signal, string symbol, string interval, DateTime timestamp);
+        Task<double> CalculateExitCost(double exitPrice, PositionDirection positionDirection, string symbol, string interval, DateTime timestamp);
+        Task<double> GetSpreadCost(double price, int quantity, string symbol, string interval, DateTime timestamp);
+        Task<double> GetSpreadCost(double price, double quantity, string symbol, string interval, DateTime timestamp);
+        Task<double> CalculateTotalTradeCost(double entryPrice, double exitPrice, SignalDecision entrySignal, PositionDirection exitPositionDirection, int quantity, string symbol, string interval, DateTime entryTimestamp, DateTime exitTimestamp);
     }
 }

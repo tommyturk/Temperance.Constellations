@@ -90,10 +90,10 @@ namespace TradingApp.src.Core.Services.Implementations
                                 Symbol = symbol,
                                 TimeInterval = interval,
                                 Timestamp = DateTime.Parse(item.Name),
-                                OpenPrice = decimal.Parse(item.Value["1. open"]?.ToString()),
-                                HighPrice = decimal.Parse(item.Value["2. high"]?.ToString()),
-                                LowPrice = decimal.Parse(item.Value["3. low"]?.ToString()),
-                                ClosePrice = decimal.Parse(item.Value["4. close"]?.ToString()),
+                                OpenPrice = double.Parse(item.Value["1. open"]?.ToString()),
+                                HighPrice = double.Parse(item.Value["2. high"]?.ToString()),
+                                LowPrice = double.Parse(item.Value["3. low"]?.ToString()),
+                                ClosePrice = double.Parse(item.Value["4. close"]?.ToString()),
                                 Volume = long.Parse(item.Value["5. volume"]?.ToString())
                             };
 
@@ -181,10 +181,10 @@ namespace TradingApp.src.Core.Services.Implementations
                                 Symbol = symbol,
                                 TimeInterval = interval,
                                 Timestamp = DateTime.Parse(item.Name),
-                                OpenPrice = decimal.Parse(item.Value["1. open"]?.ToString()),
-                                HighPrice = decimal.Parse(item.Value["2. high"]?.ToString()),
-                                LowPrice = decimal.Parse(item.Value["3. low"]?.ToString()),
-                                ClosePrice = decimal.Parse(item.Value["4. close"]?.ToString()),
+                                OpenPrice = double.Parse(item.Value["1. open"]?.ToString()),
+                                HighPrice = double.Parse(item.Value["2. high"]?.ToString()),
+                                LowPrice = double.Parse(item.Value["3. low"]?.ToString()),
+                                ClosePrice = double.Parse(item.Value["4. close"]?.ToString()),
                                 Volume = long.Parse(item.Value["5. volume"]?.ToString())
                             };
 
@@ -254,10 +254,10 @@ namespace TradingApp.src.Core.Services.Implementations
                             Symbol = symbol,
                             TimeInterval = interval,
                             Timestamp = DateTime.Parse(item.Key),
-                            OpenPrice = decimal.Parse(item.Value["1. open"].ToString()),
-                            HighPrice = decimal.Parse(item.Value["2. high"].ToString()),
-                            LowPrice = decimal.Parse(item.Value["3. low"].ToString()),
-                            ClosePrice = decimal.Parse(item.Value["4. close"].ToString()),
+                            OpenPrice = double.Parse(item.Value["1. open"].ToString()),
+                            HighPrice = double.Parse(item.Value["2. high"].ToString()),
+                            LowPrice = double.Parse(item.Value["3. low"].ToString()),
+                            ClosePrice = double.Parse(item.Value["4. close"].ToString()),
                             Volume = long.Parse(item.Value["5. volume"].ToString())
                         };
 

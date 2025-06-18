@@ -1,6 +1,4 @@
-﻿using System;
-using System.Threading.Tasks;
-using Temperance.Data.Models.Backtest;
+﻿using Temperance.Data.Models.Strategy;
 
 namespace Temperance.Services.BackTesting.Interfaces
 {
@@ -8,5 +6,8 @@ namespace Temperance.Services.BackTesting.Interfaces
     {
         [Hangfire.JobDisplayName("Run Backtest {0}")]
         Task RunBacktestAsync(string configJson, Guid runId);
+
+        [Hangfire.JobDisplayName("Run Pairs Backtest {0}")]
+        Task RunPairsBacktest(PairsBacktestConfiguration configuration, Guid runId);
     }
 }

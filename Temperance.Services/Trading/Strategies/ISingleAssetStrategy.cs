@@ -9,28 +9,31 @@ namespace Temperance.Services.Trading.Strategies
 
         Dictionary<string, object> GetDefaultParameters();
 
-        void Initialize(decimal initialCapital, Dictionary<string, object> parameters);
+        void Initialize(double initialCapital, Dictionary<string, object> parameters);
 
         SignalDecision GenerateSignal(HistoricalPriceModel currentBar, IReadOnlyList<HistoricalPriceModel> historicalData);
+
+        SignalDecision GenerateSignal(HistoricalPriceModel currentBar, IReadOnlyList<HistoricalPriceModel> historicalDataWindow, Dictionary<string, double> currentIndicatorValues);
 
         TradeSummary ClosePosition(TradeSummary activeTrade, HistoricalPriceModel currentBar, SignalDecision exitSignal);
 
         bool ShouldExitPosition(Position position, HistoricalPriceModel currentBar, IReadOnlyList<HistoricalPriceModel> historaicalDataWindow);
 
+        bool ShouldExitPosition(Position position, HistoricalPriceModel currentBar, IReadOnlyList<HistoricalPriceModel> historicalDataWindow, Dictionary<string, double> currentIndicatorValues);
         int GetRequiredLookbackPeriod();
 
-        decimal GetAllocationAmount(HistoricalPriceModel currentBar, IReadOnlyList<HistoricalPriceModel> historicalDataWindow, decimal maxTradeAllocation);
+        double GetAllocationAmount(HistoricalPriceModel currentBar, IReadOnlyList<HistoricalPriceModel> historicalDataWindow, double maxTradeAllocation);
 
-        decimal GetAllocationAmount(
+        double GetAllocationAmount(
            HistoricalPriceModel currentBar,
            IReadOnlyList<HistoricalPriceModel> historicalDataWindow,
-           decimal maxTradeAllocationInitialCapital,
-           decimal currentTotalEquity,
-           decimal kellyHalfFraction);
+           double maxTradeAllocationInitialCapital,
+           double currentTotalEquity,
+           double kellyHalfFraction);
 
         long GetMinimumAverageDailyVolume();
 
-        
+        double[] CalculateRSI(double[] prices, int period);
     }
 }
     

@@ -2,15 +2,15 @@
 {
     public class KellyMetrics
     {
-        public decimal KellyFraction { get; set; }
-        public decimal KellyHalfFraction { get; set; }
-        public decimal WinRate { get; set; }
-        public decimal PayoffRatio { get; set; }
+        public double KellyFraction { get; set; }
+        public double KellyHalfFraction { get; set; }
+        public double WinRate { get; set; }
+        public double PayoffRatio { get; set; }
         public int TotalTrades { get; set; }
         public int WinningTrades { get; set; }
         public int LosingTrades { get; set; }
-        public decimal AverageWin { get; set; }
-        public decimal AverageLoss { get; set; }
+        public double AverageWin { get; set; }
+        public double AverageLoss { get; set; }
 
         public KellyMetrics()
         {

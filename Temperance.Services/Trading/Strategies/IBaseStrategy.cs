@@ -4,6 +4,6 @@
     {
         string Name { get; }
 
-        void Initialize(decimal nitialCapital, Dictionary<string, object> parameters);
+        void Initialize(double  initialCapital, Dictionary<string, object> parameters);
     }
 }

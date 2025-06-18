@@ -36,7 +36,7 @@ namespace TradingApp.src.Data.Repositories.HistoricalPrices.Implementations
                 SELECT *
                 FROM {tableName}
                 WHERE Symbol = @Symbol AND TimeInterval = @TimeInterval
-                ORDER BY [Timestamp] DESC";
+                ORDER BY [Timestamp]";
 
             var prices = await _connection.QueryAsync<HistoricalPriceModel>(query, new
             {

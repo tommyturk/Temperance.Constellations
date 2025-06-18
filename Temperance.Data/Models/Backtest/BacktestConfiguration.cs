@@ -8,7 +8,7 @@
         public List<string> Intervals { get; set; } = new(); 
         public DateTime StartDate { get; set; }
         public DateTime EndDate { get; set; }
-        public decimal InitialCapital { get; set; } = 10000;
+        public double InitialCapital { get; set; } = 10000;
         public int MaxParallelism { get; set; } = Environment.ProcessorCount;
     }
 }

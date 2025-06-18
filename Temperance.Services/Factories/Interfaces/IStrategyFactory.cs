@@ -9,7 +9,11 @@ namespace Temperance.Services.Factories.Interfaces
 {
     public interface IStrategyFactory
     {
-        ISingleAssetStrategy? CreateStrategy(string strategyName, Dictionary<string, object> parameters);
+        T? CreateStrategy<T>(
+            string strategyName,
+            double initialCapital,
+            Dictionary<string, object> parameters) where T : class, IBaseStrategy;
+
         IEnumerable<string> GetAvailableStrategies();
     }
 }

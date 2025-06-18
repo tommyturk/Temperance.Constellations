@@ -1,4 +1,5 @@
 ﻿using Temperance.Data.Models.Backtest;
+using Temperance.Data.Models.Strategy;
 using Temperance.Data.Models.Trading;
 
 namespace TradingApp.src.Core.Services.Interfaces
@@ -11,6 +12,7 @@ namespace TradingApp.src.Core.Services.Interfaces
         Task<int> LogStrategyAsync(StrategyLog log);
 
         Task InitializeBacktestRunAsync(BacktestConfiguration config, Guid runId);
+        Task InitializePairBacktestRunAsync(PairsBacktestConfiguration config, Guid runId);
         Task UpdateBacktestRunStatusAsync(Guid runId, string status, string? errorMessage = null);
         Task SaveTradesAsync(Guid runId, IEnumerable<TradeSummary> trades);
         Task FinalizeBacktestRunAsync(Guid runId, BacktestResult result);
@@ -20,6 +22,6 @@ namespace TradingApp.src.Core.Services.Interfaces
 
         Task SaveBacktestResults(Guid runId, BacktestResult backtestResult, string symbol, string interval);
 
-        Task UpdateBacktestPerformanceMetrics(Guid runId, BacktestResult metrics, decimal initialCapital);
+        Task UpdateBacktestPerformanceMetrics(Guid runId, BacktestResult metrics, double initialCapital);
     }
 }

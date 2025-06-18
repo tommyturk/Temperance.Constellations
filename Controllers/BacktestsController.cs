@@ -4,6 +4,7 @@ using TradingApp.src.Core.Services.Interfaces;
 using Temperance.Data.Models.Backtest;
 using Temperance.Services.BackTesting.Interfaces;
 using Temperance.Services.Factories.Interfaces;
+using Temperance.Data.Models.Strategy;
 
 namespace Temperance.Constellations.Controllers
 {
@@ -33,9 +34,6 @@ namespace Temperance.Constellations.Controllers
             if (configuration == null || string.IsNullOrWhiteSpace(configuration.StrategyName))
                 return BadRequest("Invalid configuration: StrategyName is required.");
 
-            //if (_strategyFactory.CreateStrategy(configuration.StrategyName, configuration.StrategyParameters) == null)
-            //    return BadRequest($"Invalid configuration: Strategy '{configuration.StrategyName}' not found.");
-
             var runId = Guid.NewGuid(); 
 
             await _tradeService.InitializeBacktestRunAsync(configuration, runId);
@@ -46,6 +44,25 @@ namespace Temperance.Constellations.Controllers
                            runner.RunBacktestAsync(configJson, runId));
 
             _logger.LogInformation("Enqueued backtest RunId: {RunId}, Hangfire JobId: {JobId}", runId, jobId);
+
+            return Accepted(new { BacktestRunId = runId, JobId = jobId });
+        }
+
+        [HttpPost("start-pairs")]
+        [ProducesResponseType(StatusCodes.Status202Accepted)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)] 
+        public async Task<IActionResult> StartPairsBacktest([FromBody] PairsBacktestConfiguration configuration)
+        {
+            if(configuration == null || string.IsNullOrWhiteSpace(configuration.StrategyName))
+                return BadRequest("Invalid configuration: StrategyName is required.");
+
+            var runId = Guid.NewGuid();
+            await _tradeService.InitializePairBacktestRunAsync(configuration, runId);
+
+            var jobId = _backgroundJobClient.Enqueue<IBacktestRunner>(runner =>
+                           runner.RunPairsBacktest(configuration, runId));
+
+            _logger.LogInformation("Enqueued pairs backtest RunId: {RunId}, Hangfire JobId: {JobId}", runId, jobId);
 
             return Accepted(new { BacktestRunId = runId, JobId = jobId });
         }

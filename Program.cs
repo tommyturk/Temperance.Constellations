@@ -1,5 +1,8 @@
 using Hangfire;
 using Hangfire.SqlServer;
+using ILGPU;
+using ILGPU.Algorithms;
+using ILGPU.Runtime;
 using Microsoft.Extensions.Options;
 using Microsoft.OpenApi.Models;
 using System.Text.Json.Serialization;
@@ -61,6 +64,7 @@ builder.Services.AddSingleton<ISecuritiesOverviewRepository, SecuritiesOverviewR
 builder.Services.AddScoped<IHistoricalPriceService, HistoricalPriceService>();
 builder.Services.AddSingleton<ITransactionCostService, TransactionCostService>();
 builder.Services.AddScoped<ILiquidityService, LiquidityService>();
+builder.Services.AddScoped<IGpuIndicatorService, GpuIndicatorService>();
 builder.Services.AddScoped<IPortfolioManager, PortfolioManager>();
 builder.Services.AddScoped<ISecuritiesOverviewService, SecuritiesOverviewService>();
 builder.Services.AddScoped<IAlphaVantageService, AlphaVantageService>();
@@ -116,6 +120,36 @@ builder.Services.AddSingleton<ISqlHelper>(provider =>
     return new SqlHelper(cs);
 });
 
+builder.Services.AddSingleton<Accelerator>(sp =>
+{
+    var logger = sp.GetRequiredService<ILogger<Program>>(); 
+    logger.LogInformation("Initializing ILGPU Context and Accelerator...");
+
+    try
+    {
+        var context = Context.Create(builder => builder.Default().EnableAlgorithms());
+
+        var device = context.GetPreferredDevice(preferCPU: false);
+
+        if (device == null)
+        {
+            logger.LogWarning("No suitable ILGPU device found. GPU acceleration will be unavailable.");
+            throw new InvalidOperationException("ILGPU Accelerator could not be created as no suitable device was found.");
+        }
+
+        logger.LogInformation("Found ILGPU Device: {DeviceName}", device.Name);
+
+        var accelerator = device.CreateAccelerator(context);
+        logger.LogInformation("ILGPU Accelerator created successfully for {AcceleratorName}", accelerator.Name);
+
+        return accelerator;
+    }
+    catch (Exception ex)
+    {
+        logger.LogCritical(ex, "A critical error occurred while initializing the ILGPU Accelerator. The application cannot start.");
+        throw;
+    }
+});
 builder.Services.AddHangfire(configuration => configuration
     .SetDataCompatibilityLevel(CompatibilityLevel.Version_170)
     .UseSimpleAssemblyNameTypeSerializer()

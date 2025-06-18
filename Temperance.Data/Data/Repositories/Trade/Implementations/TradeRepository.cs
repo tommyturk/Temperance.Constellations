@@ -236,12 +236,10 @@ namespace Temperance.Data.Data.Repositories.Trade.Implementations
 
         public async Task<BacktestRun?> GetBacktestRunAsync(Guid runId)
         {
-            // Fetches the summary data for a run
             const string sql = "SELECT * FROM [TradingBotDb].[Constellations].[BacktestRuns] WHERE RunId = @RunId;";
             try
             {
                 using var connection = CreateConnection();
-                // Use the BacktestRun model defined earlier for mapping
                 return await connection.QuerySingleOrDefaultAsync<BacktestRun>(sql, new { RunId = runId });
             }
             catch (Exception ex)

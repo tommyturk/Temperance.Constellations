@@ -4,6 +4,7 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using Temperance.Data.Models.HistoricalPriceData;
+using Temperance.Data.Models.Strategy;
 using Temperance.Data.Models.Trading;
 
 namespace Temperance.Services.Trading.Strategies
@@ -11,20 +12,26 @@ namespace Temperance.Services.Trading.Strategies
     public interface IPairTradingStrategy : IBaseStrategy
     {
         int GetRequiredLookbackPeriod();
-        SignalDecision GenerateSignal(HistoricalPriceModel currentBarA, HistoricalPriceModel currentBarB, IReadOnlyList<HistoricalPriceModel> historicalDataA,
-                                      IReadOnlyList<HistoricalPriceModel> historicalDataB);
+
+        SignalDecision GenerateSignal(HistoricalPriceModel currentBarA,
+            HistoricalPriceModel currentBarB, Dictionary<string, double> currentIndicatorValues);
+
         TradeSummary ClosePosition(TradeSummary activeTrade, HistoricalPriceModel currentBar, SignalDecision exitSignal);
 
-        bool ShouldExitPosition(Position position, HistoricalPriceModel currentBar, IReadOnlyList<HistoricalPriceModel> historaicalDataWindow);
+        bool ShouldExitPosition(
+            Position position,
+            HistoricalPriceModel currentBarA,
+            HistoricalPriceModel currentBarB,
+            Dictionary<string, double> currentIndicatorValues);
 
-        decimal GetAllocationAmount(HistoricalPriceModel currentBar, IReadOnlyList<HistoricalPriceModel> historicalDataWindow, decimal maxTradeAllocation);
+        double GetAllocationAmount(HistoricalPriceModel currentBar, IReadOnlyList<HistoricalPriceModel> historicalDataWindow, double maxTradeAllocation);
 
-        decimal GetAllocationAmount(
+        double GetAllocationAmount(
            HistoricalPriceModel currentBar,
            IReadOnlyList<HistoricalPriceModel> historicalDataWindow,
-           decimal maxTradeAllocationInitialCapital,
-           decimal currentTotalEquity,
-           decimal kellyHalfFraction);
+           double maxTradeAllocationInitialCapital,
+           double currentTotalEquity,
+           double kellyHalfFraction);
 
         long GetMinimumAverageDailyVolume();
     }

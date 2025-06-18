@@ -2,6 +2,7 @@
 using System.Text.Json; // For deserializing config if needed
 using Temperance.Data.Data.Repositories.Trade.Interfaces;
 using Temperance.Data.Models.Backtest;
+using Temperance.Data.Models.Strategy;
 using Temperance.Data.Models.Trading;
 using TradingApp.src.Core.Services.Interfaces;
 
@@ -51,13 +52,33 @@ namespace TradingApp.src.Core.Services.Implementations
             await _tradeRepository.InitializeBacktestRunAsync(runId, config);
         }
 
+        public async Task InitializePairBacktestRunAsync(PairsBacktestConfiguration config, Guid runId)
+        {
+            string strategyParametersJson = JsonSerializer.Serialize(config.StrategyParameters);
+
+            Dictionary<string, object> strategyParameters = JsonSerializer.Deserialize<Dictionary<string, object>>(strategyParametersJson) 
+                ?? new Dictionary<string, object>();
+
+            BacktestConfiguration backtestConfig = new BacktestConfiguration
+            {
+                StrategyName = config.StrategyName,
+                StrategyParameters = strategyParameters,
+                Symbols = config.PairsToTest.Select(x => $"{x.SymbolA},{x.SymbolB}").ToList(),
+                Intervals = new List<string>() { config.Interval },
+                StartDate = config.StartDate,
+                EndDate = config.EndDate,
+                InitialCapital = config.InitialCapital
+            };
+            await InitializeBacktestRunAsync(backtestConfig, runId);
+        }
+
         public async Task UpdateBacktestRunStatusAsync(Guid runId, string status, string? errorMessage = null)
         {
             _logger.LogInformation($"Service request to update status for backtest run {runId} to {status}");
             await _tradeRepository.UpdateBacktestRunStatusAsync(runId, status, DateTime.UtcNow, errorMessage);
         }
 
-        public async Task UpdateBacktestPerformanceMetrics(Guid runId, BacktestResult metrics, decimal initialCapital)
+        public async Task UpdateBacktestPerformanceMetrics(Guid runId, BacktestResult metrics, double initialCapital)
         {
             _logger.LogInformation("Service request to update performance metrics for backtest run {RunId}", runId);
             await _backtestRepository.UpdateBacktestPerformanceMetrics(runId, metrics, initialCapital);

@@ -7,6 +7,6 @@ namespace Temperance.Data.Data.Repositories.Trade.Interfaces
     {
         Task SaveBacktestTradesAsync(Guid runId, IEnumerable<TradeSummary> trades);
 
-        Task UpdateBacktestPerformanceMetrics(Guid runId, BacktestResult result, decimal initialCapital);
+        Task UpdateBacktestPerformanceMetrics(Guid runId, BacktestResult result, double initialCapital);
     }
 }

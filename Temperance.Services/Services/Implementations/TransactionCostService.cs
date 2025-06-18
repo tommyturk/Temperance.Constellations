@@ -8,17 +8,17 @@ namespace Temperance.Services.Services.Implementations
     public class TransactionCostService : ITransactionCostService
     {
         private readonly ILogger<TransactionCostService> _logger;
-        private readonly decimal _defaultSpreadPercentage = 0.0005m;
+        private readonly double _defaultSpreadPercentage = 0.0005;
 
         public TransactionCostService(ILogger<TransactionCostService> logger)
         {
             _logger = logger;
         }
 
-        public Task<decimal> CalculateEntryCost(decimal entryPrice, SignalDecision signal, string symbol, string interval, DateTime timestamp)
+        public Task<double> CalculateEntryCost(double entryPrice, SignalDecision signal, string symbol, string interval, DateTime timestamp)
         {
-            decimal spreadAmount = entryPrice * _defaultSpreadPercentage;
-            decimal effectivePrice;
+            double spreadAmount = entryPrice * _defaultSpreadPercentage;
+            double effectivePrice;
             if (signal == SignalDecision.Buy)
                 effectivePrice = entryPrice + (spreadAmount / 2);
             else if (signal == SignalDecision.Sell)
@@ -30,11 +30,11 @@ namespace Temperance.Services.Services.Implementations
             }
             return Task.FromResult(effectivePrice);
         }
-        public Task<decimal> CalculateExitCost(decimal exitPrice, PositionDirection positionDirection, string symbol, string interval, DateTime timestamp)
+        public Task<double> CalculateExitCost(double exitPrice, PositionDirection positionDirection, string symbol, string interval, DateTime timestamp)
         {
-            decimal spreadAmount = exitPrice * _defaultSpreadPercentage;
+            double spreadAmount = exitPrice * _defaultSpreadPercentage;
 
-            decimal effectivePrice;
+            double effectivePrice;
             if (positionDirection == PositionDirection.Long)
                 effectivePrice = exitPrice - (spreadAmount / 2);
             else if (positionDirection == PositionDirection.Short) 
@@ -43,21 +43,28 @@ namespace Temperance.Services.Services.Implementations
                 effectivePrice = exitPrice;
             return Task.FromResult(effectivePrice);
         }
-        public Task<decimal> GetSpreadCost(decimal price, int quantity, string symbol, string interval, DateTime timestamp)
+        public Task<double> GetSpreadCost(double price, int quantity, string symbol, string interval, DateTime timestamp)
         {
-            decimal spreadAmount = price * _defaultSpreadPercentage;
-            decimal totalSpreadCost = spreadAmount * quantity;
+            double spreadAmount = price * _defaultSpreadPercentage;
+            double totalSpreadCost = spreadAmount * quantity;
             return Task.FromResult(totalSpreadCost);
         }
-        public async Task<decimal> CalculateTotalTradeCost(decimal entryPrice, decimal exitPrice, SignalDecision entrySignal, PositionDirection exitPositionDirection, int quantity, string symbol, string interval, DateTime entryTimestamp, DateTime exitTimestamp)
+
+        public Task<double> GetSpreadCost(double price, double quantity, string symbol, string interval, DateTime timestamp)
         {
-            decimal entrySpreadCost = await GetSpreadCost(entryPrice, quantity, symbol, interval, entryTimestamp);
-            decimal exitSpreadCost = await GetSpreadCost(exitPrice, quantity, symbol, interval, exitTimestamp);
+            double spreadAmount = price * _defaultSpreadPercentage;
+            double totalSpreadCost = spreadAmount * quantity;
+            return Task.FromResult(totalSpreadCost);
+        }
+        public async Task<double> CalculateTotalTradeCost(double entryPrice, double exitPrice, SignalDecision entrySignal, PositionDirection exitPositionDirection, int quantity, string symbol, string interval, DateTime entryTimestamp, DateTime exitTimestamp)
+        {
+            double entrySpreadCost = await GetSpreadCost(entryPrice, quantity, symbol, interval, entryTimestamp);
+            double exitSpreadCost = await GetSpreadCost(exitPrice, quantity, symbol, interval, exitTimestamp);
             return entrySpreadCost + exitSpreadCost;
         }
-        public decimal CalculateEntryCost(decimal entryPrice, SignalDecision signal)
+        public double CalculateEntryCost(double entryPrice, SignalDecision signal)
         {
-            decimal spreadAmount = entryPrice * _defaultSpreadPercentage;
+            double spreadAmount = entryPrice * _defaultSpreadPercentage;
 
             if (signal == SignalDecision.Buy)
                 return entryPrice + (spreadAmount / 2);
@@ -70,9 +77,9 @@ namespace Temperance.Services.Services.Implementations
             }
         }
 
-        public decimal CalculateExitCost(decimal exitPrice, PositionDirection positionDirection)
+        public double CalculateExitCost(double exitPrice, PositionDirection positionDirection)
         {
-            decimal spreadAmount = exitPrice * _defaultSpreadPercentage;
+            double spreadAmount = exitPrice * _defaultSpreadPercentage;
             if (positionDirection == PositionDirection.Long)
                 return exitPrice - (spreadAmount / 2);
             else if (positionDirection == PositionDirection.Short)
@@ -84,10 +91,10 @@ namespace Temperance.Services.Services.Implementations
             }
         }
 
-        public decimal CalculateTotalCost(decimal entryPrice, decimal exitPrie, SignalDecision entrySignal, PositionDirection exitPositionDirectionl, int quantity)
+        public double CalculateTotalCost(double entryPrice, double exitPrie, SignalDecision entrySignal, PositionDirection exitPositionDirectionl, int quantity)
         {
-            decimal effectiveEntryPrice = CalculateEntryCost(entryPrice, entrySignal);
-            decimal effectiveExitPrice = CalculateExitCost(exitPrie, exitPositionDirectionl);
+            double effectiveEntryPrice = CalculateEntryCost(entryPrice, entrySignal);
+            double effectiveExitPrice = CalculateExitCost(exitPrie, exitPositionDirectionl);
 
             if(entrySignal == SignalDecision.Buy)
                 return (entryPrice - effectiveEntryPrice) + (effectiveExitPrice - exitPrie) * quantity;

@@ -15,14 +15,14 @@ namespace Temperance.Data.Models.Backtest
         public string IntervalsJson { get; set; } = string.Empty;
         public DateTime StartDate { get; set; }
         public DateTime EndDate { get; set; }
-        public decimal InitialCapital { get; set; }
+        public double InitialCapital { get; set; }
         public string Status { get; set; } = string.Empty;
         public DateTime StartTime { get; set; }
         public DateTime? EndTime { get; set; }
-        public decimal? TotalProfitLoss { get; set; }
-        public decimal? TotalReturn { get; set; }
-        public decimal? MaxDrawdown { get; set; }
-        public decimal? WinRate { get; set; }
+        public double? TotalProfitLoss { get; set; }
+        public double? TotalReturn { get; set; }
+        public double? MaxDrawdown { get; set; }
+        public double? WinRate { get; set; }
         public int? TotalTrades { get; set; } // Nullable if calculation deferred
         public string? ErrorMessage { get; set; }
     }

@@ -3,7 +3,7 @@
     public class Position
     {
         public string Symbol { get; set; } = string.Empty;
-        public decimal EntryPrice { get; set; }
+        public double EntryPrice { get; set; }
         public DateTime EntryDate { get; set; }
         public int Quantity { get; set; }
         public PositionDirection Direction { get; set; }

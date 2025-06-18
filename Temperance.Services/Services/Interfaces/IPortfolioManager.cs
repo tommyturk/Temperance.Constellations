@@ -4,18 +4,26 @@ namespace Temperance.Services.Services.Interfaces
 {
     public interface IPortfolioManager
     {
-        Task Initialize(decimal initialCapital);
-        decimal GetAvailableCapital();
-        decimal GetTotalEquity();
-        decimal GetAllocatedCapital();
+        Task Initialize(double initialCapital);
+        double GetAvailableCapital();
+        double GetTotalEquity();
+        double GetAllocatedCapital();
         IReadOnlyList<Position> GetOpenPositions();
 
         IReadOnlyList<TradeSummary> GetCompletedTradesHistory();
 
-        Task<bool> CanOpenPosition(decimal allocationAmount);
+        Task<bool> CanOpenPosition(double allocationAmount);
 
-        Task OpenPosition(string symbol, string interval, PositionDirection direction, int quantity, decimal entryPrice, DateTime entryDate, decimal transactionCost);
+        Task OpenPosition(string symbol, string interval, PositionDirection direction, int quantity, double entryPrice, DateTime entryDate, double transactionCost);
 
-        Task ClosePosition(string strategyName, string symbol, string interval, PositionDirection direction, int quantity, decimal exitPrice, DateTime exitDate, decimal transactionCost, decimal profitLoss);
+        Task OpenPairPosition(string strategyName, string pairIdentifier, string interval, ActivePairTrade trade);
+
+        Task ClosePosition(string strategyName, string symbol, string interval, PositionDirection direction, int quantity, double exitPrice, DateTime exitDate, double transactionCost, double profitLoss);
+        Task<TradeSummary?> ClosePairPosition(
+        ActivePairTrade activeTrade,
+        double exitPriceA,
+        double exitPriceB,
+        DateTime exitTimestamp,
+        double totalExitTransactionCost);
     }
 }

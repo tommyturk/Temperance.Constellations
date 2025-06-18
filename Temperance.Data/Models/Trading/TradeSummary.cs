@@ -8,12 +8,12 @@
         public string StrategyName { get; set; } = string.Empty;
         public DateTime EntryDate { get; set; }
         public DateTime? ExitDate { get; set; }
-        public decimal EntryPrice { get; set; }
-        public decimal? ExitPrice { get; set; }
-        public decimal? ProfitLoss { get; set; }
+        public double EntryPrice { get; set; }
+        public double? ExitPrice { get; set; }
+        public double? ProfitLoss { get; set; }
         public string Direction { get; set; } = string.Empty;
         public int Quantity { get; set; }
         public DateTime HoldingPeriod { get; set; }
-        public decimal TransactionCost { get; set; }
+        public double TransactionCost { get; set; }
     }
 }

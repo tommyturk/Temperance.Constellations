@@ -2,9 +2,11 @@
 using Microsoft.Extensions.Logging;
 using Microsoft.Win32.SafeHandles;
 using System.Collections.Concurrent;
+using System.Runtime.InteropServices;
 using Temperance.Data.Models.Backtest;
 using Temperance.Data.Models.HistoricalPriceData;
 using Temperance.Data.Models.Performance;
+using Temperance.Data.Models.Strategy;
 using Temperance.Data.Models.Trading;
 using Temperance.Services.BackTesting.Interfaces;
 using Temperance.Services.Factories.Interfaces;
@@ -12,7 +14,7 @@ using Temperance.Services.Services.Implementations;
 using Temperance.Services.Services.Interfaces;
 using Temperance.Services.Trading.Strategies;
 using TradingApp.src.Core.Services.Interfaces;
-
+using System.Text.Json;
 namespace Temperance.Services.BackTesting.Implementations
 {
     public class BacktestRunner : IBacktestRunner
@@ -20,6 +22,7 @@ namespace Temperance.Services.BackTesting.Implementations
         private readonly IHistoricalPriceService _historicalPriceService;
         private readonly ILiquidityService _liquidityService;
         private readonly ITransactionCostService _transactionCostService;
+        private readonly IGpuIndicatorService _gpuIndicatorService;
         private readonly IPortfolioManager _portfolioManager;
         private readonly IStrategyFactory _strategyFactory;
         private readonly ITradeService _tradesService;
@@ -31,6 +34,7 @@ namespace Temperance.Services.BackTesting.Implementations
             IHistoricalPriceService historicalPriceService,
             ILiquidityService liquidityService,
             ITransactionCostService transactionCostService,
+            IGpuIndicatorService gpuIndicatorService,
             IPortfolioManager portfolioManager,
             IStrategyFactory strategyFactory,
             ITradeService tradesService,
@@ -41,6 +45,7 @@ namespace Temperance.Services.BackTesting.Implementations
             _historicalPriceService = historicalPriceService;
             _liquidityService = liquidityService;
             _transactionCostService = transactionCostService;
+            _gpuIndicatorService = gpuIndicatorService;
             _portfolioManager = portfolioManager;
             _strategyFactory = strategyFactory;
             _tradesService = tradesService;
@@ -69,7 +74,12 @@ namespace Temperance.Services.BackTesting.Implementations
                 await _portfolioManager.Initialize(config.InitialCapital);
 
                 var allTrades = new ConcurrentBag<TradeSummary>();
-                var strategyInstance = _strategyFactory.CreateStrategy(config.StrategyName, config.StrategyParameters);
+                var strategyInstance = _strategyFactory.CreateStrategy<ISingleAssetStrategy>(
+                    config.StrategyName,
+                    config.InitialCapital,
+                    config.StrategyParameters
+                );
+
                 if (strategyInstance == null)
                     throw new InvalidOperationException($"Strategy '{config.StrategyName}' could not be created.");
 
@@ -88,67 +98,93 @@ namespace Temperance.Services.BackTesting.Implementations
 
                 if (!symbolsToTest.Any()) throw new InvalidOperationException("No symbols specified or found for backtest.");
 
-                var parallelOptions = new ParallelOptions { MaxDegreeOfParallelism = config.MaxParallelism };
-
                 var testCases = symbolsToTest.SelectMany(symbol => config.Intervals.Select(interval => new { Symbol = symbol, Interval = interval }))
                     .ToList();
 
-                _logger.LogInformation($"RunId: {runId} - Processing {testCases.Count} Symbol/Interval combinations.", runId, testCases.Count().ToString());
+                var indicatorCache = new ConcurrentDictionary<string, Dictionary<string, double[]>>();
 
-                var symbolKellyHalfFractions = new ConcurrentDictionary<string, decimal>();
+                foreach (var testCase in testCases)
+                {
+                    string cacheKey = $"{testCase.Symbol}_{testCase.Interval}";
+                    var historicalData = await _historicalPriceService.GetHistoricalPrices(testCase.Symbol, testCase.Interval);
+                    if (historicalData == null || !historicalData.Any())
+                    {
+                        _logger.LogWarning("RunId: {RunId} - No historical data found for {Symbol} [{Interval}]", runId, testCase.Symbol, testCase.Interval);
+                        continue;
+                    }
+                    var closePrices = historicalData.OrderBy(p => p.Timestamp).Select(p => (double)p.ClosePrice)
+                        .ToArray();
+
+                    var movingAverage = _gpuIndicatorService.CalculateSma(closePrices, strategyMinimumLookback);
+                    var standardDeviation = _gpuIndicatorService.CalculateStdDev(closePrices, strategyMinimumLookback);
+                    var rsi = strategyInstance.CalculateRSI(closePrices, strategyMinimumLookback);
+                    var upperBand = new double[closePrices.Length];
+                    var lowerBand = new double[closePrices.Length];
+                    for (int i = 0; i < closePrices.Length; i++)
+                    {
+                        upperBand[i] = (movingAverage[i] + (2 * standardDeviation[i]));
+                        lowerBand[i] = (movingAverage[i] - (2 * standardDeviation[i]));
+                    }
+
+                    indicatorCache[cacheKey] = new Dictionary<string, double[]>
+                    {
+                        { "RSI", rsi },
+                        { "UpperBand", upperBand },
+                        { "LowerBand", lowerBand }
+                    };
+                }
+
+                var parallelOptions = new ParallelOptions { MaxDegreeOfParallelism = config.MaxParallelism };
+
+                _logger.LogInformation($"RunId: {runId} - Processing {testCases.Count} Symbol/Interval combinations.", runId, testCases.Count().ToString());
+                var symbolKellyHalfFractions = new ConcurrentDictionary<string, double>();
 
                 await Parallel.ForEachAsync(testCases, parallelOptions, async (testCase, cancellationToken) =>
                 {
                     var symbol = testCase.Symbol;
                     var interval = testCase.Interval;
+                    string cacheKey = $"{symbol}_{interval}";
 
-                    decimal currentSymbolKellyHalfFraction = symbolKellyHalfFractions.GetOrAdd(symbol + "_" + interval, 0.001m);
+                    if (!indicatorCache.ContainsKey(cacheKey)) { return; }
+
+                    double currentSymbolKellyHalfFraction = symbolKellyHalfFractions.GetOrAdd(symbol + "_" + interval, 0.001);
 
                     try
                     {
-                        _logger.LogDebug("RunId: {RunId} - Starting processing for {Symbol} [{Interval}]", runId, symbol, interval);
-
-                        var dataFetchStartDate = config.StartDate.AddYears(-20);
-                        _logger.LogDebug("RunId: {RunId} - Attempting to fetch data for {Symbol} [{Interval}] from {FetchStart} to {FetchEnd}", runId, symbol, interval, dataFetchStartDate, config.EndDate);
-
-                        List<HistoricalPriceModel> historicalData = await _historicalPriceService.GetHistoricalPrices(symbol, interval);
-
-                        if (historicalData == null || !historicalData.Any())
-                        {
-                            _logger.LogWarning("RunId: {RunId} - No historical data found for {Symbol} [{Interval}]", runId, symbol, interval);
-                            return;
-                        }
-
-                        var orderedData = historicalData.OrderBy(x => x.Timestamp).ToList();
-                        _logger.LogDebug("RunId: {RunId} - Total bars loaded for {Symbol} [{Interval}]: {TotalBars}. Full range: {FirstDate} to {LastDate}", runId, symbol, interval, orderedData.Count, orderedData.First().Timestamp, orderedData.Last().Timestamp);
-
+                        var orderedData = (await _historicalPriceService.GetHistoricalPrices(symbol, interval)).OrderBy(x => x.Timestamp).ToList();
                         var backtestData = orderedData.Where(x => x.Timestamp >= config.StartDate && x.Timestamp <= config.EndDate).ToList();
 
                         if (!backtestData.Any())
                         {
-                            _logger.LogWarning("RunId: {RunId} - No historical data found for {Symbol} [{Interval}] *within* the requested date range {StartDate} to {EndDate}.", runId, symbol, interval, config.StartDate, config.EndDate);
+                            _logger.LogWarning("RunId: {RunId} - No data for {Symbol} in date range. This should have been caught earlier.", runId, symbol);
                             return;
                         }
-                        _logger.LogDebug("RunId: {RunId} - Bars within test range for {Symbol} [{Interval}]: {BarCount}", runId, symbol, interval, backtestData.Count);
+
+                        var timestampIndexMap = orderedData.Select((data, index) => new { data.Timestamp, index })
+                                                           .ToDictionary(x => x.Timestamp, x => x.index);
 
                         Position? currentPosition = null;
-                        TradeSummary? activeTrade = null; 
+                        TradeSummary? activeTrade = null;
 
                         for (int i = 0; i < backtestData.Count; i++)
                         {
                             var currentBar = backtestData[i];
 
+                            if (!timestampIndexMap.TryGetValue(currentBar.Timestamp, out var globalIndex) || globalIndex < strategyMinimumLookback)
+                                continue;
+
+                            var currentIndicatorValues = new Dictionary<string, double>
+                            {
+                                { "RSI", indicatorCache[cacheKey]["RSI"][globalIndex] },
+                                { "UpperBand", indicatorCache[cacheKey]["UpperBand"][globalIndex] },
+                                { "LowerBand", indicatorCache[cacheKey]["LowerBand"][globalIndex] }
+                            };
+
                             var dataWindow = orderedData.Where(x => x.Timestamp <= currentBar.Timestamp)
                                                        .OrderByDescending(x => x.Timestamp)
-                                                       .Take(strategyMinimumLookback + rollingAdvLookbackBars + 5) 
+                                                       .Take(strategyMinimumLookback + rollingAdvLookbackBars + 5)
                                                        .OrderBy(x => x.Timestamp)
                                                        .ToList();
-
-                            if (dataWindow.Count < strategyMinimumLookback)
-                            {
-                                _logger.LogDebug("RunId: {RunId} - Insufficient data window for strategy indicators for {Symbol} [{Interval}] at {Timestamp}. Required: {Required}, Actual: {Actual}. Skipping bar.", runId, symbol, interval, strategyMinimumLookback, dataWindow.Count);
-                                continue;
-                            }
 
                             if (!_liquidityService.IsSymbolLiquidAtTime(symbol, interval, minimumAdv, currentBar.Timestamp, rollingAdvLookbackBars, orderedData))
                             {
@@ -157,28 +193,28 @@ namespace Temperance.Services.BackTesting.Implementations
                                     continue;
                             }
 
-                            SignalDecision signal = strategyInstance.GenerateSignal(currentBar, dataWindow);
+                            SignalDecision signal = strategyInstance.GenerateSignal(currentBar, dataWindow, currentIndicatorValues);
 
-                            if (currentPosition != null && strategyInstance.ShouldExitPosition(currentPosition, currentBar, dataWindow))
+                            if (currentPosition != null && strategyInstance.ShouldExitPosition(currentPosition, currentBar, dataWindow, currentIndicatorValues))
                             {
                                 _logger.LogInformation("RunId: {RunId}, Symbol: {Symbol}, Interval: {Interval}, Attempting to close position at Timestamp: {Timestamp}",
                                     runId, symbol, interval, currentBar.Timestamp);
 
-                                decimal rawExitPrice = currentBar.ClosePrice;
+                                double rawExitPrice = currentBar.ClosePrice;
                                 PositionDirection exitPositionDirection = currentPosition.Direction;
 
-                                decimal effectiveExitPrice = await _transactionCostService.CalculateExitCost(rawExitPrice, exitPositionDirection, symbol, interval, currentBar.Timestamp);
-                                decimal exitSpreadCost = await _transactionCostService.GetSpreadCost(rawExitPrice, currentPosition.Quantity, symbol, interval, currentBar.Timestamp);
+                                double effectiveExitPrice = await _transactionCostService.CalculateExitCost(rawExitPrice, exitPositionDirection, symbol, interval, currentBar.Timestamp);
+                                double exitSpreadCost = await _transactionCostService.GetSpreadCost(rawExitPrice, currentPosition.Quantity, symbol, interval, currentBar.Timestamp);
 
-                                decimal profitLossBeforeCosts;
+                                double profitLossBeforeCosts;
                                 if (currentPosition.Direction == PositionDirection.Long)
                                     profitLossBeforeCosts = (effectiveExitPrice - currentPosition.EntryPrice) * currentPosition.Quantity;
                                 else
-                                    profitLossBeforeCosts = (currentPosition.EntryPrice - effectiveExitPrice) * currentPosition.Quantity; 
+                                    profitLossBeforeCosts = (currentPosition.EntryPrice - effectiveExitPrice) * currentPosition.Quantity;
 
-                                decimal totalTradeTransactionCost = activeTrade.TransactionCost + exitSpreadCost;
+                                double totalTradeTransactionCost = activeTrade.TransactionCost + exitSpreadCost;
 
-                                decimal netProfitLoss = profitLossBeforeCosts - totalTradeTransactionCost;
+                                double netProfitLoss = profitLossBeforeCosts - totalTradeTransactionCost;
 
                                 await _portfolioManager.ClosePosition(
                                     strategyInstance.Name,
@@ -188,8 +224,8 @@ namespace Temperance.Services.BackTesting.Implementations
                                     currentPosition.Quantity,
                                     effectiveExitPrice,
                                     currentBar.Timestamp,
-                                    totalTradeTransactionCost, 
-                                    netProfitLoss              
+                                    totalTradeTransactionCost,
+                                    netProfitLoss
                                 );
 
                                 var recentTradesForKelly = _portfolioManager.GetCompletedTradesHistory()
@@ -225,10 +261,10 @@ namespace Temperance.Services.BackTesting.Implementations
 
                             if (currentPosition == null && signal != SignalDecision.Hold)
                             {
-                                decimal maxTradeAllocationInitialCapital = config.InitialCapital * 0.02m;
-                                decimal currentTotalEquity = _portfolioManager.GetTotalEquity(); 
+                                double maxTradeAllocationInitialCapital = config.InitialCapital * 0.02;
+                                double currentTotalEquity = _portfolioManager.GetTotalEquity();
 
-                                decimal actualAllocationAmount = strategyInstance.GetAllocationAmount(currentBar, dataWindow, maxTradeAllocationInitialCapital, currentTotalEquity, currentSymbolKellyHalfFraction);
+                                double actualAllocationAmount = strategyInstance.GetAllocationAmount(currentBar, dataWindow, maxTradeAllocationInitialCapital, currentTotalEquity, currentSymbolKellyHalfFraction);
 
                                 if (actualAllocationAmount <= 0)
                                 {
@@ -236,7 +272,7 @@ namespace Temperance.Services.BackTesting.Implementations
                                     continue;
                                 }
 
-                                decimal effectiveEntryPrice = await _transactionCostService.CalculateEntryCost(currentBar.ClosePrice, signal, symbol, interval, currentBar.Timestamp);
+                                double effectiveEntryPrice = await _transactionCostService.CalculateEntryCost(currentBar.ClosePrice, signal, symbol, interval, currentBar.Timestamp);
                                 if (effectiveEntryPrice <= 0)
                                 {
                                     _logger.LogWarning("RunId: {RunId} - Invalid effective entry price ({EffectivePrice:C}) for {Symbol} [{Interval}] at {Timestamp}. Skipping entry.", runId, symbol, interval, effectiveEntryPrice, currentBar.Timestamp);
@@ -250,9 +286,9 @@ namespace Temperance.Services.BackTesting.Implementations
                                     continue;
                                 }
 
-                                decimal entrySpreadCost = await _transactionCostService.GetSpreadCost(currentBar.ClosePrice, calculatedQuantity, symbol, interval, currentBar.Timestamp);
+                                double entrySpreadCost = await _transactionCostService.GetSpreadCost(currentBar.ClosePrice, calculatedQuantity, symbol, interval, currentBar.Timestamp);
 
-                                decimal totalCostToOpen = (calculatedQuantity * effectiveEntryPrice) + entrySpreadCost;
+                                double totalCostToOpen = (calculatedQuantity * effectiveEntryPrice) + entrySpreadCost;
                                 if (!await _portfolioManager.CanOpenPosition(totalCostToOpen))
                                 {
                                     _logger.LogInformation("RunId: {RunId}, Symbol: {Symbol}, Interval: {Interval}, Cannot open position for {Quantity} shares due to insufficient available cash after sizing. Skipping entry.", runId, symbol, interval, calculatedQuantity);
@@ -268,7 +304,7 @@ namespace Temperance.Services.BackTesting.Implementations
                                     EntryPrice = effectiveEntryPrice,
                                     Direction = signal == SignalDecision.Buy ? "Long" : "Short",
                                     Quantity = calculatedQuantity,
-                                    Symbol = symbol,  
+                                    Symbol = symbol,
                                     Interval = interval,
                                     TransactionCost = entrySpreadCost
                                 };
@@ -281,20 +317,20 @@ namespace Temperance.Services.BackTesting.Implementations
                         if (currentPosition != null && activeTrade != null)
                         {
                             var lastBar = backtestData.Last();
-                            decimal rawExitPrice = lastBar.ClosePrice;
+                            double rawExitPrice = lastBar.ClosePrice;
                             PositionDirection exitPositionDirection = currentPosition.Direction;
 
-                            decimal effectiveExitPrice = await _transactionCostService.CalculateExitCost(rawExitPrice, exitPositionDirection, symbol, interval, lastBar.Timestamp);
-                            decimal exitSpreadCost = await _transactionCostService.GetSpreadCost(rawExitPrice, currentPosition.Quantity, symbol, interval, lastBar.Timestamp);
+                            double effectiveExitPrice = await _transactionCostService.CalculateExitCost(rawExitPrice, exitPositionDirection, symbol, interval, lastBar.Timestamp);
+                            double exitSpreadCost = await _transactionCostService.GetSpreadCost(rawExitPrice, currentPosition.Quantity, symbol, interval, lastBar.Timestamp);
 
-                            decimal profitLossBeforeCosts;
+                            double profitLossBeforeCosts;
                             if (currentPosition.Direction == PositionDirection.Long)
                                 profitLossBeforeCosts = (effectiveExitPrice - currentPosition.EntryPrice) * currentPosition.Quantity;
                             else
                                 profitLossBeforeCosts = (currentPosition.EntryPrice - effectiveExitPrice) * currentPosition.Quantity;
 
-                            decimal totalTradeTransactionCost = activeTrade.TransactionCost + exitSpreadCost;
-                            decimal netProfitLoss = profitLossBeforeCosts - totalTradeTransactionCost;
+                            double totalTradeTransactionCost = activeTrade.TransactionCost + exitSpreadCost;
+                            double netProfitLoss = profitLossBeforeCosts - totalTradeTransactionCost;
 
                             await _portfolioManager.ClosePosition(strategyInstance.Name, symbol, interval, exitPositionDirection, currentPosition.Quantity, effectiveExitPrice, lastBar.Timestamp, totalTradeTransactionCost, netProfitLoss);
 
@@ -342,24 +378,199 @@ namespace Temperance.Services.BackTesting.Implementations
             {
                 _logger.LogError(ex, "RunId: {RunId} - Error during backtest execution", runId);
                 await _tradesService.UpdateBacktestRunStatusAsync(runId, "Failed", ex.Message);
-                throw; 
+                throw;
             }
         }
 
-        private int CalculatePositionSize(decimal currentBalance, decimal entryPrice, BacktestConfiguration config, ISingleAssetStrategy strategy)
+        public async Task RunPairsBacktest(PairsBacktestConfiguration config, Guid runId)
         {
-            // Placeholder - Implement actual position sizing logic
-            // Examples:
-            // 1. Fixed Quantity: return 10; (like original code)
-            // 2. Fixed Monetary Amount: return (int)Math.Floor(1000 / entryPrice); // e.g., $1000 worth
-            // 3. Percentage of Equity:
-            //    decimal riskAmount = currentBalance * 0.01m; // Risk 1% of capital
-            //    decimal stopLossPrice = CalculateStopLossPrice(...); // Requires strategy input or fixed %
-            //    decimal priceRiskPerShare = Math.Abs(entryPrice - stopLossPrice);
-            //    if (priceRiskPerShare == 0) return 1; // Avoid division by zero
-            //    return (int)Math.Floor(riskAmount / priceRiskPerShare);
+            var result = new BacktestResult();
+            // --- Initial Setup ---
+            await _tradesService.UpdateBacktestRunStatusAsync(runId, "Running");
+            _logger.LogInformation("Starting GPU-accelerated pairs backtest for RunId: {RunId}", runId);
 
-            return 10; // Defaulting to original fixed quantity for now
+            await _portfolioManager.Initialize(config.InitialCapital);
+            var allTrades = new ConcurrentBag<TradeSummary>();
+            var pairKellyHalfFractions = new ConcurrentDictionary<string, double>();
+
+            string strategyParametersJson = JsonSerializer.Serialize(config.StrategyParameters);
+
+            Dictionary<string, object> strategyParameters = JsonSerializer.Deserialize<Dictionary<string, object>>(strategyParametersJson)
+                ?? new Dictionary<string, object>();
+
+            var strategyInstance = _strategyFactory.CreateStrategy<IPairTradingStrategy>(
+                config.StrategyName, config.InitialCapital, strategyParameters);
+
+            if (strategyInstance == null)
+                throw new InvalidOperationException($"Could not create a valid IPairTradingStrategy for '{config.StrategyName}'.");
+
+            int lookbackPeriod = strategyInstance.GetRequiredLookbackPeriod();
+            int rollingKellyLookbackTrades = 50;
+            var parallelOptions = new ParallelOptions { MaxDegreeOfParallelism = config.MaxParallelism };
+
+            //await Parallel.ForEachAsync(config.PairsToTest, parallelOptions, async (pair, cancellationToken) =>
+            //{
+            foreach (var pair in config.PairsToTest)
+            {
+                var pairIdentifier = $"{pair.SymbolA}/{pair.SymbolB}";
+                try
+                {
+                    // --- Stage 1: Data Fetching, Alignment, and Full Indicator Pre-calculation ---
+                    var historicalDataA = await _historicalPriceService.GetHistoricalPrices(pair.SymbolA, config.Interval);
+                    var historicalDataB = await _historicalPriceService.GetHistoricalPrices(pair.SymbolB, config.Interval);
+
+                    var alignedData = AlignData(historicalDataA, historicalDataB);
+                    if (alignedData.Count < lookbackPeriod)
+                    {
+                        _logger.LogWarning("Insufficient aligned data for pair {Pair} to meet lookback of {Lookback}", pairIdentifier, lookbackPeriod);
+                        return;
+                    }
+
+                    // Extract aligned close prices into arrays for GPU processing
+                    var closePricesA = alignedData.Select(d => (double)d.Item1.ClosePrice).ToArray();
+                    var closePricesB = alignedData.Select(d => (double)d.Item2.ClosePrice).ToArray();
+
+                    // 1. Calculate the entire spread series
+                    var spreadSeries = new double[alignedData.Count];
+                    for (int i = 0; i < alignedData.Count; i++)
+                        spreadSeries[i] = closePricesA[i] - (pair.HedgeRatio * closePricesB[i]);
+
+                    var spreadSma = _gpuIndicatorService.CalculateSma(spreadSeries, lookbackPeriod);
+                    var spreadStdDev = _gpuIndicatorService.CalculateStdDev(spreadSeries, lookbackPeriod);
+
+                    var zScoreSeries = new double[alignedData.Count];
+                    for (int i = 0; i < alignedData.Count; i++)
+                    {
+                        if (spreadStdDev[i] != 0)
+                            zScoreSeries[i] = (spreadSeries[i] - spreadSma[i]) / spreadStdDev[i];
+                        else
+                            zScoreSeries[i] = 0;
+                    }
+
+                    var backtestData = alignedData
+                        .Where(d => d.Item1.Timestamp >= config.StartDate && d.Item1.Timestamp <= config.EndDate).ToList();
+
+                    var timestampIndexMap = alignedData.Select((data, index) => new { data.Item1.Timestamp, index })
+                                                     .ToDictionary(x => x.Timestamp, x => x.index);
+
+                    ActivePairTrade? activePairTrade = null;
+                    double currentPairKellyHalfFraction = pairKellyHalfFractions.GetOrAdd(pairIdentifier, 0.01);
+
+                    foreach (var (currentBarA, currentBarB) in backtestData)
+                    {
+                        if (!timestampIndexMap.TryGetValue(currentBarA.Timestamp, out var globalIndex) || globalIndex < lookbackPeriod)
+                            continue;
+
+                        var currentIndicatorValues = new Dictionary<string, double>
+                        {
+                            { "ZScore", zScoreSeries[globalIndex] }
+                        };
+
+                        // --- Decision Making ---
+                        var signal = strategyInstance.GenerateSignal(currentBarA, currentBarB, currentIndicatorValues);
+
+                        if (activePairTrade != null && strategyInstance.ShouldExitPosition(new Position { Direction = activePairTrade.Direction, EntryDate = activePairTrade.EntryDate }, currentBarA, currentBarB, currentIndicatorValues))
+                        {
+                            #region Close Position Logic
+                            _logger.LogInformation("RunId: {RunId}, Pair: {Pair}, Attempting to close position at Timestamp: {Timestamp}", runId, pairIdentifier, currentBarA.Timestamp);
+
+                            var rawExitPriceA = currentBarA.ClosePrice;
+                            var directionA = activePairTrade.Direction == PositionDirection.Long ? PositionDirection.Long : PositionDirection.Short;
+                            var effectiveExitPriceA = await _transactionCostService.CalculateExitCost(rawExitPriceA, directionA, pair.SymbolA, config.Interval, currentBarA.Timestamp);
+                            var exitSpreadCostA = await _transactionCostService.GetSpreadCost(rawExitPriceA, (int)activePairTrade.QuantityA, pair.SymbolA, config.Interval, currentBarA.Timestamp);
+
+                            var rawExitPriceB = currentBarB.ClosePrice;
+                            var directionB = activePairTrade.Direction == PositionDirection.Long ? PositionDirection.Short : PositionDirection.Long;
+                            var effectiveExitPriceB = await _transactionCostService.CalculateExitCost(rawExitPriceB, directionB, pair.SymbolB, config.Interval, currentBarB.Timestamp);
+                            var exitSpreadCostB = await _transactionCostService.GetSpreadCost(rawExitPriceB, (int)activePairTrade.QuantityB, pair.SymbolB, config.Interval, currentBarB.Timestamp);
+
+                            var pnlA = (directionA == PositionDirection.Long) ? (effectiveExitPriceA - activePairTrade.EntryPriceA) * activePairTrade.QuantityA : (activePairTrade.EntryPriceA - effectiveExitPriceA) * activePairTrade.QuantityA;
+                            var pnlB = (directionB == PositionDirection.Long) ? (effectiveExitPriceB - activePairTrade.EntryPriceB) * activePairTrade.QuantityB : (activePairTrade.EntryPriceB - effectiveExitPriceB) * activePairTrade.QuantityB;
+
+                            var profitLossBeforeCosts = pnlA + pnlB;
+                            var totalExitTransactionCost = exitSpreadCostA + exitSpreadCostB;
+                            var totalTradeTransactionCost = activePairTrade.TotalEntryTransactionCost + totalExitTransactionCost;
+                            var netProfitLoss = profitLossBeforeCosts - totalTradeTransactionCost;
+
+                            var finalizedClosedTrade = await _portfolioManager.ClosePairPosition(activePairTrade, effectiveExitPriceA, effectiveExitPriceB, currentBarA.Timestamp, totalTradeTransactionCost);
+
+                            var recentTradesForKelly = _portfolioManager.GetCompletedTradesHistory().Where(t => t.Symbol == pairIdentifier && t.Interval == config.Interval).OrderByDescending(t => t.ExitDate).Take(rollingKellyLookbackTrades).ToList();
+                            KellyMetrics kellyMetrics = _performanceCalculator.CalculateKellyMetrics(recentTradesForKelly);
+                            currentPairKellyHalfFraction = kellyMetrics.KellyHalfFraction;
+                            pairKellyHalfFractions[pairIdentifier] = currentPairKellyHalfFraction;
+
+                            if (finalizedClosedTrade != null)
+                            {
+                                allTrades.Add(finalizedClosedTrade);
+                                await _tradesService.SaveBacktestResults(runId, new BacktestResult { Trades = { finalizedClosedTrade } }, pairIdentifier, config.Interval);
+                                _logger.LogInformation("RunId: {RunId}, Pair: {Pair}, Position Closed. PnL: {PnL:C}", runId, pairIdentifier, netProfitLoss);
+                            }
+                            activePairTrade = null;
+                            #endregion
+                        }
+
+                        // --- Open Position Logic ---
+                        if (activePairTrade != null && signal != SignalDecision.Hold)
+                        {
+                            // This block for opening a position (sizing, calculating costs, updating portfolio)
+                            // also remains the same.
+                            #region Open Position Logic
+                            double allocation = _portfolioManager.GetTotalEquity() * currentPairKellyHalfFraction;
+                            if (allocation <= 0) continue;
+
+                            long quantityA = (long)(allocation / currentBarA.ClosePrice);
+                            long quantityB = (long)((quantityA * (long)currentBarA.ClosePrice * pair.HedgeRatio) / (long)currentBarB.ClosePrice);
+                            if (quantityA <= 0 || quantityB <= 0) continue;
+
+                            var directionA = signal == SignalDecision.Buy ? PositionDirection.Long : PositionDirection.Short;
+                            var effectiveEntryPriceA = await _transactionCostService.CalculateEntryCost(currentBarA.ClosePrice, signal, pair.SymbolA, config.Interval, currentBarA.Timestamp);
+                            var entrySpreadCostA = await _transactionCostService.GetSpreadCost(currentBarA.ClosePrice, quantityA, pair.SymbolA, config.Interval, currentBarA.Timestamp);
+
+                            var directionB = signal == SignalDecision.Buy ? PositionDirection.Short : PositionDirection.Long;
+                            var effectiveEntryPriceB = await _transactionCostService.CalculateEntryCost(currentBarB.ClosePrice, signal, pair.SymbolB, config.Interval, currentBarB.Timestamp);
+                            var entrySpreadCostB = await _transactionCostService.GetSpreadCost(currentBarB.ClosePrice, quantityB, pair.SymbolB, config.Interval, currentBarB.Timestamp);
+
+                            double totalCostToOpen = (quantityA * effectiveEntryPriceA) + (quantityB * effectiveEntryPriceB) + entrySpreadCostA + entrySpreadCostB;
+                            if (!await _portfolioManager.CanOpenPosition(totalCostToOpen)) continue;
+
+                            activePairTrade = new ActivePairTrade(pair.SymbolA, pair.SymbolB, (long)pair.HedgeRatio, (signal == SignalDecision.Buy ? PositionDirection.Long : PositionDirection.Short), quantityA, quantityB, effectiveEntryPriceA, effectiveEntryPriceB, currentBarA.Timestamp, entrySpreadCostA + entrySpreadCostB);
+                            await _portfolioManager.OpenPairPosition(strategyInstance.Name, pairIdentifier, config.Interval, activePairTrade);
+                            _logger.LogInformation("RunId: {RunId}, Pair: {Pair}, Position Opened. Direction: {Direction}", runId, pairIdentifier, activePairTrade.Direction);
+                            #endregion
+                        }
+                    }
+                    // Logic to close any trade still open at the end of the test period would go here.
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "RunId: {RunId} - Unhandled error processing pair {Pair}", runId, pairIdentifier);
+                }
+            //});
+            }
+
+            // --- Finalization ---
+            result.Trades.AddRange(allTrades);
+            result.TotalTrades = result.Trades.Count;
+            await _performanceCalculator.CalculatePerformanceMetrics(result, config.InitialCapital);
+            await _tradesService.UpdateBacktestPerformanceMetrics(runId, result, config.InitialCapital);
+            await _tradesService.UpdateBacktestRunStatusAsync(runId, "Completed");
+        }
+
+        private List<(HistoricalPriceModel, HistoricalPriceModel)> AlignData(
+            IEnumerable<HistoricalPriceModel> dataA,
+            IEnumerable<HistoricalPriceModel> dataB)
+        {
+            if (dataA == null || dataB == null)
+                return new List<(HistoricalPriceModel, HistoricalPriceModel)>();
+
+            var joinedQuery = dataA.Join(
+                dataB,
+                barA => barA.Timestamp, 
+                barB => barB.Timestamp,
+                (barA, barB) => (barA, barB)
+            );
+
+            return joinedQuery.OrderBy(pair => pair.barA.Timestamp).ToList();
         }
     }
 }

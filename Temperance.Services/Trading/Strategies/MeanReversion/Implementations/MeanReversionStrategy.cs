@@ -4,6 +4,7 @@ using Temperance.Data.Models.HistoricalPriceData;
 using Temperance.Data.Models.Trading;
 using Temperance.Services.Services.Interfaces;
 using Temperance.Services.Trading.Strategies;
+using Temperance.Utilities.Helpers;
 
 namespace Temperance.Services.Trading.Strategies.MeanReversion.Implementation
 {
@@ -13,11 +14,11 @@ namespace Temperance.Services.Trading.Strategies.MeanReversion.Implementation
 
         // --- Strategy Parameters ---
         private int _movingAveragePeriod;
-        private decimal _stdDevMultiplier;
+        private double _stdDevMultiplier;
         private int _rsiPeriod;
-        private decimal _rsiOversoldThreshold;
-        private decimal _rsiOverboughtThreshold;
-        private decimal _minimumAverageDailyVolume;
+        private double _rsiOversoldThreshold;
+        private double _rsiOverboughtThreshold;
+        private double _minimumAverageDailyVolume;
         // ---
 
         private readonly ITransactionCostService _transactionCostService;
@@ -41,16 +42,15 @@ namespace Temperance.Services.Trading.Strategies.MeanReversion.Implementation
             {"MinimumAverageDailyVolume", 750000m }
         };
 
-        public void Initialize(decimal initialCapital, Dictionary<string, object> parameters)
+        public void Initialize(double initialCapital, Dictionary<string, object> parameters)
         {
-            _movingAveragePeriod = GetParameterOrDefault(parameters, "MovingAveragePeriod", 20);
-            _stdDevMultiplier = GetParameterOrDefault(parameters, "StdDevMultiplier", 2.0m);
-            _rsiPeriod = GetParameterOrDefault(parameters, "RSIPeriod", 14);
-            _rsiOversoldThreshold = GetParameterOrDefault(parameters, "RSIOversold", 30m);
-            _rsiOverboughtThreshold = GetParameterOrDefault(parameters, "RSIOverbought", 70m);
-            _minimumAverageDailyVolume = GetParameterOrDefault(parameters, "MinimumAverageDailyVolume", 750000); // Ensure 750000m is decimal literal
+            _movingAveragePeriod = ParameterHelper.GetParameterOrDefault(parameters, "MovingAveragePeriod", 20);
+            _stdDevMultiplier = ParameterHelper.GetParameterOrDefault(parameters, "StdDevMultiplier", 2.0);
+            _rsiPeriod = ParameterHelper.GetParameterOrDefault(parameters, "RSIPeriod", 14);
+            _rsiOversoldThreshold = ParameterHelper.GetParameterOrDefault(parameters, "RSIOversold", 30);
+            _rsiOverboughtThreshold = ParameterHelper.GetParameterOrDefault(parameters, "RSIOverbought", 70);
+            _minimumAverageDailyVolume = ParameterHelper.GetParameterOrDefault(parameters, "MinimumAverageDailyVolume", 750000); // Ensure 750000m is decimal literal
 
-            // Log the initialization (unchanged)
             _logger.LogInformation($"Initializing {Name} with MA:{_movingAveragePeriod}, SDMult:{_stdDevMultiplier}, RSI:{_rsiPeriod}, RSI Levels:{_rsiOversoldThreshold}/{_rsiOverboughtThreshold}");
         }
 
@@ -64,6 +64,21 @@ namespace Temperance.Services.Trading.Strategies.MeanReversion.Implementation
             return (long)_minimumAverageDailyVolume;
         }
 
+        public SignalDecision GenerateSignal(HistoricalPriceModel currentBar, IReadOnlyList<HistoricalPriceModel> historicalDataWindow, Dictionary<string, double> currentIndicatorValues)
+        {
+            double lowerBollingerBand = currentIndicatorValues["LowerBand"];
+            double upperBollingerBand = currentIndicatorValues["UpperBand"];
+            double currentRelativeStrengthIndex = currentIndicatorValues["RSI"];
+
+            if (currentBar.ClosePrice < lowerBollingerBand && currentRelativeStrengthIndex < _rsiOversoldThreshold)
+                return SignalDecision.Buy;
+
+            if (currentBar.ClosePrice > upperBollingerBand && currentRelativeStrengthIndex > _rsiOverboughtThreshold)
+                return SignalDecision.Sell;
+
+            return SignalDecision.Hold;
+        }
+
         public SignalDecision GenerateSignal(HistoricalPriceModel currentBar, IReadOnlyList<HistoricalPriceModel> historicalDataWindow)
         {
             if (historicalDataWindow.Count < _movingAveragePeriod || historicalDataWindow.Count < _rsiPeriod + 1)
@@ -72,17 +87,17 @@ namespace Temperance.Services.Trading.Strategies.MeanReversion.Implementation
             var bbWindowPrices = historicalDataWindow.TakeLast(_movingAveragePeriod).Select(h => h.ClosePrice).ToList();
             if (bbWindowPrices.Count < _movingAveragePeriod) return SignalDecision.Hold;
 
-            decimal simpleMovingAverage = bbWindowPrices.Average();
-            decimal standardDeviation = CalculateStdDev(bbWindowPrices);
-            decimal upperBollingerBand = simpleMovingAverage + _stdDevMultiplier * standardDeviation;
-            decimal lowerBollingerBand = simpleMovingAverage - _stdDevMultiplier * standardDeviation;
+            double simpleMovingAverage = bbWindowPrices.Average();
+            double standardDeviation = CalculateStdDev(bbWindowPrices);
+            double upperBollingerBand = simpleMovingAverage + _stdDevMultiplier * standardDeviation;
+            double lowerBollingerBand = simpleMovingAverage - _stdDevMultiplier * standardDeviation;
 
-            var rsiWindowPrices = historicalDataWindow.Select(h => h.ClosePrice).ToList();
-            List<decimal> rsiValues = CalculateRSI(rsiWindowPrices, _rsiPeriod);
-            if (rsiValues.Count == 0 || rsiValues.Count < historicalDataWindow.Count)
+            var rsiWindowPrices = historicalDataWindow.Select(h => h.ClosePrice).ToArray();
+            double[] rsiValues = CalculateRSI(rsiWindowPrices, _rsiPeriod);
+            if (rsiValues.Length == 0 || rsiValues.Length< historicalDataWindow.Count)
                 return SignalDecision.Hold;
 
-            decimal currentRelativeStrengthIndex = rsiValues.Last();
+            double currentRelativeStrengthIndex = rsiValues.Last();
 
             if (currentBar.ClosePrice < lowerBollingerBand && currentRelativeStrengthIndex < _rsiOversoldThreshold)
                 return SignalDecision.Buy;
@@ -102,11 +117,33 @@ namespace Temperance.Services.Trading.Strategies.MeanReversion.Implementation
             if (position.Direction == PositionDirection.Short && currentSignal == SignalDecision.Buy)
                 return true;
 
-            decimal stopLossPrice = CalculateStopLoss(position);
+            double stopLossPrice = CalculateStopLoss(position);
             if (position.Direction == PositionDirection.Long && currentBar.LowPrice <= stopLossPrice) return true;
             if (position.Direction == PositionDirection.Short && currentBar.HighPrice >= stopLossPrice) return true;
 
-            decimal takeProfitPrice = CalculateTakeProfit(position);
+            double takeProfitPrice = CalculateTakeProfit(position);
+            if (position.Direction == PositionDirection.Long && currentBar.HighPrice >= takeProfitPrice) return true;
+            if (position.Direction == PositionDirection.Short && currentBar.LowPrice <= takeProfitPrice) return true;
+
+            return false;
+        }
+
+        public bool ShouldExitPosition(Position position, HistoricalPriceModel currentBar, IReadOnlyList<HistoricalPriceModel> historicalDataWindow, Dictionary<string, double> currentIndicatorValues)
+        {
+            var currentSignal = GenerateSignal(currentBar, historicalDataWindow, currentIndicatorValues);
+
+            // Exit on opposing signal
+            if (position.Direction == PositionDirection.Long && currentSignal == SignalDecision.Sell)
+                return true;
+            if (position.Direction == PositionDirection.Short && currentSignal == SignalDecision.Buy)
+                return true;
+
+            // --- Stop Loss / Take Profit logic remains the same ---
+            double stopLossPrice = CalculateStopLoss(position);
+            if (position.Direction == PositionDirection.Long && currentBar.LowPrice <= stopLossPrice) return true;
+            if (position.Direction == PositionDirection.Short && currentBar.HighPrice >= stopLossPrice) return true;
+
+            double takeProfitPrice = CalculateTakeProfit(position);
             if (position.Direction == PositionDirection.Long && currentBar.HighPrice >= takeProfitPrice) return true;
             if (position.Direction == PositionDirection.Short && currentBar.LowPrice <= takeProfitPrice) return true;
 
@@ -117,14 +154,14 @@ namespace Temperance.Services.Trading.Strategies.MeanReversion.Implementation
         {
             if (activeTrade == null) return null; // Or throw
 
-            decimal rawExitPrice = currentBar.ClosePrice;
+            double rawExitPrice = currentBar.ClosePrice;
 
-            decimal effectiveExitPrice = _transactionCostService.CalculateExitCost(rawExitPrice, activeTrade.Direction == "Long" ? PositionDirection.Long : PositionDirection.Short);
+            double effectiveExitPrice = _transactionCostService.CalculateExitCost(rawExitPrice, activeTrade.Direction == "Long" ? PositionDirection.Long : PositionDirection.Short);
 
             activeTrade.ExitDate = currentBar.Timestamp;
             activeTrade.ExitPrice = effectiveExitPrice;
 
-            decimal profitLoss = 0;
+            double profitLoss = 0;
             if (activeTrade.Direction == "Long")
                 profitLoss = (activeTrade.ExitPrice.Value - activeTrade.EntryPrice) * activeTrade.Quantity; // Use effective entry/exit
             else if (activeTrade.Direction == "Short")
@@ -136,12 +173,12 @@ namespace Temperance.Services.Trading.Strategies.MeanReversion.Implementation
             return activeTrade;
         }
 
-        public decimal GetAllocationAmount(
+        public double GetAllocationAmount(
             HistoricalPriceModel currentBar,
             IReadOnlyList<HistoricalPriceModel> historicalDataWindow,
-            decimal maxTradeAllocationInitialCapital,
-            decimal currentTotalEquity,
-            decimal kellyHalfFraction)
+            double maxTradeAllocationInitialCapital,
+            double currentTotalEquity,
+            double kellyHalfFraction)
         {
             if (historicalDataWindow.Count < _movingAveragePeriod || historicalDataWindow.Count < _rsiPeriod + 1)
                 return 0; 
@@ -150,41 +187,41 @@ namespace Temperance.Services.Trading.Strategies.MeanReversion.Implementation
             if (bbWindowPrices.Count < _movingAveragePeriod)
                 return 0;
 
-            decimal simpleMovingAverage = bbWindowPrices.Average();
-            decimal standardDeviation = CalculateStdDev(bbWindowPrices);
-            decimal upperBollingerBand = simpleMovingAverage + _stdDevMultiplier * standardDeviation;
-            decimal lowerBollingerBand = simpleMovingAverage - _stdDevMultiplier * standardDeviation;
+            double simpleMovingAverage = bbWindowPrices.Average();
+            double standardDeviation = CalculateStdDev(bbWindowPrices);
+            double upperBollingerBand = simpleMovingAverage + _stdDevMultiplier * standardDeviation;
+            double lowerBollingerBand = simpleMovingAverage - _stdDevMultiplier * standardDeviation;
 
-            var rsiWindowPrices = historicalDataWindow.Select(h => h.ClosePrice).ToList();
-            List<decimal> rsiValues = CalculateRSI(rsiWindowPrices, _rsiPeriod);
-            if (!rsiValues.Any() || rsiValues.Count < historicalDataWindow.Count) 
+            var rsiWindowPrices = historicalDataWindow.Select(h => h.ClosePrice).ToArray();
+            double[] rsiValues = CalculateRSI(rsiWindowPrices, _rsiPeriod);
+            if (!rsiValues.Any() || rsiValues.Length < historicalDataWindow.Count) 
                 return 0;
 
-            decimal currentRelativeStrengthIndex = rsiValues.Last();
+            double currentRelativeStrengthIndex = rsiValues.Last();
 
-            SignalDecision signal = GenerateSignal(currentBar, historicalDataWindow); 
+            SignalDecision signal = GenerateSignal(currentBar, historicalDataWindow);
 
-            decimal calculatedAllocationFromStrategyLogic = 0; 
+            double calculatedAllocationFromStrategyLogic = 0; 
 
             if (signal == SignalDecision.Buy)
             {
-                decimal distanceBelowLowerBand = Math.Max(0, lowerBollingerBand - currentBar.ClosePrice);
-                decimal distanceBelowRSIOversold = Math.Max(0, _rsiOversoldThreshold - currentRelativeStrengthIndex);
+                double distanceBelowLowerBand = Math.Max(0, lowerBollingerBand - currentBar.ClosePrice);
+                double distanceBelowRSIOversold = Math.Max(0, _rsiOversoldThreshold - currentRelativeStrengthIndex);
 
                 if (distanceBelowRSIOversold > 0 && currentBar.ClosePrice < lowerBollingerBand)
                 {
-                    decimal rsiScalingFactor = Math.Min(1.0m, distanceBelowRSIOversold / (_rsiOversoldThreshold - 0m));
+                    double rsiScalingFactor = Math.Min(1.0, distanceBelowRSIOversold / (_rsiOversoldThreshold - 0));
                     calculatedAllocationFromStrategyLogic = maxTradeAllocationInitialCapital * rsiScalingFactor;
                 }
             }
             else if (signal == SignalDecision.Sell) 
             {
-                decimal distanceAboveUpperBand = Math.Max(0, currentBar.ClosePrice - upperBollingerBand);
-                decimal distanceAboveRSIOverbought = Math.Max(0, currentRelativeStrengthIndex - _rsiOverboughtThreshold);
+                double distanceAboveUpperBand = Math.Max(0, currentBar.ClosePrice - upperBollingerBand);
+                double distanceAboveRSIOverbought = Math.Max(0, currentRelativeStrengthIndex - _rsiOverboughtThreshold);
 
                 if (distanceAboveRSIOverbought > 0 && currentBar.ClosePrice > upperBollingerBand)
                 {
-                    decimal rsiScalingFactor = Math.Min(1.0m, distanceAboveRSIOverbought / (100m - _rsiOverboughtThreshold));
+                    double rsiScalingFactor = Math.Min(1.0, distanceAboveRSIOverbought / (100 - _rsiOverboughtThreshold));
                     calculatedAllocationFromStrategyLogic = maxTradeAllocationInitialCapital * rsiScalingFactor;
                 }
             }
@@ -192,12 +229,12 @@ namespace Temperance.Services.Trading.Strategies.MeanReversion.Implementation
             if (calculatedAllocationFromStrategyLogic <= 0)
                 return 0;
 
-            decimal kellySizedAllocation = currentTotalEquity * kellyHalfFraction;
+            double kellySizedAllocation = currentTotalEquity * kellyHalfFraction;
             if (kellySizedAllocation < 0) kellySizedAllocation = 0;
 
-            decimal finalAllocationAmount = Math.Min(
-                calculatedAllocationFromStrategyLogic, // Strategy's own scaled suggestion
-                Math.Min(maxTradeAllocationInitialCapital, kellySizedAllocation) // Capped by 2% initial capital AND Kelly/2 current equity
+            double finalAllocationAmount = Math.Min(
+                calculatedAllocationFromStrategyLogic, 
+                Math.Min(maxTradeAllocationInitialCapital, kellySizedAllocation)
             );
 
             if (finalAllocationAmount <= 0)
@@ -209,97 +246,79 @@ namespace Temperance.Services.Trading.Strategies.MeanReversion.Implementation
             return finalAllocationAmount;
         }
 
-        private decimal CalculateStdDev(List<decimal> values)
+        private double CalculateStdDev(List<double> values)
         {
             if (values == null || values.Count <= 1)
                 return 0;
 
-            decimal average = values.Average();
-            double sumOfSquares = values.Sum(val => Math.Pow((double)(val - average), 2));
-            return (decimal)Math.Sqrt(sumOfSquares / (values.Count - 1));
+            double average = values.Average();
+            double sumOfSquares = values.Sum(val => Math.Pow((val - average), 2));
+            return Math.Sqrt(sumOfSquares / (values.Count - 1));
         }
 
-        private List<decimal> CalculateRSI(List<decimal> prices, int period)
+        public double[] CalculateRSI(double[] prices, int period)
         {
-            var rsiValues = new List<decimal>();
-
-            // Handle insufficient data: If we don't have enough prices for the initial period, return an empty list.
-            if (prices == null || prices.Count <= period)
+            if (prices == null || prices.Length <= period)
             {
-                // For consistency with your original padding, we can return a list of 50s.
-                // However, a true calculation wouldn't start until 'period' bars are available.
-                return Enumerable.Repeat(50m, prices.Count).ToList();
+                var neutralRsi = new double[prices?.Length ?? 0];
+                Array.Fill(neutralRsi, 50);
+                return neutralRsi;
             }
 
-            decimal initialGainsSum = 0;
-            decimal initialLossesSum = 0;
+            var rsiValues = new double[prices.Length];
+            double initialGainSum = 0;
+            double initialLossSum = 0;
 
-            // Iterate from the second price (index 1) up to and including the 'period'-th price.
-            // We need 'period' changes, so we look at prices[1] vs prices[0], prices[2] vs prices[1] etc.
             for (int i = 1; i <= period; i++)
             {
-                decimal change = prices[i] - prices[i - 1];
+                double change = prices[i] - prices[i - 1];
                 if (change > 0)
-                    initialGainsSum += change;
+                {
+                    initialGainSum += change;
+                }
                 else
-                    initialLossesSum += Math.Abs(change);
+                {
+                    initialLossSum -= change; 
+                }
             }
 
-            decimal avgGain = initialGainsSum / period;
-            decimal avgLoss = initialLossesSum / period;
+            double avgGain = initialGainSum / period;
+            double avgLoss = initialLossSum / period;
 
-            decimal initialRS;
-            if (avgLoss == 0)
-                initialRS = decimal.MaxValue; // Represents infinite strength, leading to RSI 100
-            else
-                initialRS = avgGain / avgLoss;
-
-            decimal initialRSI;
-            if (initialRS == decimal.MaxValue)
-                initialRSI = 100m;
-            else
-                initialRSI = 100m - (100m / (1m + initialRS));
-
-            // Add padding for the bars where RSI cannot be calculated yet
-            // and then add the first calculated RSI value.
-            // The number of padding values is 'period'.
-            for (int i = 0; i < period; i++)
-                rsiValues.Add(50m);
-            rsiValues[period - 1] = initialRSI;
-
-            // Wilder's smoothing ---
-            for (int i = period + 1; i < prices.Count; i++)
+            for (int i = 0; i < prices.Length; i++)
             {
-                decimal currentChange = prices[i] - prices[i - 1];
-                decimal currentGain = currentChange > 0 ? currentChange : 0;
-                decimal currentLoss = currentChange < 0 ? Math.Abs(currentChange) : 0;
+                if (i < period)
+                {
+                    rsiValues[i] = 50; 
+                    continue;
+                }
 
-                // Wilder's Smoothing Formula:
-                // New Avg Gain = [(Previous Avg Gain * (period - 1)) + Current Gain] / period
-                // New Avg Loss = [(Previous Avg Loss * (period - 1)) + Current Loss] / period
-                avgGain = ((avgGain * (period - 1)) + currentGain) / period;
-                avgLoss = ((avgLoss * (period - 1)) + currentLoss) / period;
+                if (i > period) 
+                {
+                    double change = prices[i] - prices[i - 1];
+                    double currentGain = change > 0 ? change : 0;
+                    double currentLoss = change < 0 ? -change : 0;
 
-                decimal currentRS;
+                    avgGain = ((avgGain * (period - 1)) + currentGain) / period;
+                    avgLoss = ((avgLoss * (period - 1)) + currentLoss) / period;
+                }
+
                 if (avgLoss == 0)
-                    currentRS = decimal.MaxValue;
-                else
-                    currentRS = avgGain / avgLoss;
+                    rsiValues[i] = 100;
 
-                decimal currentRSI;
-                if (currentRS == decimal.MaxValue)
-                    currentRSI = 100m;
                 else
-                    currentRSI = 100m - (100m / (1m + currentRS));
-                rsiValues.Add(currentRSI);
+                {
+                    double relativeStrength = avgGain / avgLoss;
+                    rsiValues[i] = 100 - (100 / (1 + relativeStrength));
+                }
             }
 
             return rsiValues;
         }
 
-        protected decimal CalculateStopLoss(Position position)
+        protected double CalculateStopLoss(Position position)
         {
-            decimal stopLossPercentage = 0.05m;
+            double stopLossPercentage = 0.05;
 
             if (position.Direction == PositionDirection.Long)
                 return position.EntryPrice * (1 - stopLossPercentage);
@@ -307,9 +326,9 @@ namespace Temperance.Services.Trading.Strategies.MeanReversion.Implementation
                 return position.EntryPrice * (1 + stopLossPercentage);
         }
 
-        protected decimal CalculateTakeProfit(Position position)
+        protected double CalculateTakeProfit(Position position)
         {
-            decimal takeProfitPercentage = 0.05m;
+            double takeProfitPercentage = 0.05;
 
             if (position.Direction == PositionDirection.Long)
                 return position.EntryPrice * (1 + takeProfitPercentage);
@@ -317,54 +336,9 @@ namespace Temperance.Services.Trading.Strategies.MeanReversion.Implementation
                 return position.EntryPrice * (1 - takeProfitPercentage);
         }
 
-        public decimal GetAllocationAmount(HistoricalPriceModel currentBar, IReadOnlyList<HistoricalPriceModel> historicalDataWindow, decimal maxTradeAllocation)
+        public double GetAllocationAmount(HistoricalPriceModel currentBar, IReadOnlyList<HistoricalPriceModel> historicalDataWindow, double maxTradeAllocation)
         {
             throw new NotImplementedException();
-        }
-
-        private T GetParameterOrDefault<T>(Dictionary<string, object> parameters, string key, T defaultValue)
-        {
-            if (!parameters.TryGetValue(key, out var value))
-            {
-                _logger.LogWarning("Parameter '{Key}' not found. Using default value: {DefaultValue}", key, defaultValue);
-                return defaultValue;
-            }
-
-            try
-            {
-                if (value is JsonElement jsonElement)
-                {
-                    if (typeof(T) == typeof(decimal))
-                    {
-                        if (jsonElement.TryGetDecimal(out var decimalValue))
-                        {
-                            return (T)(object)decimalValue;
-                        }
-                    }
-                    if (typeof(T) == typeof(int))
-                    {
-                        if (jsonElement.TryGetInt32(out var intValue))
-                        {
-                            return (T)(object)intValue;
-                        }
-                    }
-                    if (typeof(T) == typeof(double))
-                    {
-                        if (jsonElement.TryGetDouble(out var doubleValue))
-                        {
-                            return (T)(object)doubleValue;
-                        }
-                    }
-                    return (T)Convert.ChangeType(jsonElement.ToString(), typeof(T));
-                }
-
-                return (T)Convert.ChangeType(value, typeof(T));
-            }
-            catch (Exception ex) when (ex is InvalidCastException || ex is FormatException || ex is OverflowException)
-            {
-                _logger.LogError(ex, "Parameter '{Key}' has an invalid value '{Value}'. Expected type '{ExpectedType}'. Using default value: {DefaultValue}", key, value, typeof(T).Name, defaultValue);
-                return defaultValue;
-            }
         }
     }
 }

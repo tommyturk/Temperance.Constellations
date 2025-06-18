@@ -18,7 +18,7 @@ namespace Temperance.Data.Data.Repositories.Trade.Implementations
             _logger = logger;
         }
 
-        public async Task UpdateBacktestPerformanceMetrics(Guid runId, BacktestResult result, decimal initialCapital)
+        public async Task UpdateBacktestPerformanceMetrics(Guid runId, BacktestResult result, double initialCapital)
         {
             const string query = @"
                 UPDATE [TradingBotDb].[Constellations].[BacktestRuns]

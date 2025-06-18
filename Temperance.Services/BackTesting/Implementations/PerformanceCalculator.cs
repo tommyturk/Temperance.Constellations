@@ -33,17 +33,17 @@ namespace Temperance.Services.BackTesting.Implementations
             metrics.WinningTrades = winningTrades.Count;
             metrics.LosingTrades = losingTrades.Count;
 
-            metrics.WinRate = metrics.TotalTrades > 0 ? (decimal)winningTrades.Count / metrics.TotalTrades : 0;
+            metrics.WinRate = metrics.TotalTrades > 0 ? winningTrades.Count / metrics.TotalTrades : 0;
 
             metrics.AverageWin = winningTrades.Any() ? winningTrades.Sum(t => t.ProfitLoss.GetValueOrDefault()) / winningTrades.Count : 0;
             metrics.AverageLoss = losingTrades.Any() ? losingTrades.Sum(t => Math.Abs(t.ProfitLoss.GetValueOrDefault())) / losingTrades.Count : 0;
 
-            metrics.PayoffRatio = metrics.AverageLoss > 0 ? metrics.AverageWin / metrics.AverageLoss : (metrics.AverageWin > 0 ? decimal.MaxValue : 0);
+            metrics.PayoffRatio = metrics.AverageLoss > 0 ? metrics.AverageWin / metrics.AverageLoss : (metrics.AverageWin > 0 ? double.MaxValue : 0);
 
             if (metrics.PayoffRatio > 0 && metrics.WinRate > 0 && metrics.WinRate < 1)
             {
-                decimal lossProbability = 1 - metrics.WinRate;
-                decimal numerator = (metrics.PayoffRatio * metrics.WinRate) - lossProbability;
+                double lossProbability = 1 - metrics.WinRate;
+                double numerator = (metrics.PayoffRatio * metrics.WinRate) - lossProbability;
 
                 if (numerator > 0)
                 {
@@ -59,7 +59,7 @@ namespace Temperance.Services.BackTesting.Implementations
             return metrics;
         }
 
-        public async Task CalculatePerformanceMetrics(BacktestResult result, decimal initialCapital)
+        public async Task CalculatePerformanceMetrics(BacktestResult result, double initialCapital)
         {
             if (result.Trades == null || !result.Trades.Any())
             {
@@ -68,7 +68,7 @@ namespace Temperance.Services.BackTesting.Implementations
                 result.TotalReturn = 0;
                 result.MaxDrawdown = 0;
                 result.WinRate = 0;
-                result.EquityCurve = new List<KeyValuePair<DateTime, decimal>> { new(result.Configuration?.StartDate ?? DateTime.MinValue, initialCapital) };
+                result.EquityCurve = new List<KeyValuePair<DateTime, double>> { new(result.Configuration?.StartDate ?? DateTime.MinValue, initialCapital) };
                 result.TotalTrades = 0;
                 result.WinningTrades = 0;
                 result.LosingTrades = 0;
@@ -78,10 +78,10 @@ namespace Temperance.Services.BackTesting.Implementations
                 return;
             }
 
-            decimal runningBalance = initialCapital;
-            decimal peakBalance = initialCapital;
-            decimal maxDrawdownValue = 0; 
-            var equityCurve = new List<KeyValuePair<DateTime, decimal>> { new(result.Configuration?.StartDate ?? result.Trades.Min(t => t.EntryDate), initialCapital) };
+            double runningBalance = initialCapital;
+            double peakBalance = initialCapital;
+            double maxDrawdownValue = 0; 
+            var equityCurve = new List<KeyValuePair<DateTime, double>> { new(result.Configuration?.StartDate ?? result.Trades.Min(t => t.EntryDate), initialCapital) };
 
             var orderedTrades = result.Trades
                                     .Where(t => t.ExitDate.HasValue && t.ProfitLoss.HasValue)
@@ -107,12 +107,12 @@ namespace Temperance.Services.BackTesting.Implementations
             foreach (var trade in orderedTrades)
             {
                 runningBalance += trade.ProfitLoss!.Value;
-                equityCurve.Add(new KeyValuePair<DateTime, decimal>(trade.ExitDate!.Value, runningBalance));
+                equityCurve.Add(new KeyValuePair<DateTime, double>(trade.ExitDate!.Value, runningBalance));
 
                 if (runningBalance > peakBalance)
                     peakBalance = runningBalance;
 
-                decimal drawdown = peakBalance - runningBalance;
+                double drawdown = peakBalance - runningBalance;
                 if (drawdown > maxDrawdownValue)
                     maxDrawdownValue = drawdown;
             }
@@ -120,31 +120,31 @@ namespace Temperance.Services.BackTesting.Implementations
             result.TotalProfitLoss = runningBalance - initialCapital;
             result.TotalReturn = initialCapital != 0 ? result.TotalProfitLoss / initialCapital : 0;
             result.MaxDrawdown = peakBalance != 0 ? maxDrawdownValue / peakBalance : 0; 
-            result.WinRate = result.TotalTrades > 0 ? result.Trades.Count(t => t.ProfitLoss.HasValue && t.ProfitLoss > 0) / (decimal)result.TotalTrades : 0;
+            result.WinRate = result.TotalTrades > 0 ? result.Trades.Count(t => t.ProfitLoss.HasValue && t.ProfitLoss > 0) / result.TotalTrades : 0;
             result.EquityCurve = equityCurve;
 
             var winningTrades = orderedTrades.Where(t => t.ProfitLoss > 0).ToList();
             var losingTrades = orderedTrades.Where(t => t.ProfitLoss < 0).ToList();
 
-            decimal totalWinningProfit = winningTrades.Sum(t => t.ProfitLoss!.Value);
-            decimal totalLosingProfit = losingTrades.Sum(t => t.ProfitLoss!.Value);
+            double totalWinningProfit = winningTrades.Sum(t => t.ProfitLoss!.Value);
+            double totalLosingProfit = losingTrades.Sum(t => t.ProfitLoss!.Value);
 
             result.WinningTrades = winningTrades.Count;
             result.LosingTrades = losingTrades.Count;
             result.TotalTrades = result.Trades.Count;
 
-            result.WinRate = result.TotalTrades > 0 ? (decimal)winningTrades.Count / result.TotalTrades : 0;
+            result.WinRate = result.TotalTrades > 0 ? (double)winningTrades.Count / result.TotalTrades : 0;
 
-            decimal averageWin = winningTrades.Any() ? totalWinningProfit / winningTrades.Count : 0;
-            decimal averageLoss = losingTrades.Any() ? totalLosingProfit / losingTrades.Count : 0;
+            double averageWin = winningTrades.Any() ? totalWinningProfit / winningTrades.Count : 0;
+            double averageLoss = losingTrades.Any() ? totalLosingProfit / losingTrades.Count : 0;
 
-            result.PayoffRatio = averageLoss != 0 ? averageWin / averageLoss : (averageWin > 0 ? decimal.MaxValue : 0);
+            result.PayoffRatio = averageLoss != 0 ? averageWin / averageLoss : (averageWin > 0 ? double.MaxValue : 0);
 
-            decimal kellyFraction = 0;
+            double kellyFraction = 0;
             if(result.PayoffRatio > 0 && result.WinRate > 0 && result.WinRate < 1)
             {
-                decimal lossProbability = 1 - result.WinRate.Value;
-                decimal numerator = (result.PayoffRatio * result.WinRate.Value) - lossProbability;
+                double lossProbability = 1 - result.WinRate.Value;
+                double numerator = (result.PayoffRatio * result.WinRate.Value) - lossProbability;
 
                 if (numerator > 0)
                     kellyFraction = numerator / result.PayoffRatio;
