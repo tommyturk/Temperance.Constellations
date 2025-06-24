@@ -3,6 +3,8 @@ using Microsoft.Extensions.Logging;
 using System.Collections.Concurrent;
 using System.ComponentModel;
 using System.Runtime.InteropServices;
+using Temperance.Data.Data.Repositories.Trade.Implementations;
+using Temperance.Data.Data.Repositories.Trade.Interfaces;
 using Temperance.Data.Models.Trading;
 using Temperance.Services.BackTesting.Implementations;
 using Temperance.Services.Services.Interfaces;

@@ -30,7 +30,7 @@ namespace TradingApp.src.Data.Repositories.HistoricalPrices.Implementations
         {
             var tableName = _sqlHelper.SanitizeTableName(symbol, interval);
 
-            _sqlHelper.EnsureTableExists(tableName);
+            await _sqlHelper.EnsureTableExists(tableName);
 
             string query = $@"
                 SELECT *

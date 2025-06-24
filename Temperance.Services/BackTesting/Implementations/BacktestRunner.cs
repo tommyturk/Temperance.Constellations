@@ -15,6 +15,7 @@ using Temperance.Services.Services.Interfaces;
 using Temperance.Services.Trading.Strategies;
 using TradingApp.src.Core.Services.Interfaces;
 using System.Text.Json;
+using Temperance.Data.Data.Repositories.Trade.Interfaces;
 namespace Temperance.Services.BackTesting.Implementations
 {
     public class BacktestRunner : IBacktestRunner
@@ -28,6 +29,7 @@ namespace Temperance.Services.BackTesting.Implementations
         private readonly ITradeService _tradesService;
         private readonly ISecuritiesOverviewService _securitiesOverviewService;
         private readonly IPerformanceCalculator _performanceCalculator;
+        private readonly IBacktestRepository _backtestRepository;
         private readonly ILogger<BacktestRunner> _logger;
 
         public BacktestRunner(
@@ -40,6 +42,7 @@ namespace Temperance.Services.BackTesting.Implementations
             ITradeService tradesService,
             ISecuritiesOverviewService securitiesOverviewService,
             IPerformanceCalculator performanceCalculator,
+            IBacktestRepository backtestRepository,
             ILogger<BacktestRunner> logger)
         {
             _historicalPriceService = historicalPriceService;
@@ -57,7 +60,7 @@ namespace Temperance.Services.BackTesting.Implementations
         [AutomaticRetry(Attempts = 1)]
         public async Task RunBacktestAsync(string configJson, Guid runId)
         {
-            var config = System.Text.Json.JsonSerializer.Deserialize<BacktestConfiguration>(configJson);
+            var config = JsonSerializer.Deserialize<BacktestConfiguration>(configJson);
             if (config == null)
             {
                 await _tradesService.UpdateBacktestRunStatusAsync(runId, "Failed", "Failed to deserialize configuration.");
@@ -261,7 +264,7 @@ namespace Temperance.Services.BackTesting.Implementations
 
                             if (currentPosition == null && signal != SignalDecision.Hold)
                             {
-                                double maxTradeAllocationInitialCapital = config.InitialCapital * 0.02;
+                                double maxTradeAllocationInitialCapital = config.InitialCapital;
                                 double currentTotalEquity = _portfolioManager.GetTotalEquity();
 
                                 double actualAllocationAmount = strategyInstance.GetAllocationAmount(currentBar, dataWindow, maxTradeAllocationInitialCapital, currentTotalEquity, currentSymbolKellyHalfFraction);
@@ -298,16 +301,22 @@ namespace Temperance.Services.BackTesting.Implementations
                                 await _portfolioManager.OpenPosition(symbol, interval, (signal == SignalDecision.Buy ? PositionDirection.Long : PositionDirection.Short),
                                                                      calculatedQuantity, effectiveEntryPrice, currentBar.Timestamp, entrySpreadCost);
 
-                                activeTrade = new TradeSummary
+                                IEnumerable<TradeSummary> trades = new List<TradeSummary>()
                                 {
-                                    EntryDate = currentBar.Timestamp,
-                                    EntryPrice = effectiveEntryPrice,
-                                    Direction = signal == SignalDecision.Buy ? "Long" : "Short",
-                                    Quantity = calculatedQuantity,
-                                    Symbol = symbol,
-                                    Interval = interval,
-                                    TransactionCost = entrySpreadCost
+                                    new TradeSummary(){
+                                        RunId = runId,
+                                        StrategyName = strategyInstance.Name,
+                                        EntryDate = currentBar.Timestamp,
+                                        EntryPrice = effectiveEntryPrice,
+                                        Direction = signal == SignalDecision.Buy ? "Long" : "Short",
+                                        Quantity = calculatedQuantity,
+                                        Symbol = symbol,
+                                        Interval = interval,
+                                        TransactionCost = entrySpreadCost,
+                                    }
                                 };
+
+                                await _backtestRepository.SaveBacktestTradesAsync(runId, trades);
 
                                 _logger.LogInformation("RunId: {RunId}, Symbol: {Symbol}, Interval: {Interval}, Timestamp: {Timestamp}, Signal: {Signal}, Position Opened. Direction: {Direction}, Quantity: {Quantity}",
                                     runId, symbol, interval, currentBar.Timestamp, signal, activeTrade.Direction, activeTrade.Quantity);
@@ -545,7 +554,7 @@ namespace Temperance.Services.BackTesting.Implementations
                 {
                     _logger.LogError(ex, "RunId: {RunId} - Unhandled error processing pair {Pair}", runId, pairIdentifier);
                 }
-            //});
+                //});
             }
 
             // --- Finalization ---
@@ -565,7 +574,7 @@ namespace Temperance.Services.BackTesting.Implementations
 
             var joinedQuery = dataA.Join(
                 dataB,
-                barA => barA.Timestamp, 
+                barA => barA.Timestamp,
                 barB => barB.Timestamp,
                 (barA, barB) => (barA, barB)
             );
