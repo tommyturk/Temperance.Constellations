@@ -1,6 +1,7 @@
 ﻿using Dapper;
 using Microsoft.Data.SqlClient;
 using Temperance.Data.Data.Repositories.Securities.Interfaces;
+using Temperance.Data.Models.HistoricalData;
 
 namespace Temperance.Data.Repositories.Securities.Implementations
 {
@@ -20,6 +21,28 @@ namespace Temperance.Data.Repositories.Securities.Implementations
             return (await connection.QueryAsync<string>(query)).ToList();
         }
 
+        public async Task<List<SymbolCoverageBacktestModel>> GetSecuritiesForBacktest(List<string> symbols = null)
+        {
+            using var connection = new SqlConnection(_connectionString);
+
+            var query = @$"SELECT
+                            s.[Symbol],
+                            sdc.[Interval],
+                            MAX(sdc.Year) - MIN(sdc.Year) AS Years
+                        FROM [Historical].[BackFill].[SecurityDataCoverage] AS sdc";
+
+            var condition = symbols != null && symbols.Count > 0
+                ? $@"WHERE Symbol IN ({string.Join(',', symbols)})"
+                : string.Empty;
+
+            query = query + condition + $@"
+                        LEFT JOIN TradingBotDb.Financials.Securities AS s ON s.Symbol = sdc.Symbol
+                        GROUP BY s.Symbol, sdc.Interval
+                        HAVING  MAX(sdc.Year) - MIN(sdc.Year) > 15;";
+
+            return (await connection.QueryAsync<SymbolCoverageBacktestModel>(query)).ToList();
+        }
+
         public async Task<bool> UpdateSecuritiesOverview(int securityId, SecuritiesOverview securitiesOverview)
         {
             if (securitiesOverview.Symbol == null)
@@ -32,118 +55,119 @@ namespace Temperance.Data.Repositories.Securities.Implementations
                 var connection = new SqlConnection(_connectionString);
 
                 var insertQuery = @"
-            INSERT INTO [TradingBotDb].[Financials].[SecuritiesOverview]
-            (
-                SecurityID,
-                Symbol,
-                Name,
-                Description,
-                CIK,
-                Exchange,
-                Currency,
-                Country,
-                Sector,
-                Industry,
-                Address,
-                OfficialSite,
-                FiscalYearEnd,
-                LatestQuarter,
-                MarketCapitalization,
-                EBITDA,
-                PERatio,
-                PEGRatio,
-                BookValue,
-                DividendPerShare,
-                DividendYield,
-                EPS,
-                RevenuePerShareTTM,
-                ProfitMargin,
-                OperatingMarginTTM,
-                ReturnOnAssetsTTM,
-                ReturnOnEquityTTM,
-                RevenueTTM,
-                GrossProfitTTM,
-                DilutedEPSTTM,
-                QuarterlyEarningsGrowthYOY,
-                QuarterlyRevenueGrowthYOY,
-                AnalystTargetPrice,
-                AnalystRatingStrongBuy,
-                AnalystRatingBuy,
-                AnalystRatingHold,
-                AnalystRatingSell,
-                AnalystRatingStrongSell,
-                TrailingPE,
-                ForwardPE,
-                PriceToSalesRatioTTM,
-                PriceToBookRatio,
-                EVToRevenue,
-                EVToEBITDA,
-                Beta,
-                FiftyTwoWeekHigh,
-                FiftyTwoWeekLow,
-                FiftyDayMovingAverage,
-                TwoHundredDayMovingAverage,
-                SharesOutstanding,
-                DividendDate,
-                ExDividendDate,
-                LastUpdated
-            )
-            VALUES
-            (
-                @SecurityID,
-                @Symbol,
-                @Name,
-                @Description,
-                @CIK,
-                @Exchange,
-                @Currency,
-                @Country,
-                @Sector,
-                @Industry,
-                @Address,
-                @OfficialSite,
-                @FiscalYearEnd,
-                @LatestQuarter,
-                @MarketCapitalization,
-                @EBITDA,
-                @PERatio,
-                @PEGRatio,
-                @BookValue,
-                @DividendPerShare,
-                @DividendYield,
-                @EPS,
-                @RevenuePerShareTTM,
-                @ProfitMargin,
-                @OperatingMarginTTM,
-                @ReturnOnAssetsTTM,
-                @ReturnOnEquityTTM,
-                @RevenueTTM,
-                @GrossProfitTTM,
-                @DilutedEPSTTM,
-                @QuarterlyEarningsGrowthYOY,
-                @QuarterlyRevenueGrowthYOY,
-                @AnalystTargetPrice,
-                @AnalystRatingStrongBuy,
-                @AnalystRatingBuy,
-                @AnalystRatingHold,
-                @AnalystRatingSell,
-                @AnalystRatingStrongSell,
-                @TrailingPE,
-                @ForwardPE,
-                @PriceToSalesRatioTTM,
-                @PriceToBookRatio,
-                @EVToRevenue,
-                @EVToEBITDA,
-                @Beta,
-                @FiftyTwoWeekHigh,
-                @FiftyTwoWeekLow,
-                @FiftyDayMovingAverage,
-                @TwoHundredDayMovingAverage,
-                @SharesOutstanding,
-                @DividendDate,
-                @ExDividendDate,
-                @LastUpdated
-            )";
+                    INSERT INTO [TradingBotDb].[Financials].[SecuritiesOverview]
+                    (
+                        SecurityID,
+                        Symbol,
+                        Name,
+                        Description,
+                        CIK,
+                        Exchange,
+                        Currency,
+                        Country,
+                        Sector,
+                        Industry,
+                        Address,
+                        OfficialSite,
+                        FiscalYearEnd,
+                        LatestQuarter,
+                        MarketCapitalization,
+                        EBITDA,
+                        PERatio,
+                        PEGRatio,
+                        BookValue,
+                        DividendPerShare,
+                        DividendYield,
+                        EPS,
+                        RevenuePerShareTTM,
+                        ProfitMargin,
+                        OperatingMarginTTM,
+                        ReturnOnAssetsTTM,
+                        ReturnOnEquityTTM,
+                        RevenueTTM,
+                        GrossProfitTTM,
+                        DilutedEPSTTM,
+                        QuarterlyEarningsGrowthYOY,
+                        QuarterlyRevenueGrowthYOY,
+                        AnalystTargetPrice,
+                        AnalystRatingStrongBuy,
+                        AnalystRatingBuy,
+                        AnalystRatingHold,
+                        AnalystRatingSell,
+                        AnalystRatingStrongSell,
+                        TrailingPE,
+                        ForwardPE,
+                        PriceToSalesRatioTTM,
+                        PriceToBookRatio,
+                        EVToRevenue,
+                        EVToEBITDA,
+                        Beta,
+                        FiftyTwoWeekHigh,
+                        FiftyTwoWeekLow,
+                        FiftyDayMovingAverage,
+                        TwoHundredDayMovingAverage,
+                        SharesOutstanding,
+                        DividendDate,
+                        ExDividendDate,
+                        LastUpdated
+                    )
+                    VALUES
+                    (
+                        @SecurityID,
+                        @Symbol,
+                        @Name,
+                        @Description,
+                        @CIK,
+                        @Exchange,
+                        @Currency,
+                        @Country,
+                        @Sector,
+                        @Industry,
+                        @Address,
+                        @OfficialSite,
+                        @FiscalYearEnd,
+                        @LatestQuarter,
+                        @MarketCapitalization,
+                        @EBITDA,
+                        @PERatio,
+                        @PEGRatio,
+                        @BookValue,
+                        @DividendPerShare,
+                        @DividendYield,
+                        @EPS,
+                        @RevenuePerShareTTM,
+                        @ProfitMargin,
+                        @OperatingMarginTTM,
+                        @ReturnOnAssetsTTM,
+                        @ReturnOnEquityTTM,
+                        @RevenueTTM,
+                        @GrossProfitTTM,
+                        @DilutedEPSTTM,
+                        @QuarterlyEarningsGrowthYOY,
+                        @QuarterlyRevenueGrowthYOY,
+                        @AnalystTargetPrice,
+                        @AnalystRatingStrongBuy,
+                        @AnalystRatingBuy,
+                        @AnalystRatingHold,
+                        @AnalystRatingSell,
+                        @AnalystRatingStrongSell,
+                        @TrailingPE,
+                        @ForwardPE,
+                        @PriceToSalesRatioTTM,
+                        @PriceToBookRatio,
+                        @EVToRevenue,
+                        @EVToEBITDA,
+                        @Beta,
+                        @FiftyTwoWeekHigh,
+                        @FiftyTwoWeekLow,
+                        @FiftyDayMovingAverage,
+                        @TwoHundredDayMovingAverage,
+                        @SharesOutstanding,
+                        @DividendDate,
+                        @ExDividendDate,
+                        @LastUpdated
+                    )";
+
                 return connection.Execute(insertQuery, new
                 {
                     securitiesOverview.SecurityID,

@@ -1,4 +1,5 @@
 ﻿using Temperance.Data.Data.Repositories.Securities.Interfaces;
+using Temperance.Data.Models.HistoricalData;
 using Temperance.Data.Models.Securities.SecurityOverview;
 using Temperance.Services.Services.Interfaces;
 
@@ -23,6 +24,11 @@ namespace Temperance.Services.Services.Implementations
         public async Task<List<string>> GetSecurities()
         {
             return await _securitiesOverviewRepository.GetSecurities();
+        }
+
+        public async Task<List<SymbolCoverageBacktestModel>> GetSecuritiesForBacktest(List<string> symbols = null)
+        {
+            return await _securitiesOverviewRepository.GetSecuritiesForBacktest(symbols);
         }
 
         public async Task<SecuritySearchResponse> SearchSecuritiesAsync(string query)

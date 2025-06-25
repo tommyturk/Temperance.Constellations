@@ -97,18 +97,13 @@ namespace Temperance.Services.BackTesting.Implementations
                 int rollingAdvLookbackBars = 20;
                 int rollingKellyLookbackTrades = 50;
 
-                var symbolsToTest = (config.Symbols?.Any() ?? false)
-                    ? config.Symbols
-                    : (await _securitiesOverviewService.GetSecurities() ?? Enumerable.Empty<string>()).ToList();
+                var symbolsWithCoverage = await _securitiesOverviewService.GetSecuritiesForBacktest(config.Symbols);
 
-                if (!symbolsToTest.Any()) throw new InvalidOperationException("No symbols specified or found for backtest.");
-
-                var testCases = symbolsToTest.SelectMany(symbol => config.Intervals.Select(interval => new { Symbol = symbol, Interval = interval }))
-                    .ToList();
+                if (!symbolsWithCoverage.Any()) throw new InvalidOperationException("No symbols specified or found for backtest.");
 
                 var indicatorCache = new ConcurrentDictionary<string, Dictionary<string, double[]>>();
 
-                foreach (var testCase in testCases)
+                foreach (var testCase in symbolsWithCoverage)
                 {
                     string cacheKey = $"{testCase.Symbol}_{testCase.Interval}";
                     var historicalData = await _historicalPriceService.GetHistoricalPrices(testCase.Symbol, testCase.Interval);
@@ -141,10 +136,12 @@ namespace Temperance.Services.BackTesting.Implementations
 
                 var parallelOptions = new ParallelOptions { MaxDegreeOfParallelism = config.MaxParallelism };
 
-                _logger.LogInformation($"RunId: {runId} - Processing {testCases.Count} Symbol/Interval combinations.", runId, testCases.Count().ToString());
+                _logger.LogInformation($"RunId: {runId} - Processing {symbolsWithCoverage.Count} Symbol/Interval combinations.", runId, symbolsWithCoverage.Count().ToString());
                 var symbolKellyHalfFractions = new ConcurrentDictionary<string, double>();
 
-                await Parallel.ForEachAsync(testCases, parallelOptions, async (testCase, cancellationToken) =>
+                //await Parallel.ForEachAsync(testCases, parallelOptions, async (testCase, cancellationToken) =>
+                //{
+                foreach (var testCase in symbolsWithCoverage)
                 {
                     var symbol = testCase.Symbol;
                     var interval = testCase.Interval;
@@ -392,7 +389,8 @@ namespace Temperance.Services.BackTesting.Implementations
                     {
                         _logger.LogError(ex, "RunId: {RunId} - Error processing {Symbol} [{Interval}]", runId, symbol, interval);
                     }
-                });
+                    //});
+                }
 
                 result.Trades.AddRange(_portfolioManager.GetCompletedTradesHistory());
                 result.TotalTrades = result.Trades.Count;
@@ -449,7 +447,7 @@ namespace Temperance.Services.BackTesting.Implementations
 
                 var assetDataCache = new Dictionary<string, List<HistoricalPriceModel>>();
                 var allPortfolioAssets = new List<string>(config.RiskAssetSymbols) { config.SafeAssetSymbol };
-                foreach(var symbol in allPortfolioAssets)
+                foreach (var symbol in allPortfolioAssets)
                 {
                     var data = await _historicalPriceService.GetHistoricalPrices(symbol, string.Empty);
                     assetDataCache[symbol] = data.OrderBy(d => d.Timestamp).ToList();

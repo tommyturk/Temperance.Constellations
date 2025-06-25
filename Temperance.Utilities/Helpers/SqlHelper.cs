@@ -59,7 +59,6 @@ namespace Temperance.Utilities.Helpers
                 {
                     await connection.ExecuteAsync($@"
                     CREATE TABLE {tableName} (
-                        PriceId BIGINT IDENTITY(1,1) NOT NULL,
                         SecurityID INT NOT NULL,
                         Symbol NVARCHAR(50) NOT NULL,
                         Timestamp DATETIME2 NOT NULL,
