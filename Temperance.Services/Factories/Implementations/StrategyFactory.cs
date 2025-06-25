@@ -4,6 +4,7 @@ using Temperance.Services.Factories.Interfaces;
 using Temperance.Services.Trading.Strategies;
 using Temperance.Services.Trading.Strategies.MeanReversion.Implementation;
 using Temperance.Services.Trading.Strategies.MeanReversion.Implementations;
+using Temperance.Services.Trading.Strategies.Momentum;
 
 namespace Temperance.Services.Factories.Implementations
 {
@@ -18,6 +19,7 @@ namespace Temperance.Services.Factories.Implementations
         {
             _strategyRegistry.Add("MeanReversion_BB_RSI", typeof(MeanReversionStrategy));
             _strategyRegistry.Add("PairsTrading_Cointegration", typeof(PairsTradingStrategy));
+            _strategyRegistry.Add("Dual_Momentum", typeof(DualMomentumStrategy));
         }
 
         public StrategyFactory(IServiceProvider serviceProvider, ILogger<StrategyFactory> logger)

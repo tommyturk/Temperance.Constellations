@@ -17,7 +17,7 @@ namespace Temperance.Constellations.Controllers
         private readonly ITradeService _tradeService;
         private readonly IBackgroundJobClient _backgroundJobClient;
 
-        public BacktestsController(IStrategyFactory strategyFactory, ITradeService tradeService, IBackgroundJobClient backgroundJobClient, 
+        public BacktestsController(IStrategyFactory strategyFactory, ITradeService tradeService, IBackgroundJobClient backgroundJobClient,
             ILogger<BacktestsController> logger)
         {
             _strategyFactory = strategyFactory;
@@ -34,14 +34,14 @@ namespace Temperance.Constellations.Controllers
             if (configuration == null || string.IsNullOrWhiteSpace(configuration.StrategyName))
                 return BadRequest("Invalid configuration: StrategyName is required.");
 
-            var runId = Guid.NewGuid(); 
+            var runId = Guid.NewGuid();
 
             await _tradeService.InitializeBacktestRunAsync(configuration, runId);
 
             string configJson = System.Text.Json.JsonSerializer.Serialize(configuration);
 
             var jobId = _backgroundJobClient.Enqueue<IBacktestRunner>(runner =>
-                           runner.RunBacktestAsync(configJson, runId));
+                           runner.RunBacktest(configJson, runId));
 
             _logger.LogInformation("Enqueued backtest RunId: {RunId}, Hangfire JobId: {JobId}", runId, jobId);
 
@@ -50,10 +50,10 @@ namespace Temperance.Constellations.Controllers
 
         [HttpPost("start-pairs")]
         [ProducesResponseType(StatusCodes.Status202Accepted)]
-        [ProducesResponseType(StatusCodes.Status400BadRequest)] 
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
         public async Task<IActionResult> StartPairsBacktest([FromBody] PairsBacktestConfiguration configuration)
         {
-            if(configuration == null || string.IsNullOrWhiteSpace(configuration.StrategyName))
+            if (configuration == null || string.IsNullOrWhiteSpace(configuration.StrategyName))
                 return BadRequest("Invalid configuration: StrategyName is required.");
 
             var runId = Guid.NewGuid();
@@ -63,6 +63,27 @@ namespace Temperance.Constellations.Controllers
                            runner.RunPairsBacktest(configuration, runId));
 
             _logger.LogInformation("Enqueued pairs backtest RunId: {RunId}, Hangfire JobId: {JobId}", runId, jobId);
+
+            return Accepted(new { BacktestRunId = runId, JobId = jobId });
+        }
+
+        [HttpPost("start-dual-momentum")]
+        [ProducesResponseType(StatusCodes.Status202Accepted)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        public async Task<IActionResult> StartDualMomentumBacktest([FromBody] DualMomentumBacktestConfiguration configuration)
+        {
+            if (configuration == null || !configuration.RiskAssetSymbols.Any() || string.IsNullOrWhiteSpace(configuration.SafeAssetSymbol))
+                return BadRequest("Invalid configuration: RiskAssetSymbols and SafeAssetSymbol are required.");
+
+            var runId = Guid.NewGuid();
+            await _tradeService.InitializeBacktestRunAsync(configuration, runId);
+
+            string configJson = System.Text.Json.JsonSerializer.Serialize(configuration);
+
+            var jobId = _backgroundJobClient.Enqueue<IBacktestRunner>(runner =>
+                runner.RunDualMomentumBacktest(configJson, runId));
+
+            _logger.LogInformation("Enqueued Dual Momentum backtest RunId: {RunId}, Hangfire JobId: {JobId}", runId, jobId);
 
             return Accepted(new { BacktestRunId = runId, JobId = jobId });
         }

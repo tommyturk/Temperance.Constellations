@@ -3,6 +3,9 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Win32.SafeHandles;
 using System.Collections.Concurrent;
 using System.Runtime.InteropServices;
+using System.Text.Json;
+using System.Threading.Tasks;
+using Temperance.Data.Data.Repositories.Trade.Interfaces;
 using Temperance.Data.Models.Backtest;
 using Temperance.Data.Models.HistoricalPriceData;
 using Temperance.Data.Models.Performance;
@@ -13,9 +16,8 @@ using Temperance.Services.Factories.Interfaces;
 using Temperance.Services.Services.Implementations;
 using Temperance.Services.Services.Interfaces;
 using Temperance.Services.Trading.Strategies;
+using Temperance.Services.Trading.Strategies.Momentum;
 using TradingApp.src.Core.Services.Interfaces;
-using System.Text.Json;
-using Temperance.Data.Data.Repositories.Trade.Interfaces;
 namespace Temperance.Services.BackTesting.Implementations
 {
     public class BacktestRunner : IBacktestRunner
@@ -58,7 +60,7 @@ namespace Temperance.Services.BackTesting.Implementations
         }
 
         [AutomaticRetry(Attempts = 1)]
-        public async Task RunBacktestAsync(string configJson, Guid runId)
+        public async Task RunBacktest(string configJson, Guid runId)
         {
             var config = JsonSerializer.Deserialize<BacktestConfiguration>(configJson);
             if (config == null)
@@ -168,6 +170,7 @@ namespace Temperance.Services.BackTesting.Implementations
 
                         Position? currentPosition = null;
                         TradeSummary? activeTrade = null;
+                        List<TradeSummary> tradesForThisCase = new List<TradeSummary>();
 
                         for (int i = 0; i < backtestData.Count; i++)
                         {
@@ -219,7 +222,7 @@ namespace Temperance.Services.BackTesting.Implementations
 
                                 double netProfitLoss = profitLossBeforeCosts - totalTradeTransactionCost;
 
-                                await _portfolioManager.ClosePosition(
+                                TradeSummary? closedTrade = await _portfolioManager.ClosePosition(
                                     strategyInstance.Name,
                                     symbol,
                                     interval,
@@ -231,11 +234,16 @@ namespace Temperance.Services.BackTesting.Implementations
                                     netProfitLoss
                                 );
 
+                                if (closedTrade != null)
+                                    tradesForThisCase.Add(closedTrade);
+
+                                _logger.LogWarning("RunId: {RunId} - Could not close position for {Symbol} [{Interval}] at {Timestamp}. This may indicate a data discrepancy.", runId, symbol, interval, currentBar.Timestamp);
+
                                 var recentTradesForKelly = _portfolioManager.GetCompletedTradesHistory()
-                                                                            .Where(t => t.Symbol == symbol && t.Interval == interval)
-                                                                            .OrderByDescending(t => t.ExitDate)
-                                                                            .Take(rollingKellyLookbackTrades)
-                                                                            .ToList();
+                                                                        .Where(t => t.Symbol == symbol && t.Interval == interval)
+                                                                        .OrderByDescending(t => t.ExitDate)
+                                                                        .Take(rollingKellyLookbackTrades)
+                                                                        .ToList();
 
                                 KellyMetrics kellyMetrics = _performanceCalculator.CalculateKellyMetrics(recentTradesForKelly);
                                 currentSymbolKellyHalfFraction = kellyMetrics.KellyHalfFraction;
@@ -316,8 +324,18 @@ namespace Temperance.Services.BackTesting.Implementations
                                     }
                                 };
 
-                                await _backtestRepository.SaveBacktestTradesAsync(runId, trades);
+                                currentPosition = _portfolioManager.GetOpenPositions().FirstOrDefault(p => p.Symbol == symbol);
 
+                                if (tradesForThisCase.Any())
+                                {
+                                    tradesForThisCase.ForEach(t => t.RunId = runId);
+                                    await _backtestRepository.SaveBacktestTradesAsync(runId, allTrades);
+
+                                    foreach (var trade in tradesForThisCase)
+                                    {
+                                        allTrades.Add(trade);
+                                    }
+                                }
                                 _logger.LogInformation("RunId: {RunId}, Symbol: {Symbol}, Interval: {Interval}, Timestamp: {Timestamp}, Signal: {Signal}, Position Opened. Direction: {Direction}, Quantity: {Quantity}",
                                     runId, symbol, interval, currentBar.Timestamp, signal, activeTrade.Direction, activeTrade.Quantity);
                             }
@@ -390,6 +408,55 @@ namespace Temperance.Services.BackTesting.Implementations
                 throw;
             }
         }
+
+
+        [AutomaticRetry(Attempts = 1)]
+        public async Task RunDualMomentumBacktest(string configJson, Guid runId)
+        {
+            var config = JsonSerializer.Deserialize<DualMomentumBacktestConfiguration>(configJson);
+            if (config == null || !config.RiskAssetSymbols.Any() || string.IsNullOrWhiteSpace(config.SafeAssetSymbol))
+            {
+                await _tradesService.UpdateBacktestRunStatusAsync(runId, "Failed", "Invalid configuration for Dual Momentum Backtest.");
+                throw new ArgumentException("Invalid configuration for Dual Momentum Backtest.");
+            }
+
+            await _tradesService.UpdateBacktestRunStatusAsync(runId, "Running");
+            _logger.LogInformation("Starting Dual Momentum backtest for RunId: {RunId}", runId);
+
+            await _portfolioManager.Initialize(config.InitialCapital);
+            var allTrades = new ConcurrentBag<TradeSummary>();
+            var riskAssetKellyHalfFractions = new ConcurrentDictionary<string, double>();
+
+            string strategyParametersJson = JsonSerializer.Serialize(config.StrategyParameters);
+            var strategyInstance = _strategyFactory.CreateStrategy<IDualMomentumStrategy>(
+                config.StrategyName, config.InitialCapital, config.StrategyParameters);
+
+            if (strategyInstance == null)
+                throw new InvalidOperationException($"Could not create a valid IDualMomentumStrategy for '{config.StrategyName}'.");
+
+            int lookbackPeriod = config.MomentumLookbackMonths;
+            var testCases = config.RiskAssetSymbols.Select(symbol => new { Symbol = symbol }).ToList();
+
+            var parallelOptions = new ParallelOptions { MaxDegreeOfParallelism = config.MaxParallelism };
+            await Parallel.ForEachAsync(testCases, parallelOptions, async (testCase, cancellationToken) =>
+            {
+                var dmStrategy = strategyInstance as DualMomentumStrategy;
+                if (dmStrategy == null)
+                {
+                    _logger.LogError("RunId: {RunId} - Strategy instance is not a valid DualMomentumStrategy.", runId);
+                    return;
+                }
+
+                var assetDataCache = new Dictionary<string, List<HistoricalPriceModel>>();
+                var allPortfolioAssets = new List<string>(config.RiskAssetSymbols) { config.SafeAssetSymbol };
+                foreach(var symbol in allPortfolioAssets)
+                {
+                    var data = await _historicalPriceService.GetHistoricalPrices(symbol, string.Empty);
+                    assetDataCache[symbol] = data.OrderBy(d => d.Timestamp).ToList();
+                }
+            });
+        }
+
 
         public async Task RunPairsBacktest(PairsBacktestConfiguration config, Guid runId)
         {
@@ -480,7 +547,6 @@ namespace Temperance.Services.BackTesting.Implementations
 
                         if (activePairTrade != null && strategyInstance.ShouldExitPosition(new Position { Direction = activePairTrade.Direction, EntryDate = activePairTrade.EntryDate }, currentBarA, currentBarB, currentIndicatorValues))
                         {
-                            #region Close Position Logic
                             _logger.LogInformation("RunId: {RunId}, Pair: {Pair}, Attempting to close position at Timestamp: {Timestamp}", runId, pairIdentifier, currentBarA.Timestamp);
 
                             var rawExitPriceA = currentBarA.ClosePrice;
@@ -511,11 +577,9 @@ namespace Temperance.Services.BackTesting.Implementations
                             if (finalizedClosedTrade != null)
                             {
                                 allTrades.Add(finalizedClosedTrade);
-                                await _tradesService.SaveBacktestResults(runId, new BacktestResult { Trades = { finalizedClosedTrade } }, pairIdentifier, config.Interval);
                                 _logger.LogInformation("RunId: {RunId}, Pair: {Pair}, Position Closed. PnL: {PnL:C}", runId, pairIdentifier, netProfitLoss);
                             }
                             activePairTrade = null;
-                            #endregion
                         }
 
                         // --- Open Position Logic ---
@@ -555,6 +619,16 @@ namespace Temperance.Services.BackTesting.Implementations
                     _logger.LogError(ex, "RunId: {RunId} - Unhandled error processing pair {Pair}", runId, pairIdentifier);
                 }
                 //});
+            }
+
+            if (allTrades.Any())
+            {
+                foreach (var trade in allTrades)
+                {
+                    trade.RunId = runId;
+                }
+                await _backtestRepository.SaveBacktestTradesAsync(runId, allTrades);
+                _logger.LogInformation("RunId: {RunId} - Saved {TradeCount} trades for pairs backtest.", runId, allTrades.Count);
             }
 
             // --- Finalization ---

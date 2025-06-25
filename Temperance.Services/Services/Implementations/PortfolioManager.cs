@@ -80,6 +80,7 @@ namespace Temperance.Services.Services.Implementations
                 return newPosition;
             });
 
+
             _allocatedCapital += (quantity * entryPrice);
 
             _logger.LogInformation("Opened {Direction} position for {Quantity} shares of {Symbol} at {EntryPrice:C}. Cash: {Cash:C}, Allocated: {Allocated:C}",
@@ -129,7 +130,7 @@ namespace Temperance.Services.Services.Implementations
             _allocatedCapital += (trade.QuantityA * trade.EntryPriceA) + (trade.QuantityB * trade.EntryPriceB);
         }
 
-        public async Task ClosePosition(string strategyName, string symbol, string interval, PositionDirection direction, int quantity, double exitPrice, DateTime exitDate, double transactionCost, double profitLoss)
+        public Task<TradeSummary?> ClosePosition(string strategyName, string symbol, string interval, PositionDirection direction, int quantity, double exitPrice, DateTime exitDate, double transactionCost, double profitLoss)
         {
             if (_openPositions.TryRemove(symbol, out var closedPosition))
             {
@@ -156,10 +157,12 @@ namespace Temperance.Services.Services.Implementations
 
                 _logger.LogInformation("Closed {Direction} position for {Quantity} shares of {Symbol}. Net PnL: {PnL:C}. Total Tx Cost: {TxCost:C}. Current Cash: {Cash:C}, Allocated: {Allocated:C}",
                     direction, quantity, symbol, profitLoss, transactionCost, _currentCash, _allocatedCapital);
+                return Task.FromResult<TradeSummary?>(finalTradeSummary);
             }
             else
             {
                 _logger.LogWarning("Attempted to close position for {Symbol} but no open position found. This might indicate a logic error or out-of-sync state.", symbol);
+                return Task.FromResult<TradeSummary?>(null);
             }
         }
 

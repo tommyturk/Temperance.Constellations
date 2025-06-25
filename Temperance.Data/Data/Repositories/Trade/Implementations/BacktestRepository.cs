@@ -55,9 +55,11 @@ namespace Temperance.Data.Data.Repositories.Trade.Implementations
 
         public async Task SaveBacktestTradesAsync(Guid runId, IEnumerable<TradeSummary> trades)
         {
+            _logger.LogInformation("Attempting to save {TradeCount} backtest trades for run {RunId}.", trades.Count(), runId);
+
             const string sql = @"
-                INSERT INTO Constellations.BacktestTrades (RunId, Symbol, Interval, StrategyName, EntryDate, ExitDate, EntryPrice, ExitPrice, Quantity, Direction, ProfitLoss)
-                VALUES (@RunId, @Symbol, @Interval, @StrategyName, @EntryDate, @ExitDate, @EntryPrice, @ExitPrice, @Quantity, @Direction, @ProfitLoss);";
+                INSERT INTO [TradingBotDb].[Constellations].[BacktestTrades] (RunId, Symbol, Interval, StrategyName, EntryDate, ExitDate, EntryPrice, ExitPrice, Quantity, Direction, ProfitLoss, CreatedAt)
+                VALUES (@RunId, @Symbol, @Interval, @StrategyName, @EntryDate, @ExitDate, @EntryPrice, @ExitPrice, @Quantity, @Direction, @ProfitLoss, @CreatedAt);";
             try
             {
                 using var connection = CreateConnection();
@@ -73,7 +75,8 @@ namespace Temperance.Data.Data.Repositories.Trade.Implementations
                     t.ExitPrice,
                     t.Quantity,
                     t.Direction,
-                    t.ProfitLoss
+                    t.ProfitLoss,
+                    CreatedAt = DateTime.UtcNow,
                 }));
                 _logger.LogInformation("Saved {TradeCount} backtest trades for run {RunId}.", affectedRows, runId);
             }
