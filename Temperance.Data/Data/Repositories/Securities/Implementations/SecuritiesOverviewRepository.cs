@@ -23,24 +23,29 @@ namespace Temperance.Data.Repositories.Securities.Implementations
 
         public async Task<List<SymbolCoverageBacktestModel>> GetSecuritiesForBacktest(List<string> symbols = null)
         {
-            using var connection = new SqlConnection(_connectionString);
+            await using var connection = new SqlConnection(_connectionString);
 
-            var query = @$"SELECT
-                            s.[Symbol],
-                            sdc.[Interval],
-                            MAX(sdc.Year) - MIN(sdc.Year) AS Years
-                        FROM [Historical].[BackFill].[SecurityDataCoverage] AS sdc";
+            var queryBuilder = new System.Text.StringBuilder();
+            queryBuilder.AppendLine("SELECT");
+            queryBuilder.AppendLine("    sdc.[Symbol], -- Use sdc.Symbol as it's the source for coverage");
+            queryBuilder.AppendLine("    sdc.[Interval],");
+            queryBuilder.AppendLine("    MAX(sdc.Year) - MIN(sdc.Year) AS Years");
+            queryBuilder.AppendLine("FROM [Historical].[BackFill].[SecurityDataCoverage] AS sdc");
 
-            var condition = symbols != null && symbols.Count > 0
-                ? $@"WHERE Symbol IN ({string.Join(',', symbols)})"
-                : string.Empty;
+            queryBuilder.AppendLine("LEFT JOIN TradingBotDb.Financials.Securities AS s ON s.Symbol = sdc.Symbol");
 
-            query = query + condition + $@"
-                        LEFT JOIN TradingBotDb.Financials.Securities AS s ON s.Symbol = sdc.Symbol
-                        GROUP BY s.Symbol, sdc.Interval
-                        HAVING  MAX(sdc.Year) - MIN(sdc.Year) > 15;";
+            var parameters = new DynamicParameters();
 
-            return (await connection.QueryAsync<SymbolCoverageBacktestModel>(query)).ToList();
+            if (symbols != null && symbols.Any())
+            {
+                queryBuilder.AppendLine("WHERE sdc.Symbol IN @Symbols");
+                parameters.Add("@Symbols", symbols);
+            }
+
+            queryBuilder.AppendLine("GROUP BY sdc.Symbol, sdc.Interval");
+            queryBuilder.AppendLine("HAVING MAX(sdc.Year) - MIN(sdc.Year) > 15;");
+
+            return (await connection.QueryAsync<SymbolCoverageBacktestModel>(queryBuilder.ToString(), parameters)).ToList();
         }
 
         public async Task<bool> UpdateSecuritiesOverview(int securityId, SecuritiesOverview securitiesOverview)
