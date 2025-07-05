@@ -105,6 +105,8 @@ namespace Temperance.Services.BackTesting.Implementations
 
                 foreach (var testCase in symbolsWithCoverage)
                 {
+                    testCase.Symbol = testCase.Symbol.Trim();
+                    testCase.Interval = testCase.Interval.Trim();
                     string cacheKey = $"{testCase.Symbol}_{testCase.Interval}";
                     var historicalData = await _historicalPriceService.GetHistoricalPrices(testCase.Symbol, testCase.Interval);
                     if (historicalData == null || !historicalData.Any())
@@ -139,7 +141,7 @@ namespace Temperance.Services.BackTesting.Implementations
                 _logger.LogInformation($"RunId: {runId} - Processing {symbolsWithCoverage.Count} Symbol/Interval combinations.", runId, symbolsWithCoverage.Count().ToString());
                 var symbolKellyHalfFractions = new ConcurrentDictionary<string, double>();
 
-                //await Parallel.ForEachAsync(testCases, parallelOptions, async (testCase, cancellationToken) =>
+                //await Parallel.ForEachAsync(symbolsWithCoverage, parallelOptions, async (testCase, cancellationToken) =>
                 //{
                 foreach (var testCase in symbolsWithCoverage)
                 {
@@ -391,7 +393,6 @@ namespace Temperance.Services.BackTesting.Implementations
                     }
                     //});
                 }
-
                 result.Trades.AddRange(_portfolioManager.GetCompletedTradesHistory());
                 result.TotalTrades = result.Trades.Count;
 

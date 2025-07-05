@@ -68,7 +68,7 @@ namespace Temperance.Utilities.Helpers
                         ClosePrice DECIMAL(18,4) NOT NULL,
                         Volume BIGINT NOT NULL,
                         TimeInterval NVARCHAR(50) NOT NULL,
-                        CONSTRAINT PK_{cleanTableName} PRIMARY KEY (PriceId, SecurityID, Symbol, Timestamp)
+                        CONSTRAINT PK_{cleanTableName} PRIMARY KEY (SecurityID, Symbol, Timestamp)
                     )");
                 }
             }
