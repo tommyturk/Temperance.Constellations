@@ -141,9 +141,7 @@ namespace Temperance.Services.BackTesting.Implementations
                 _logger.LogInformation($"RunId: {runId} - Processing {symbolsWithCoverage.Count} Symbol/Interval combinations.", runId, symbolsWithCoverage.Count().ToString());
                 var symbolKellyHalfFractions = new ConcurrentDictionary<string, double>();
 
-                //await Parallel.ForEachAsync(symbolsWithCoverage, parallelOptions, async (testCase, cancellationToken) =>
-                //{
-                foreach (var testCase in symbolsWithCoverage)
+                await Parallel.ForEachAsync(symbolsWithCoverage, parallelOptions, async (testCase, cancellationToken) =>
                 {
                     var symbol = testCase.Symbol;
                     var interval = testCase.Interval;
@@ -391,8 +389,8 @@ namespace Temperance.Services.BackTesting.Implementations
                     {
                         _logger.LogError(ex, "RunId: {RunId} - Error processing {Symbol} [{Interval}]", runId, symbol, interval);
                     }
-                    //});
-                }
+                });
+
                 result.Trades.AddRange(_portfolioManager.GetCompletedTradesHistory());
                 result.TotalTrades = result.Trades.Count;
 
