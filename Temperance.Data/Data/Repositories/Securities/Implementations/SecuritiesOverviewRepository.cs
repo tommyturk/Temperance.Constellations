@@ -2,6 +2,7 @@
 using Microsoft.Data.SqlClient;
 using Temperance.Data.Data.Repositories.Securities.Interfaces;
 using Temperance.Data.Models.HistoricalData;
+using TradingApp.src.Data.Repositories.HistoricalPrices.Interfaces;
 
 namespace Temperance.Data.Repositories.Securities.Implementations
 {
@@ -9,9 +10,11 @@ namespace Temperance.Data.Repositories.Securities.Implementations
     {
         private readonly string _connectionString;
         private static readonly object _lock = new object();
-        public SecuritiesOverviewRepository(string connectionString)
+        private readonly IHistoricalPriceRepository _historicalPriceRepository;
+        public SecuritiesOverviewRepository(string connectionString, IHistoricalPriceRepository historicalPriceRepository)
         {
             _connectionString = connectionString;
+            _historicalPriceRepository = historicalPriceRepository;
         }
 
         public async Task<List<string>> GetSecurities()
@@ -21,31 +24,33 @@ namespace Temperance.Data.Repositories.Securities.Implementations
             return (await connection.QueryAsync<string>(query)).ToList();
         }
 
-        public async Task<List<SymbolCoverageBacktestModel>> GetSecuritiesForBacktest(List<string> symbols = null)
+        public async Task<List<SymbolCoverageBacktestModel>> GetSecuritiesForBacktest(List<string> symbols = null, List<string> intervals = null)
         {
             await using var connection = new SqlConnection(_connectionString);
 
-            var queryBuilder = new System.Text.StringBuilder();
-            queryBuilder.AppendLine("SELECT");
-            queryBuilder.AppendLine("    sdc.[Symbol], -- Use sdc.Symbol as it's the source for coverage");
-            queryBuilder.AppendLine("    sdc.[Interval],");
-            queryBuilder.AppendLine("    MAX(sdc.Year) - MIN(sdc.Year) AS Years");
-            queryBuilder.AppendLine("FROM [Historical].[BackFill].[SecurityDataCoverage] AS sdc");
+            var symbolsWithCoverage = new List<SymbolCoverageBacktestModel>();
 
-            queryBuilder.AppendLine("LEFT JOIN TradingBotDb.Financials.Securities AS s ON s.Symbol = sdc.Symbol");
-
-            var parameters = new DynamicParameters();
-
-            if (symbols != null && symbols.Any())
-            {
-                queryBuilder.AppendLine("WHERE sdc.Symbol IN @Symbols");
-                parameters.Add("@Symbols", symbols);
+            foreach(var symbol in symbols) 
+            { 
+                foreach(var interval in intervals)
+                {
+                    var symbolIntervalData = await _historicalPriceRepository.GetHistoricalPrices(symbol, interval);
+                    var minYear = symbolIntervalData.Min(x => x.Timestamp);
+                    var maxYear = symbolIntervalData.Max(x => x.Timestamp);
+                    if(maxYear.Year - minYear.Year > 15)
+                    {
+                        symbolsWithCoverage.Add(new SymbolCoverageBacktestModel
+                        {
+                            Symbol = symbol,
+                            Interval = interval,
+                            Years = maxYear.Year - minYear.Year
+                        });
+                    }
+                    continue;
+                }
             }
 
-            queryBuilder.AppendLine("GROUP BY sdc.Symbol, sdc.Interval");
-            queryBuilder.AppendLine("HAVING MAX(sdc.Year) - MIN(sdc.Year) > 15;");
-
-            return (await connection.QueryAsync<SymbolCoverageBacktestModel>(queryBuilder.ToString(), parameters)).ToList();
+            return symbolsWithCoverage;
         }
 
         public async Task<bool> UpdateSecuritiesOverview(int securityId, SecuritiesOverview securitiesOverview)

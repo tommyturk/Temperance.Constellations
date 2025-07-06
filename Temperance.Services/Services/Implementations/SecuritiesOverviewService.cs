@@ -26,9 +26,9 @@ namespace Temperance.Services.Services.Implementations
             return await _securitiesOverviewRepository.GetSecurities();
         }
 
-        public async Task<List<SymbolCoverageBacktestModel>> GetSecuritiesForBacktest(List<string> symbols = null)
+        public async Task<List<SymbolCoverageBacktestModel>> GetSecuritiesForBacktest(List<string> symbols = null, List<string> intervals = null)
         {
-            return await _securitiesOverviewRepository.GetSecuritiesForBacktest(symbols);
+            return await _securitiesOverviewRepository.GetSecuritiesForBacktest(symbols, intervals);
         }
 
         public async Task<SecuritySearchResponse> SearchSecuritiesAsync(string query)

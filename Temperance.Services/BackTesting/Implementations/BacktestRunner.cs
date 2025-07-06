@@ -97,7 +97,7 @@ namespace Temperance.Services.BackTesting.Implementations
                 int rollingAdvLookbackBars = 20;
                 int rollingKellyLookbackTrades = 50;
 
-                var symbolsWithCoverage = await _securitiesOverviewService.GetSecuritiesForBacktest(config.Symbols);
+                var symbolsWithCoverage = await _securitiesOverviewService.GetSecuritiesForBacktest(config.Symbols, config.Intervals);
 
                 if (!symbolsWithCoverage.Any()) throw new InvalidOperationException("No symbols specified or found for backtest.");
 
@@ -390,7 +390,6 @@ namespace Temperance.Services.BackTesting.Implementations
                         _logger.LogError(ex, "RunId: {RunId} - Error processing {Symbol} [{Interval}]", runId, symbol, interval);
                     }
                 });
-
                 result.Trades.AddRange(_portfolioManager.GetCompletedTradesHistory());
                 result.TotalTrades = result.Trades.Count;
 

@@ -6,7 +6,7 @@ namespace Temperance.Services.Services.Interfaces
     public interface ISecuritiesOverviewService
     {
         Task<List<string>> GetSecurities();
-        Task<List<SymbolCoverageBacktestModel>> GetSecuritiesForBacktest(List<string> symbol = null);
+        Task<List<SymbolCoverageBacktestModel>> GetSecuritiesForBacktest(List<string> symbol = null, List<string> intervals = null);
         Task<bool> UpdateSecuritiesOverviewData(int securityId, string symbols);
         Task<SecuritySearchResponse> SearchSecuritiesAsync(string query);
         Task<SecuritiesOverview> GetSecurityOverview(string symbol);
