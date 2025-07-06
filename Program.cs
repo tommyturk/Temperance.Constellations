@@ -89,7 +89,8 @@ builder.Services.AddSingleton(sp => "YourConnectionStringHere");
 builder.Services.AddSingleton<ISecuritiesOverviewRepository>(provider =>
 {
     var cs = provider.GetRequiredService<DefaultConnectionString>().Value;
-    return new SecuritiesOverviewRepository(cs);
+    var historicalPriceRepository = provider.GetRequiredService<IHistoricalPriceRepository>();
+    return new SecuritiesOverviewRepository(cs, historicalPriceRepository);
 });
 
 builder.Services.AddSingleton<IHistoricalPriceRepository>(provider =>

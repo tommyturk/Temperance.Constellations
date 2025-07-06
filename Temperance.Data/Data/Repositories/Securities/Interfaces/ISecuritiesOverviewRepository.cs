@@ -7,7 +7,7 @@ namespace Temperance.Data.Data.Repositories.Securities.Interfaces
     {
         Task<List<string>> GetSecurities();
 
-        Task<List<SymbolCoverageBacktestModel>> GetSecuritiesForBacktest(List<string> symbols = null, List<string> intervals);
+        Task<List<SymbolCoverageBacktestModel>> GetSecuritiesForBacktest(List<string> symbols = null, List<string> intervals = null);
 
         Task<bool> UpdateSecuritiesOverview(int securityId, SecuritiesOverview SecuritiesOverview);
 
