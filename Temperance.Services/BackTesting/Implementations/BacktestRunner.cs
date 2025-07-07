@@ -62,6 +62,7 @@ namespace Temperance.Services.BackTesting.Implementations
         [AutomaticRetry(Attempts = 1)]
         public async Task RunBacktest(string configJson, Guid runId)
         {
+            _logger.LogCritical("Run Backtest started");
             var config = JsonSerializer.Deserialize<BacktestConfiguration>(configJson);
             if (config == null)
             {

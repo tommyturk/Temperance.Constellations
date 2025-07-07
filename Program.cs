@@ -151,8 +151,9 @@ builder.Services.AddSingleton<Accelerator>(sp =>
         throw;
     }
 });
+
 builder.Services.AddHangfire(configuration => configuration
-    .SetDataCompatibilityLevel(CompatibilityLevel.Version_170)
+    .SetDataCompatibilityLevel(CompatibilityLevel.Version_180)
     .UseSimpleAssemblyNameTypeSerializer()
     .UseRecommendedSerializerSettings()
     .UseSqlServerStorage(connectionString, new SqlServerStorageOptions
@@ -167,7 +168,7 @@ builder.Services.AddHangfire(configuration => configuration
 
 builder.Services.AddHangfireServer(options =>
 {
-    options.WorkerCount = Environment.ProcessorCount / 4;
+    options.WorkerCount = Environment.ProcessorCount;
     options.Queues = new[] { "default" };
 });
 
