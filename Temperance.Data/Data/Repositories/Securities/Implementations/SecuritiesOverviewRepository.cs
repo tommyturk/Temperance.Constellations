@@ -26,18 +26,24 @@ namespace Temperance.Data.Repositories.Securities.Implementations
 
         public async Task<List<SymbolCoverageBacktestModel>> GetSecuritiesForBacktest(List<string> symbols = null, List<string> intervals = null)
         {
-            await using var connection = new SqlConnection(_connectionString);
+            using var connection = new SqlConnection(_connectionString);
 
             var symbolsWithCoverage = new List<SymbolCoverageBacktestModel>();
 
-            foreach(var symbol in symbols) 
+            if(symbols == null || !symbols.Any())
+                symbols = (await connection.QueryAsync<string>("SELECT DISTINCT Symbol FROM [TradingBotDb].[Financials].[SecuritiesOverview] WHERE MarketCapitalization > 10000000000")).ToList();
+
+            if(intervals == null || !intervals.Any())
+                intervals = new List<string>() { "1min", "5min", "15min", "60min", "1d" };
+
+            foreach (var symbol in symbols) 
             { 
                 foreach(var interval in intervals)
                 {
                     var symbolIntervalData = await _historicalPriceRepository.GetHistoricalPrices(symbol, interval);
                     var minYear = symbolIntervalData.Min(x => x.Timestamp);
                     var maxYear = symbolIntervalData.Max(x => x.Timestamp);
-                    if(maxYear.Year - minYear.Year > 15)
+                    if(maxYear.Year - minYear.Year > 10)
                     {
                         symbolsWithCoverage.Add(new SymbolCoverageBacktestModel
                         {
