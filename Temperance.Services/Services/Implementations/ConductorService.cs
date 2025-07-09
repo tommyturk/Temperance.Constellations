@@ -330,9 +330,9 @@ namespace Temperance.Services.Services.Implementations
             {
                 _logger.LogDebug("Requesting sectors from Conductor API: {Url}", url);
                 var responseString = await _httpClient.GetStringAsync(url);
-                var data = JsonConvert.DeserializeObject<List<string>>(responseString);
-                _logger.LogDebug("Successfully fetched {Count} sectors.", data?.Count ?? 0);
-                return data ?? new List<string>();
+                var result = JsonConvert.DeserializeObject<SectorResponse>(responseString);
+                _logger.LogDebug("Successfully fetched {Count} sectors.", result?.Data?.Count ?? 0);
+                return result?.Data ?? new List<string>();
             }
             catch (Exception ex)
             {
