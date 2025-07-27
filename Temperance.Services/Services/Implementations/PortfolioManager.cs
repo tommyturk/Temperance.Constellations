@@ -1,12 +1,6 @@
-﻿using CsvHelper.Configuration.Attributes;
-using Microsoft.Extensions.Logging;
+﻿using Microsoft.Extensions.Logging;
 using System.Collections.Concurrent;
-using System.ComponentModel;
-using System.Runtime.InteropServices;
-using Temperance.Data.Data.Repositories.Trade.Implementations;
-using Temperance.Data.Data.Repositories.Trade.Interfaces;
 using Temperance.Data.Models.Trading;
-using Temperance.Services.BackTesting.Implementations;
 using Temperance.Services.Services.Interfaces;
 
 namespace Temperance.Services.Services.Implementations
@@ -15,6 +9,7 @@ namespace Temperance.Services.Services.Implementations
     {
         private readonly ILogger<PortfolioManager> _logger;
         private double _initialCapital;
+        private readonly object _lock = new object();
         private double _currentCash;
         private ConcurrentDictionary<string, Position> _openPositions;
         private double _allocatedCapital;
@@ -27,7 +22,7 @@ namespace Temperance.Services.Services.Implementations
             _completedTradesHistory = new List<TradeSummary>();
             _allocatedCapital = 0;
         }
-        
+
         public Task Initialize(double initialCapital)
         {
             _initialCapital = initialCapital;
@@ -48,122 +43,133 @@ namespace Temperance.Services.Services.Implementations
         public Task<bool> CanOpenPosition(double allocationAmount)
         {
             bool canAfford = _currentCash >= allocationAmount;
-            if(!canAfford) _logger.LogDebug("Insufficient funds to open position. Required: {AllocationAmount}, Available: {AvailableCash}", allocationAmount, _currentCash);
+            if (!canAfford) _logger.LogDebug("Insufficient funds to open position. Required: {AllocationAmount}, Available: {AvailableCash}", allocationAmount, _currentCash);
 
             return Task.FromResult(canAfford);
         }
 
         public async Task OpenPosition(string symbol, string interval, PositionDirection direction, int quantity, double entryPrice, DateTime entryDate, double transactionCost)
         {
-            double totalCashOutlay = (quantity * entryPrice) + transactionCost;
-
-            if (_currentCash < totalCashOutlay)
+            lock (_lock)
             {
-                _logger.LogError("Attempted to open position for {Symbol} but insufficient cash in PortfolioManager. This indicates a prior `CanOpenPosition` check failed or was not called. Cash: {Cash:C}, Cost: {Cost:C}", symbol, _currentCash, totalCashOutlay);
-                throw new InvalidOperationException("Insufficient cash to open position. This should have been pre-checked.");
+                double totalCashOutlay = (quantity * entryPrice) + transactionCost;
+
+                if (_currentCash < totalCashOutlay)
+                {
+                    _logger.LogError("Attempted to open position for {Symbol} but insufficient cash in PortfolioManager. This indicates a prior `CanOpenPosition` check failed or was not called. Cash: {Cash:C}, Cost: {Cost:C}", symbol, _currentCash, totalCashOutlay);
+                    throw new InvalidOperationException("Insufficient cash to open position. This should have been pre-checked.");
+                }
+
+                _currentCash -= totalCashOutlay;
+
+                var newPosition = new Position
+                {
+                    Symbol = symbol,
+                    Direction = direction,
+                    Quantity = quantity,
+                    EntryPrice = entryPrice,
+                    EntryDate = entryDate
+                };
+
+                _openPositions.AddOrUpdate(symbol, newPosition, (key, existingVal) =>
+                {
+                    _logger.LogWarning("Overwriting existing open position for {Symbol}. This should generally not happen in a single-position-per-symbol strategy.", symbol);
+                    return newPosition;
+                });
+
+
+                _allocatedCapital += (quantity * entryPrice);
+
+                _logger.LogInformation("Opened {Direction} position for {Quantity} shares of {Symbol} at {EntryPrice:C}. Cash: {Cash:C}, Allocated: {Allocated:C}",
+                    direction, quantity, symbol, entryPrice, _currentCash, _allocatedCapital);
             }
-
-            _currentCash -= totalCashOutlay;
-
-            var newPosition = new Position
-            {
-                Symbol = symbol,
-                Direction = direction,
-                Quantity = quantity,
-                EntryPrice = entryPrice,
-                EntryDate = entryDate
-            };
-
-            _openPositions.AddOrUpdate(symbol, newPosition, (key, existingVal) =>
-            {
-                _logger.LogWarning("Overwriting existing open position for {Symbol}. This should generally not happen in a single-position-per-symbol strategy.", symbol);
-                return newPosition;
-            });
-
-
-            _allocatedCapital += (quantity * entryPrice);
-
-            _logger.LogInformation("Opened {Direction} position for {Quantity} shares of {Symbol} at {EntryPrice:C}. Cash: {Cash:C}, Allocated: {Allocated:C}",
-                direction, quantity, symbol, entryPrice, _currentCash, _allocatedCapital);
         }
 
         public async Task OpenPairPosition(string strategyName, string pairIdentifier, string interval, ActivePairTrade trade)
         {
-            double totalCashOutlay = (trade.QuantityA * trade.EntryPriceA ) + (trade.QuantityB * trade.EntryPriceB)
-                + trade.TotalEntryTransactionCost;
-
-            if (_currentCash < totalCashOutlay)
+            lock (_lock)
             {
-                throw new InvalidOperationException($"Insufficient cash to open pair position for {pairIdentifier}. Required: {totalCashOutlay:C}, Available: {_currentCash:C}.");
+
+                double totalCashOutlay = (trade.QuantityA * trade.EntryPriceA) + (trade.QuantityB * trade.EntryPriceB)
+                    + trade.TotalEntryTransactionCost;
+
+                if (_currentCash < totalCashOutlay)
+                {
+                    throw new InvalidOperationException($"Insufficient cash to open pair position for {pairIdentifier}. Required: {totalCashOutlay:C}, Available: {_currentCash:C}.");
+                }
+
+                _currentCash -= totalCashOutlay;
+
+                var positionA = new Position
+                {
+                    Symbol = trade.SymbolA,
+                    Quantity = (int)trade.QuantityA,
+                    Direction = trade.Direction == PositionDirection.Long ? PositionDirection.Long : PositionDirection.Short,
+                    EntryPrice = trade.EntryPriceA,
+                    EntryDate = trade.EntryDate,
+                };
+
+                var positionB = new Position
+                {
+                    Symbol = trade.SymbolB,
+                    Quantity = (int)trade.QuantityB,
+                    Direction = trade.Direction == PositionDirection.Long ? PositionDirection.Short : PositionDirection.Long,
+                    EntryPrice = trade.EntryPriceB,
+                    EntryDate = trade.EntryDate,
+                };
+
+                _openPositions.AddOrUpdate(positionA.Symbol, positionA, (key, existingVal) =>
+                {
+                    return positionA;
+                });
+                _openPositions.AddOrUpdate(positionB.Symbol, positionB, (key, existingVal) =>
+                {
+                    return positionB;
+                });
+
+                double totalValue = (positionA.EntryPrice * positionA.Quantity) + (positionB.EntryPrice * positionB.Quantity);
+                _allocatedCapital += (trade.QuantityA * trade.EntryPriceA) + (trade.QuantityB * trade.EntryPriceB);
             }
-
-            _currentCash -= totalCashOutlay;
-
-            var positionA = new Position
-            {
-                Symbol = trade.SymbolA,
-                Quantity = (int)trade.QuantityA,
-                Direction = trade.Direction == PositionDirection.Long ? PositionDirection.Long : PositionDirection.Short,
-                EntryPrice = trade.EntryPriceA,
-                EntryDate = trade.EntryDate,
-            };
-
-            var positionB = new Position
-            {
-                Symbol = trade.SymbolB,
-                Quantity = (int)trade.QuantityB,
-                Direction = trade.Direction == PositionDirection.Long ? PositionDirection.Short : PositionDirection.Long,
-                EntryPrice = trade.EntryPriceB,
-                EntryDate = trade.EntryDate,
-            };
-
-            _openPositions.AddOrUpdate(positionA.Symbol, positionA, (key, existingVal) =>
-            {
-                return positionA;
-            });
-            _openPositions.AddOrUpdate(positionB.Symbol, positionB, (key, existingVal) =>
-            {
-                return positionB;
-            });
-
-            double totalValue = (positionA.EntryPrice * positionA.Quantity) + (positionB.EntryPrice * positionB.Quantity);
-            _allocatedCapital += (trade.QuantityA * trade.EntryPriceA) + (trade.QuantityB * trade.EntryPriceB);
         }
 
         public Task<TradeSummary?> ClosePosition(string strategyName, string symbol, string interval, PositionDirection direction, int quantity, double exitPrice, DateTime exitDate, double transactionCost, double profitLoss)
         {
-            if (_openPositions.TryRemove(symbol, out var closedPosition))
+            lock (_lock)
             {
-                _allocatedCapital -= (closedPosition.Quantity * closedPosition.EntryPrice);
-
-                _currentCash += profitLoss;
-
-                var finalTradeSummary = new TradeSummary
+                if (_openPositions.TryRemove(symbol, out var closedPosition))
                 {
-                    StrategyName = strategyName,
-                    EntryDate = closedPosition.EntryDate,
-                    EntryPrice = closedPosition.EntryPrice,
-                    ExitDate = exitDate,
-                    ExitPrice = exitPrice,
-                    Direction = direction == PositionDirection.Long ? "Long" : "Short",
-                    Quantity = quantity,
-                    ProfitLoss = profitLoss,
-                    Symbol = symbol,
-                    Interval = interval,
-                    TransactionCost = transactionCost
-                };
+                    _allocatedCapital -= (closedPosition.Quantity * closedPosition.EntryPrice);
 
-                _completedTradesHistory.Add(finalTradeSummary);
+                    _currentCash += profitLoss;
 
-                _logger.LogInformation("Closed {Direction} position for {Quantity} shares of {Symbol}. Net PnL: {PnL:C}. Total Tx Cost: {TxCost:C}. Current Cash: {Cash:C}, Allocated: {Allocated:C}",
-                    direction, quantity, symbol, profitLoss, transactionCost, _currentCash, _allocatedCapital);
-                return Task.FromResult<TradeSummary?>(finalTradeSummary);
+                    var finalTradeSummary = new TradeSummary
+                    {
+                        StrategyName = strategyName,
+                        EntryDate = closedPosition.EntryDate,
+                        EntryPrice = closedPosition.EntryPrice,
+                        ExitDate = exitDate,
+                        ExitPrice = exitPrice,
+                        Direction = direction == PositionDirection.Long ? "Long" : "Short",
+                        Quantity = quantity,
+                        ProfitLoss = profitLoss,
+                        Symbol = symbol,
+                        Interval = interval,
+                        TransactionCost = transactionCost
+                    };
+
+                    _completedTradesHistory.Add(finalTradeSummary);
+
+                    _logger.LogInformation("Closed {Direction} position for {Quantity} shares of {Symbol}. Net PnL: {PnL:C}. Total Tx Cost: {TxCost:C}. Current Cash: {Cash:C}, Allocated: {Allocated:C}",
+                        direction, quantity, symbol, profitLoss, transactionCost, _currentCash, _allocatedCapital);
+                    return Task.FromResult<TradeSummary?>(finalTradeSummary);
+                }
+                else
+                {
+                    _logger.LogWarning("Attempted to close position for {Symbol} but no open position found. This might indicate a logic error or out-of-sync state.", symbol);
+                    return Task.FromResult<TradeSummary?>(null);
+                }
             }
-            else
-            {
-                _logger.LogWarning("Attempted to close position for {Symbol} but no open position found. This might indicate a logic error or out-of-sync state.", symbol);
-                return Task.FromResult<TradeSummary?>(null);
-            }
+
         }
 
         public Task<TradeSummary?> ClosePairPosition(
@@ -199,11 +205,11 @@ namespace Temperance.Services.Services.Implementations
             var positionBValue = positionB.Value;
 
             // 4. Calculate P&L internally to ensure data integrity. This should match the runner's calculation.
-            double pnlA = (positionAValue.Direction == PositionDirection.Long) 
-                ? (exitPriceA - positionAValue.EntryPrice) * positionAValue.Quantity 
+            double pnlA = (positionAValue.Direction == PositionDirection.Long)
+                ? (exitPriceA - positionAValue.EntryPrice) * positionAValue.Quantity
                 : (positionAValue.EntryPrice - exitPriceA) * positionAValue.Quantity;
-            double pnlB = (positionBValue.Direction == PositionDirection.Long) 
-                ? (exitPriceB - positionBValue.EntryPrice) * positionBValue.Quantity 
+            double pnlB = (positionBValue.Direction == PositionDirection.Long)
+                ? (exitPriceB - positionBValue.EntryPrice) * positionBValue.Quantity
                 : (positionBValue.EntryPrice - exitPriceB) * positionBValue.Quantity;
             double totalTransactionCost = activeTrade.TotalEntryTransactionCost + totalExitTransactionCost;
             double netProfitLoss = (pnlA + pnlB) - totalTransactionCost;

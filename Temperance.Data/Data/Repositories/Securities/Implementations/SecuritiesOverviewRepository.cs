@@ -10,11 +10,9 @@ namespace Temperance.Data.Repositories.Securities.Implementations
     {
         private readonly string _connectionString;
         private static readonly object _lock = new object();
-        private readonly IHistoricalPriceRepository _historicalPriceRepository;
-        public SecuritiesOverviewRepository(string connectionString, IHistoricalPriceRepository historicalPriceRepository)
+        public SecuritiesOverviewRepository(string connectionString)
         {
             _connectionString = connectionString;
-            _historicalPriceRepository = historicalPriceRepository;
         }
 
         public async Task<List<string>> GetSecurities()
@@ -28,35 +26,28 @@ namespace Temperance.Data.Repositories.Securities.Implementations
         {
             using var connection = new SqlConnection(_connectionString);
 
-            var symbolsWithCoverage = new List<SymbolCoverageBacktestModel>();
-
             if(symbols == null || !symbols.Any())
                 symbols = (await connection.QueryAsync<string>("SELECT DISTINCT Symbol FROM [TradingBotDb].[Financials].[SecuritiesOverview] WHERE MarketCapitalization > 10000000000")).ToList();
 
             if(intervals == null || !intervals.Any())
                 intervals = new List<string>() { "1min", "5min", "15min", "60min", "1d" };
 
-            foreach (var symbol in symbols) 
-            { 
+            List<SymbolCoverageBacktestModel> backtestModel = new List<SymbolCoverageBacktestModel>();
+
+            foreach(var symbol in symbols)
+            {
                 foreach(var interval in intervals)
                 {
-                    var symbolIntervalData = await _historicalPriceRepository.GetHistoricalPrices(symbol, interval);
-                    var minYear = symbolIntervalData.Min(x => x.Timestamp);
-                    var maxYear = symbolIntervalData.Max(x => x.Timestamp);
-                    if(maxYear.Year - minYear.Year > 10)
+                    var backtestItem = new SymbolCoverageBacktestModel()
                     {
-                        symbolsWithCoverage.Add(new SymbolCoverageBacktestModel
-                        {
-                            Symbol = symbol,
-                            Interval = interval,
-                            Years = maxYear.Year - minYear.Year
-                        });
-                    }
-                    continue;
+                        Symbol = symbol,
+                        Interval = interval
+                    };
+
+                    backtestModel.Add(backtestItem);
                 }
             }
-
-            return symbolsWithCoverage;
+            return backtestModel;
         }
 
         public async Task<bool> UpdateSecuritiesOverview(int securityId, SecuritiesOverview securitiesOverview)

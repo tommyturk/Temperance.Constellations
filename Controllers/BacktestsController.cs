@@ -5,6 +5,7 @@ using Temperance.Data.Models.Backtest;
 using Temperance.Services.BackTesting.Interfaces;
 using Temperance.Services.Factories.Interfaces;
 using Temperance.Data.Models.Strategy;
+using Temperance.Services.Services.Interfaces;
 
 namespace Temperance.Constellations.Controllers
 {
@@ -31,21 +32,14 @@ namespace Temperance.Constellations.Controllers
         [ProducesResponseType(StatusCodes.Status400BadRequest)]
         public async Task<IActionResult> StartBackTest([FromBody] BacktestConfiguration configuration)
         {
-            if (configuration == null || string.IsNullOrWhiteSpace(configuration.StrategyName))
-                return BadRequest("Invalid configuration: StrategyName is required.");
-
             var runId = Guid.NewGuid();
-
             await _tradeService.InitializeBacktestRunAsync(configuration, runId);
-
             string configJson = System.Text.Json.JsonSerializer.Serialize(configuration);
-
             var jobId = _backgroundJobClient.Enqueue<IBacktestRunner>(runner =>
-                           runner.RunBacktest(configJson, runId));
-
+                                runner.RunBacktest(configJson, runId));
             _logger.LogInformation("Enqueued backtest RunId: {RunId}, Hangfire JobId: {JobId}", runId, jobId);
-
             return Accepted(new { BacktestRunId = runId, JobId = jobId });
+            
         }
 
         [HttpPost("start-pairs")]

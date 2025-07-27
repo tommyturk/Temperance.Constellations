@@ -49,51 +49,34 @@ builder.Services.AddControllers()
 builder.Services.Configure<ConductorSettings>(builder.Configuration.GetSection("ConductorSettings"));
 builder.Services.AddSingleton(sp => sp.GetRequiredService<IOptions<ConductorSettings>>().Value);
 
-builder.Services.AddScoped<IHistoricalPriceService, HistoricalPriceService>();
-builder.Services.AddScoped<ISecuritiesOverviewService, SecuritiesOverviewService>();
-builder.Services.AddScoped<IHistoricalPriceRepository, HistoricalPriceRepository>();
 builder.Services.AddHttpClient<IAlphaVantageService, AlphaVantageService>();
 
 builder.Services.AddSingleton(new DefaultConnectionString(connectionString));
 builder.Services.AddSingleton(new HistoricalPriceConnectionString(historicalConnectionString));
 
-builder.Services.AddSingleton<IStrategyFactory, StrategyFactory>();
-builder.Services.AddScoped<IPerformanceCalculator, PerformanceCalculator>();
+builder.Services.AddTransient<IHangfireTestService, HangfireTestService>();
+
+builder.Services.AddTransient<IEarningsService, EarningsService>();
+builder.Services.AddTransient<IStrategyFactory, StrategyFactory>();
+builder.Services.AddTransient<IPerformanceCalculator, PerformanceCalculator>();
 builder.Services.AddScoped<IBacktestRunner, BacktestRunner>();
-builder.Services.AddSingleton<ISecuritiesOverviewRepository, SecuritiesOverviewRepository>();
-builder.Services.AddScoped<IHistoricalPriceService, HistoricalPriceService>();
-builder.Services.AddSingleton<ITransactionCostService, TransactionCostService>();
-builder.Services.AddScoped<ILiquidityService, LiquidityService>();
-builder.Services.AddScoped<IGpuIndicatorService, GpuIndicatorService>();
-builder.Services.AddScoped<IPortfolioManager, PortfolioManager>();
-builder.Services.AddScoped<ISecuritiesOverviewService, SecuritiesOverviewService>();
-builder.Services.AddScoped<IAlphaVantageService, AlphaVantageService>();
-builder.Services.AddScoped<IEarningsService, EarningsService>();
-builder.Services.AddScoped<IBalanceSheetService, BalanceSheetService>();
-builder.Services.AddScoped<IPriceService, PriceService>();
-builder.Services.AddScoped<IHistoricalPriceService, HistoricalPriceService>();
-builder.Services.AddScoped<IEarningsRepository, EarningsRepository>();
-builder.Services.AddScoped<IBalanceSheetRepository, BalanceSheetRepository>();
-builder.Services.AddScoped<ITradeRepository>(provider =>
-    new TradeRepository(
-        historicalConnectionString,
-        provider.GetRequiredService<ILogger<TradeRepository>>()
-    ));
-
-builder.Services.AddSingleton<IConductorService, ConductorService>();
-
-builder.Services.AddScoped<ITradeService, TradesService>();
-
-builder.Services.AddSingleton(sp => "YourConnectionStringHere");
-
-builder.Services.AddSingleton<ISecuritiesOverviewRepository>(provider =>
+builder.Services.AddTransient<ITransactionCostService, TransactionCostService>();
+builder.Services.AddTransient<ILiquidityService, LiquidityService>();
+builder.Services.AddTransient<IGpuIndicatorService, GpuIndicatorService>();
+builder.Services.AddTransient<IPortfolioManager, PortfolioManager>();
+builder.Services.AddTransient<ISecuritiesOverviewService, SecuritiesOverviewService>();
+builder.Services.AddTransient<IBalanceSheetService, BalanceSheetService>();
+builder.Services.AddTransient<IPriceService, PriceService>();
+builder.Services.AddTransient<IHistoricalPriceService, HistoricalPriceService>();
+builder.Services.AddTransient<IConductorService, ConductorService>();
+builder.Services.AddTransient<ITradeService, TradesService>();
+builder.Services.AddTransient<ISecuritiesOverviewRepository>(provider =>
 {
     var cs = provider.GetRequiredService<DefaultConnectionString>().Value;
-    var historicalPriceRepository = provider.GetRequiredService<IHistoricalPriceRepository>();
-    return new SecuritiesOverviewRepository(cs, historicalPriceRepository);
+    return new SecuritiesOverviewRepository(cs);
 });
 
-builder.Services.AddSingleton<IHistoricalPriceRepository>(provider =>
+builder.Services.AddTransient<IHistoricalPriceRepository>(provider =>
 {
     var historicalConnectionString = provider.GetRequiredService<HistoricalPriceConnectionString>().Value;
     var sqlHelper = provider.GetRequiredService<ISqlHelper>();
@@ -101,18 +84,32 @@ builder.Services.AddSingleton<IHistoricalPriceRepository>(provider =>
     return new HistoricalPriceRepository(historicalConnectionString, securitiesOverviewRepository, sqlHelper);
 });
 
-builder.Services.AddSingleton<IBacktestRepository>(provider =>
+builder.Services.AddTransient<IEarningsRepository>(provider =>
+{
+    var connectionString = provider.GetRequiredService<DefaultConnectionString>().Value;
+
+    return new EarningsRepository(connectionString);
+});
+
+builder.Services.AddTransient<IBalanceSheetRepository>(provider =>
+{
+    var connectionString = provider.GetRequiredService<DefaultConnectionString>().Value;
+
+    return new BalanceSheetRepository(connectionString);
+});
+
+builder.Services.AddTransient<IBacktestRepository>(provider =>
 {
     var cs = provider.GetRequiredService<DefaultConnectionString>().Value;
     var logger = provider.GetRequiredService<ILogger<BacktestRepository>>();
     return new BacktestRepository(cs, logger);
 });
 
-builder.Services.AddSingleton<ITradeRepository>(provider =>
+builder.Services.AddTransient<ITradeRepository>(provider =>
 {
-    var cs = provider.GetRequiredService<DefaultConnectionString>().Value;
+    var connectionString = provider.GetRequiredService<DefaultConnectionString>().Value;
     var logger = provider.GetRequiredService<ILogger<TradeRepository>>();
-    return new TradeRepository(cs, logger);
+    return new TradeRepository(connectionString, logger);
 });
 
 builder.Services.AddSingleton<ISqlHelper>(provider =>

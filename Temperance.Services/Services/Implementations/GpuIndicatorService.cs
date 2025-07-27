@@ -17,7 +17,7 @@ namespace Temperance.Services.Services.Implementations
             _accelerator = accelerator;
             _logger = logger;
         }
-       
+
         public double[] CalculateSma(double[] prices, int period)
         {
             var output = new double[prices.Length];
@@ -35,7 +35,7 @@ namespace Temperance.Services.Services.Implementations
 
         public double[] CalculateStdDev(double[] prices, int period)
         {
-            if(_accelerator == null) throw new InvalidOperationException("GPU accelerator is not initialized.");
+            if (_accelerator == null) throw new InvalidOperationException("GPU accelerator is not initialized.");
             if (prices == null || prices.Length < period) return new double[prices.Length];
 
             var pricesAsDouble = Array.ConvertAll(prices, p => (double)p);

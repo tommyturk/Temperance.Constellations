@@ -14,7 +14,6 @@ namespace Temperance.Services.Factories.Implementations
         private readonly Dictionary<string, Type> _strategyRegistry;
         private readonly ILogger<StrategyFactory> _logger;
 
-
         private void RegisterStrategies()
         {
             _strategyRegistry.Add("MeanReversion_BB_RSI", typeof(MeanReversionStrategy));

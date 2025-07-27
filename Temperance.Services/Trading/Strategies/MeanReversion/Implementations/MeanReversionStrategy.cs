@@ -39,7 +39,7 @@ namespace Temperance.Services.Trading.Strategies.MeanReversion.Implementation
             { "RSIPeriod", 14 },
             { "RSIOversold", 30m },
             { "RSIOverbought", 70m },
-            {"MinimumAverageDailyVolume", 750000m }
+            { "MinimumAverageDailyVolume", 750000m }
         };
 
         public void Initialize(double initialCapital, Dictionary<string, object> parameters)
@@ -180,8 +180,8 @@ namespace Temperance.Services.Trading.Strategies.MeanReversion.Implementation
             double currentTotalEquity,
             double kellyHalfFraction)
         {
-            if (historicalDataWindow.Count < _movingAveragePeriod || historicalDataWindow.Count < _rsiPeriod + 1)
-                return 0; 
+            if (historicalDataWindow.Count < GetRequiredLookbackPeriod())
+                return 0;
 
             var bbWindowPrices = historicalDataWindow.TakeLast(_movingAveragePeriod).Select(h => h.ClosePrice).ToList();
             if (bbWindowPrices.Count < _movingAveragePeriod)
@@ -230,6 +230,8 @@ namespace Temperance.Services.Trading.Strategies.MeanReversion.Implementation
                 return 0;
 
             double kellySizedAllocation = currentTotalEquity * kellyHalfFraction;
+            _logger.LogInformation($"Calculating Kelly: CurrentTotalEquity = {currentTotalEquity}, Kelly Half fraction = {kellyHalfFraction}; KellySizedAllocation = {kellySizedAllocation}");
+            
             if (kellySizedAllocation < 0) kellySizedAllocation = 0;
 
             double finalAllocationAmount = Math.Min(
