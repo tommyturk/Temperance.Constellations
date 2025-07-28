@@ -1,5 +1,4 @@
-﻿using Azure.Identity;
-using Microsoft.Extensions.Logging;
+﻿using Microsoft.Extensions.Logging;
 using Temperance.Data.Models.Trading;
 using Temperance.Services.Services.Interfaces;
 
@@ -8,7 +7,10 @@ namespace Temperance.Services.Services.Implementations
     public class TransactionCostService : ITransactionCostService
     {
         private readonly ILogger<TransactionCostService> _logger;
-        private readonly double _defaultSpreadPercentage = 0.0005;
+        private readonly double _defaultSpreadPercentage = 0.0005; // 0.05%
+        private readonly double _defaultCommissionPercentage = 0.0001; // 0.01%
+        private readonly double _defaultSlippagePercentage = 0.0002; // 0.02%
+        private readonly double _defaultOtherCostPercentage = 0.00005; // 0.005%
 
         public TransactionCostService(ILogger<TransactionCostService> logger)
         {
@@ -56,12 +58,7 @@ namespace Temperance.Services.Services.Implementations
             double totalSpreadCost = spreadAmount * quantity;
             return Task.FromResult(totalSpreadCost);
         }
-        public async Task<double> CalculateTotalTradeCost(double entryPrice, double exitPrice, SignalDecision entrySignal, PositionDirection exitPositionDirection, int quantity, string symbol, string interval, DateTime entryTimestamp, DateTime exitTimestamp)
-        {
-            double entrySpreadCost = await GetSpreadCost(entryPrice, quantity, symbol, interval, entryTimestamp);
-            double exitSpreadCost = await GetSpreadCost(exitPrice, quantity, symbol, interval, exitTimestamp);
-            return entrySpreadCost + exitSpreadCost;
-        }
+
         public double CalculateEntryCost(double entryPrice, SignalDecision signal)
         {
             double spreadAmount = entryPrice * _defaultSpreadPercentage;
@@ -100,6 +97,35 @@ namespace Temperance.Services.Services.Implementations
                 return (entryPrice - effectiveEntryPrice) + (effectiveExitPrice - exitPrie) * quantity;
             else
                 return (effectiveEntryPrice - entryPrice) + (exitPrie - effectiveExitPrice) * quantity;
+        }
+
+        public async Task<double> CalculateTotalTradeCost(double entryPrice, double exitPrice, SignalDecision entrySignal, PositionDirection exitPositionDirection, double quantity, string symbol, string interval, DateTime entryTimestamp, DateTime exitTimestamp)
+        {
+            double entrySpreadCost = await GetSpreadCost(entryPrice, quantity, symbol, interval, entryTimestamp);
+            double exitSpreadCost = await GetSpreadCost(exitPrice, quantity, symbol, interval, exitTimestamp);
+            double commission = await CalculateCommissionCost(entryPrice, quantity, symbol, interval, entryTimestamp) +
+                                await CalculateCommissionCost(exitPrice, quantity, symbol, interval, exitTimestamp);
+            double slippage = await CalculateSlippageCost(entryPrice, quantity, entrySignal == SignalDecision.Buy ? PositionDirection.Long : PositionDirection.Short, symbol, interval, entryTimestamp) +
+                              await CalculateSlippageCost(exitPrice, quantity, exitPositionDirection, symbol, interval, exitTimestamp);
+            double otherCosts = await CalculateOtherCost(entryPrice, quantity, symbol, interval, entryTimestamp) +
+                                await CalculateOtherCost(exitPrice, quantity, symbol, interval, exitTimestamp);
+
+            return entrySpreadCost + exitSpreadCost + commission + slippage + otherCosts;
+        }
+
+        public Task<double> CalculateCommissionCost(double price, double quantity, string symbol, string interval, DateTime timestamp)
+        {
+            return Task.FromResult(price * quantity * _defaultCommissionPercentage);
+        }
+
+        public Task<double> CalculateSlippageCost(double price, double quantity, PositionDirection direction, string symbol, string interval, DateTime timestamp)
+        {
+            return Task.FromResult(price * quantity * _defaultSlippagePercentage);
+        }
+
+        public Task<double> CalculateOtherCost(double price, double quantity, string symbol, string interval, DateTime timestamp)
+        {
+            return Task.FromResult(price * quantity * _defaultOtherCostPercentage);
         }
     }
 }

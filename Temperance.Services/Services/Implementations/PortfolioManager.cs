@@ -85,6 +85,45 @@ namespace Temperance.Services.Services.Implementations
             }
         }
 
+        public async Task OpenPosition(string symbol, string interval, PositionDirection direction, int quantity, double entryPrice, DateTime entryDate,
+                                       double spreadCost, double commissionCost, double slippageCost, double otherCost, string entryReason)
+        {
+            lock (_lock)
+            {
+                double totalTransactionCost = spreadCost + commissionCost + slippageCost + otherCost;
+                double totalCashOutlay = (quantity * entryPrice) + totalTransactionCost;
+
+                if (_currentCash < totalCashOutlay)
+                {
+                    _logger.LogError("Attempted to open position for {Symbol} but insufficient cash in PortfolioManager. This indicates a prior `CanOpenPosition` check failed or was not called. Cash: {Cash:C}, Cost: {Cost:C}", symbol, _currentCash, totalCashOutlay);
+                    throw new InvalidOperationException("Insufficient cash to open position. This should have been pre-checked.");
+                }
+
+                _currentCash -= totalCashOutlay;
+
+                var newPosition = new Position
+                {
+                    Symbol = symbol,
+                    Direction = direction,
+                    Quantity = quantity,
+                    EntryPrice = entryPrice,
+                    EntryDate = entryDate,
+                    EntryReason = entryReason 
+                };
+
+                _openPositions.AddOrUpdate(symbol, newPosition, (key, existingVal) =>
+                {
+                    _logger.LogWarning("Overwriting existing open position for {Symbol}. This should generally not happen in a single-position-per-symbol strategy.", symbol);
+                    return newPosition;
+                });
+
+                _allocatedCapital += (quantity * entryPrice);
+
+                _logger.LogInformation("Opened {Direction} position for {Quantity} shares of {Symbol} at {EntryPrice:C}. Cash: {Cash:C}, Allocated: {Allocated:C}",
+                    direction, quantity, symbol, entryPrice, _currentCash, _allocatedCapital);
+            }
+        }
+
         public async Task OpenPairPosition(string strategyName, string pairIdentifier, string interval, ActivePairTrade trade)
         {
             lock (_lock)
@@ -132,7 +171,10 @@ namespace Temperance.Services.Services.Implementations
             }
         }
 
-        public Task<TradeSummary?> ClosePosition(string strategyName, string symbol, string interval, PositionDirection direction, int quantity, double exitPrice, DateTime exitDate, double transactionCost, double profitLoss)
+        public Task<TradeSummary?> ClosePosition(string strategyName, string symbol, string interval, PositionDirection direction, int quantity, double exitPrice, DateTime exitDate,
+                                                 double entrySpreadCost, double entryCommissionCost, double entrySlippageCost, double entryOtherCost,
+                                                 double exitSpreadCost, double exitCommissionCost, double exitSlippageCost, double exitOtherCost,
+                                                 double grossProfitLoss, int holdingPeriodMinutes, double maxAdverseExcursion, double maxFavorableExcursion, string exitReason)
         {
             lock (_lock)
             {
@@ -140,7 +182,12 @@ namespace Temperance.Services.Services.Implementations
                 {
                     _allocatedCapital -= (closedPosition.Quantity * closedPosition.EntryPrice);
 
-                    _currentCash += profitLoss;
+                    double totalTransactionCost = entrySpreadCost + entryCommissionCost + entrySlippageCost + entryOtherCost +
+                                                  exitSpreadCost + exitCommissionCost + exitSlippageCost + exitOtherCost;
+
+                    double netProfitLoss = grossProfitLoss - totalTransactionCost;
+
+                    _currentCash += netProfitLoss;
 
                     var finalTradeSummary = new TradeSummary
                     {
@@ -151,16 +198,29 @@ namespace Temperance.Services.Services.Implementations
                         ExitPrice = exitPrice,
                         Direction = direction == PositionDirection.Long ? "Long" : "Short",
                         Quantity = quantity,
-                        ProfitLoss = profitLoss,
+                        ProfitLoss = netProfitLoss,
+                        CreatedDate = DateTime.UtcNow,
+
+                        CommissionCost = entryCommissionCost + exitCommissionCost,
+                        SlippageCost = entrySlippageCost + exitSlippageCost,
+                        OtherTransactionCost = entryOtherCost + exitOtherCost + entrySpreadCost + exitSpreadCost,
+                        TotalTransactionCost = totalTransactionCost,
+
+                        GrossProfitLoss = grossProfitLoss,
+                        HoldingPeriodMinutes = holdingPeriodMinutes,
+                        MaxAdverseExcursion = maxAdverseExcursion,
+                        MaxFavorableExcursion = maxFavorableExcursion,
+                        EntryReason = closedPosition.EntryReason,
+                        ExitReason = exitReason,
+
                         Symbol = symbol,
-                        Interval = interval,
-                        TransactionCost = transactionCost
+                        Interval = interval
                     };
 
                     _completedTradesHistory.Add(finalTradeSummary);
 
-                    _logger.LogInformation("Closed {Direction} position for {Quantity} shares of {Symbol}. Net PnL: {PnL:C}. Total Tx Cost: {TxCost:C}. Current Cash: {Cash:C}, Allocated: {Allocated:C}",
-                        direction, quantity, symbol, profitLoss, transactionCost, _currentCash, _allocatedCapital);
+                    _logger.LogInformation("Closed {Direction} position for {Quantity} shares of {Symbol}. Net PnL: {NetPnL:C}. Gross PnL: {GrossPnL:C}. Total Tx Cost: {TxCost:C}. Current Cash: {Cash:C}, Allocated: {Allocated:C}",
+                        direction, quantity, symbol, netProfitLoss, grossProfitLoss, totalTransactionCost, _currentCash, _allocatedCapital);
                     return Task.FromResult<TradeSummary?>(finalTradeSummary);
                 }
                 else
@@ -169,16 +229,19 @@ namespace Temperance.Services.Services.Implementations
                     return Task.FromResult<TradeSummary?>(null);
                 }
             }
-
         }
 
         public Task<TradeSummary?> ClosePairPosition(
-        ActivePairTrade activeTrade,
-        double exitPriceA,
-        double exitPriceB,
-        DateTime exitTimestamp,
-        double totalExitTransactionCost)
+            ActivePairTrade activeTrade,
+            double exitPriceA,
+            double exitPriceB,
+            DateTime exitTimestamp,
+            double exitSpreadCostA, double exitCommissionCostA, double exitSlippageCostA, double exitOtherCostA,
+            double exitSpreadCostB, double exitCommissionCostB, double exitSlippageCostB, double exitOtherCostB,
+            double grossProfitLoss, int holdingPeriodMinutes, double maxAdverseExcursion, double maxFavorableExcursion, string exitReason)
         {
+            var pairIdentifier = $"{activeTrade.SymbolA}/{activeTrade.SymbolB}";
+
             var positionA = _openPositions.FirstOrDefault(p =>
                 p.Value.Symbol == activeTrade.SymbolA && p.Value.EntryDate == activeTrade.EntryDate);
 
@@ -192,42 +255,62 @@ namespace Temperance.Services.Services.Implementations
                 return Task.FromResult<TradeSummary?>(null);
             }
 
-            // 2. Remove the positions from the open list.
+            // Remove the positions from the open list.
             _openPositions.Remove(positionA.Key, out Position valueA);
             _openPositions.Remove(positionB.Key, out Position valueB);
 
-            // 3. Update cash balance by adding back the value of the closing positions.
-            double closingValueA = positionA.Value.Quantity * exitPriceA;
-            double closingValueB = positionB.Value.Quantity * exitPriceB;
-            _currentCash += closingValueA + closingValueB - totalExitTransactionCost;
+            // Calculate total transaction cost for the entire pair trade (entry + exit)
+            double totalEntryTransactionCost = activeTrade.TotalEntryTransactionCost; // Assuming this is already the sum of individual entry costs
+            double totalExitTransactionCost = exitSpreadCostA + exitCommissionCostA + exitSlippageCostA + exitOtherCostA +
+                                              exitSpreadCostB + exitCommissionCostB + exitSlippageCostB + exitOtherCostB;
+            double totalTradeTransactionCost = totalEntryTransactionCost + totalExitTransactionCost;
 
-            var positionAValue = positionA.Value;
-            var positionBValue = positionB.Value;
+            // Net profit/loss is gross profit/loss minus total transaction costs
+            double netProfitLoss = grossProfitLoss - totalTradeTransactionCost;
 
-            // 4. Calculate P&L internally to ensure data integrity. This should match the runner's calculation.
-            double pnlA = (positionAValue.Direction == PositionDirection.Long)
-                ? (exitPriceA - positionAValue.EntryPrice) * positionAValue.Quantity
-                : (positionAValue.EntryPrice - exitPriceA) * positionAValue.Quantity;
-            double pnlB = (positionBValue.Direction == PositionDirection.Long)
-                ? (exitPriceB - positionBValue.EntryPrice) * positionBValue.Quantity
-                : (positionBValue.EntryPrice - exitPriceB) * positionBValue.Quantity;
-            double totalTransactionCost = activeTrade.TotalEntryTransactionCost + totalExitTransactionCost;
-            double netProfitLoss = (pnlA + pnlB) - totalTransactionCost;
+            // Update cash balance with net PnL
+            _currentCash += netProfitLoss;
 
-            // 5. Create a single TradeSummary object to represent the aggregate result of the pair trade.
+            // Update allocated capital (assuming it was allocated based on entry prices)
+            _allocatedCapital -= ((positionA.Value.Quantity * positionA.Value.EntryPrice) + (positionB.Value.Quantity * positionB.Value.EntryPrice));
+
+
+            // Create a single TradeSummary object to represent the aggregate result of the pair trade.
             var summary = new TradeSummary
             {
-                Symbol = $"{activeTrade.SymbolA}/{activeTrade.SymbolB}", // Use a pair identifier
+                Symbol = pairIdentifier, // Use a pair identifier
                 Direction = activeTrade.Direction.ToString(), // "Long" or "Short" the spread
                 EntryDate = activeTrade.EntryDate,
                 ExitDate = exitTimestamp,
+                EntryPrice = activeTrade.EntryPriceA, // Could be average or just A
+                ExitPrice = exitPriceA, // Could be average or just A
+                Quantity = (int)(activeTrade.QuantityA + activeTrade.QuantityB), // Total quantity of both legs
                 ProfitLoss = netProfitLoss,
-                TransactionCost = totalTransactionCost,
-                Quantity = positionAValue.Quantity + positionBValue.Quantity, // Total quantity of both legs
+                CreatedDate = DateTime.UtcNow,
+
+                // Populate new transaction cost fields - this might need more detail if ActivePairTrade
+                // doesn't break down entry costs. For now, combining.
+                CommissionCost = (activeTrade.EntryCommissionCost ?? 0) + exitCommissionCostA + exitCommissionCostB,
+                SlippageCost = (activeTrade.EntrySlippageCost ?? 0) + exitSlippageCostA + exitSlippageCostB,
+                OtherTransactionCost = (activeTrade.EntryOtherCost ?? 0) + exitOtherCostA + exitOtherCostB + activeTrade.EntrySpreadCost + exitSpreadCostA + exitSpreadCostB, // Sum of all "other" costs including spread
+                TotalTransactionCost = totalTradeTransactionCost,
+
+                // Populate new performance metrics
+                GrossProfitLoss = grossProfitLoss,
+                HoldingPeriodMinutes = holdingPeriodMinutes,
+                MaxAdverseExcursion = maxAdverseExcursion,
+                MaxFavorableExcursion = maxFavorableExcursion,
+                EntryReason = activeTrade.EntryReason,
+                ExitReason = exitReason,
+
+                Interval = activeTrade.Interval // Assuming ActivePairTrade has Interval
             };
 
-            // 6. Add to completed trades and return.
+            // Add to completed trades and return.
             _completedTradesHistory.Add(summary);
+
+            _logger.LogInformation("Closed pair position for {Pair}. Net PnL: {NetPnL:C}. Gross PnL: {GrossPnL:C}. Total Tx Cost: {TxCost:C}. Current Cash: {Cash:C}",
+                pairIdentifier, netProfitLoss, grossProfitLoss, totalTradeTransactionCost, _currentCash);
 
             return Task.FromResult<TradeSummary?>(summary);
         }

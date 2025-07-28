@@ -168,7 +168,7 @@ namespace Temperance.Services.Trading.Strategies.MeanReversion.Implementation
                 profitLoss = (activeTrade.EntryPrice - activeTrade.ExitPrice.Value) * activeTrade.Quantity;
 
             activeTrade.ProfitLoss = profitLoss;
-            activeTrade.TransactionCost = _transactionCostService.CalculateTotalCost(activeTrade.EntryPrice, rawExitPrice, (activeTrade.Direction == "Long" ? SignalDecision.Buy : SignalDecision.Sell), (activeTrade.Direction == "Long" ? PositionDirection.Long : PositionDirection.Short), activeTrade.Quantity);
+            activeTrade.TotalTransactionCost = _transactionCostService.CalculateTotalCost(activeTrade.EntryPrice, rawExitPrice, (activeTrade.Direction == "Long" ? SignalDecision.Buy : SignalDecision.Sell), (activeTrade.Direction == "Long" ? PositionDirection.Long : PositionDirection.Short), activeTrade.Quantity);
 
             return activeTrade;
         }
@@ -341,6 +341,70 @@ namespace Temperance.Services.Trading.Strategies.MeanReversion.Implementation
         public double GetAllocationAmount(HistoricalPriceModel currentBar, IReadOnlyList<HistoricalPriceModel> historicalDataWindow, double maxTradeAllocation)
         {
             throw new NotImplementedException();
+        }
+
+        public string GetEntryReason(HistoricalPriceModel currentBar, List<HistoricalPriceModel> dataWindow, Dictionary<string, double> currentIndicatorValues)
+        {
+            currentIndicatorValues.TryGetValue("RSI", out double currentRSI);
+            currentIndicatorValues.TryGetValue("LowerBand", out double currentLowerBand);
+            currentIndicatorValues.TryGetValue("UpperBand", out double currentUpperBand);
+
+            if (currentBar.ClosePrice < currentLowerBand && currentRSI < _rsiOversoldThreshold)
+            {
+                return $"Price below Lower BB ({currentLowerBand:N2}) and RSI ({currentRSI:N2}) oversold (<{_rsiOversoldThreshold})";
+            }
+            else if (currentBar.ClosePrice > currentUpperBand && currentRSI > _rsiOverboughtThreshold)
+            {
+                return $"Price above Upper BB ({currentUpperBand:N2}) and RSI ({currentRSI:N2}) overbought (>{_rsiOverboughtThreshold})";
+            }
+            return "No specific entry signal reason";
+        }
+
+        public string GetExitReason(Position currentPosition, HistoricalPriceModel currentBar, List<HistoricalPriceModel> dataWindow, Dictionary<string, double> currentIndicatorValues)
+        {
+            currentIndicatorValues.TryGetValue("RSI", out double currentRSI);
+            double entryPrice = currentPosition.EntryPrice;
+            double currentClose = (double)currentBar.ClosePrice;
+
+            if (currentPosition.Direction == PositionDirection.Long)
+            {
+                if (currentClose > currentIndicatorValues["RSI"]) // Placeholder for middle band cross
+                {
+                    return "Price crossed above middle band (SMA)";
+                }
+                if (currentRSI > _rsiOverboughtThreshold)
+                {
+                    return $"RSI ({currentRSI:N2}) became overbought (>{_rsiOverboughtThreshold})";
+                }
+                if (currentClose <= entryPrice * 0.98)
+                {
+                    return $"Stop Loss Hit (Price: {currentClose:N2} <= {entryPrice * 0.98:N2})";
+                }
+                if (currentClose >= entryPrice * 1.05)
+                {
+                    return $"Take Profit Hit (Price: {currentClose:N2} >= {entryPrice * 1.05:N2})";
+                }
+            }
+            else if (currentPosition.Direction == PositionDirection.Short)
+            {
+                if (currentClose < currentIndicatorValues["RSI"]) // Placeholder for middle band cross
+                {
+                    return "Price crossed below middle band (SMA)";
+                }
+                if (currentRSI < _rsiOversoldThreshold)
+                {
+                    return $"RSI ({currentRSI:N2}) became oversold (<{_rsiOversoldThreshold})";
+                }
+                if (currentClose >= entryPrice * 1.02)
+                {
+                    return $"Stop Loss Hit (Price: {currentClose:N2} >= {entryPrice * 1.02:N2})";
+                }
+                if (currentClose <= entryPrice * 0.95)
+                {
+                    return $"Take Profit Hit (Price: {currentClose:N2} <= {entryPrice * 0.95:N2})";
+                }
+            }
+            return "No specific exit signal reason";
         }
     }
 }

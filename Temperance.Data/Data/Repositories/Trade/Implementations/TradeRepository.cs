@@ -3,7 +3,6 @@ using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Logging;
 using System.Data;
 using System.Text.Json;
-using TradingApp.src.Data.Repositories.HistoricalPrices.Interfaces;
 using Temperance.Data.Data.Repositories.Trade.Interfaces;
 using Temperance.Data.Models.Backtest;
 using Temperance.Data.Models.Trading;
@@ -24,23 +23,20 @@ namespace Temperance.Data.Data.Repositories.Trade.Implementations
 
         private IDbConnection CreateConnection() => new SqlConnection(_connectionString);
 
-        // --- Existing Methods (Keep as they are) ---
         public async Task<int> SaveTradeAsync(Models.Trading.Trade trade)
         {
-            // ... your existing implementation ...
             using var connection = new SqlConnection(_connectionString);
             string query = @"
             INSERT INTO [Trading].[Trades]
             (SecurityID, Symbol, Strategy, TradeType, SignalPrice, SignalTimestamp, Status, TakeProfitPrice, StopLossPrice)
             VALUES (@SecurityID, @Symbol, @Strategy, @TradeType, @SignalPrice, @SignalTimestamp, @Status, @TakeProfitPrice, @StopLossPrice);
-            SELECT SCOPE_IDENTITY();"; // Added TP/SL based on CheckTradeExits
+            SELECT SCOPE_IDENTITY();";
             try { return await connection.ExecuteScalarAsync<int>(query, trade); }
             catch (Exception ex) { _logger.LogError(ex, "Error saving live/sim trade for Symbol {Symbol}", trade?.Symbol); throw; }
         }
 
         public async Task<int> ExecuteOrderAsync(Models.Trading.Order order)
         {
-            // ... your existing implementation ...
             using var connection = new SqlConnection(_connectionString);
             string query = @"
             INSERT INTO [Trading].[Orders]
@@ -53,9 +49,6 @@ namespace Temperance.Data.Data.Repositories.Trade.Implementations
 
         public async Task<int> UpdatePositionAsync(Models.Trading.Position position)
         {
-            // ... your existing implementation ...
-            // WARNING: This MERGE logic for average price might be inaccurate for complex scenarios (e.g., shorting, partial closes)
-            // Consider simpler updates or a dedicated position management component if live trading is complex.
             using var connection = new SqlConnection(_connectionString);
             string query = @"
             MERGE INTO [Trading].[Positions] AS target
@@ -81,14 +74,13 @@ namespace Temperance.Data.Data.Repositories.Trade.Implementations
             WHEN NOT MATCHED AND @Quantity <> 0 THEN -- Insert new position
                 INSERT (SecurityID, Symbol, Quantity, AveragePrice, UnrealizedPL, Status)
                 VALUES (@SecurityID, @Symbol, @Quantity, @AveragePrice, 0, 'Open'); -- Initial UnrealizedPL is 0
-             "; // Note: Added more conditions, AveragePrice logic needs careful review for buys/sells/shorts.
+             ";
             try { return await connection.ExecuteAsync(query, position); }
             catch (Exception ex) { _logger.LogError(ex, "Error updating position for SecurityID {SecurityID}", position?.SecurityID); throw; }
         }
 
         public async Task<int> LogStrategyAsync(StrategyLog log)
         {
-            // ... your existing implementation ...
             using var connection = new SqlConnection(_connectionString);
             string query = @"
             INSERT INTO [Trading].[StrategyLogs]
@@ -100,14 +92,9 @@ namespace Temperance.Data.Data.Repositories.Trade.Implementations
 
         public async Task CheckTradeExitsAsync()
         {
-            // ... your existing implementation ...
-            // This logic remains tied to the live/sim 'Trades' table and IHistoricalPriceRepository
-            // It won't be used directly by the backtesting result saving process.
             using var connection = new SqlConnection(_connectionString);
-            // ... (rest of your existing implementation) ...
         }
 
-        // --- New Backtesting Method Implementations ---
 
         public async Task InitializeBacktestRunAsync(Guid runId, BacktestConfiguration config)
         {
@@ -158,17 +145,20 @@ namespace Temperance.Data.Data.Repositories.Trade.Implementations
 
         public async Task SaveBacktestTradesAsync(Guid runId, IEnumerable<TradeSummary> trades)
         {
-            // Assumes table BacktestTrades exists
-            // Using a simple loop with ExecuteAsync - for large volumes, consider table-valued parameters or bulk copy libraries
             const string sql = @"
-                INSERT INTO Constellations.BacktestTrades (RunId, Symbol, Interval, StrategyName, EntryDate, ExitDate, EntryPrice, ExitPrice, Quantity, Direction, ProfitLoss)
-                VALUES (@RunId, @Symbol, @Interval, @StrategyName, @EntryDate, @ExitDate, @EntryPrice, @ExitPrice, @Quantity, @Direction, @ProfitLoss);";
+                INSERT INTO [TradingBotDb].[Constellations].[BacktestTrades] (
+                    RunId, Symbol, Interval, StrategyName, EntryDate, ExitDate, EntryPrice, ExitPrice, Quantity, Direction, ProfitLoss, CreatedDate,
+                    CommissionCost, SlippageCost, OtherTransactionCost, TotalTransactionCost, GrossProfitLoss, HoldingPeriodMinutes, MaxAdverseExcursion, MaxFavorableExcursion, EntryReason, ExitReason
+                )
+                VALUES (
+                    @RunId, @Symbol, @Interval, @StrategyName, @EntryDate, @ExitDate, @EntryPrice, @ExitPrice, @Quantity, @Direction, @ProfitLoss, @CreatedDate,
+                    @CommissionCost, @SlippageCost, @OtherTransactionCost, @TotalTransactionCost, @GrossProfitLoss, @HoldingPeriodMinutes, @MaxAdverseExcursion, @MaxFavorableExcursion, @EntryReason, @ExitReason
+                );";
             try
             {
                 using var connection = CreateConnection();
                 int affectedRows = await connection.ExecuteAsync(sql, trades.Select(t => new
                 {
-                    // Ensure mapping matches table columns precisely
                     RunId = runId,
                     t.Symbol,
                     t.Interval,
@@ -179,26 +169,33 @@ namespace Temperance.Data.Data.Repositories.Trade.Implementations
                     t.ExitPrice,
                     t.Quantity,
                     t.Direction,
-                    t.ProfitLoss
+                    t.ProfitLoss,
+                    t.CreatedDate,
+                    t.CommissionCost,
+                    t.SlippageCost,
+                    t.OtherTransactionCost,
+                    t.TotalTransactionCost,
+                    t.GrossProfitLoss,
+                    t.HoldingPeriodMinutes,
+                    t.MaxAdverseExcursion,
+                    t.MaxFavorableExcursion,
+                    t.EntryReason,
+                    t.ExitReason
                 }));
                 _logger.LogInformation("Saved {TradeCount} backtest trades for run {RunId}.", affectedRows, runId);
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Failed to save backtest trades for run {RunId}.", runId);
-                throw; // Fail the operation if trades can't be saved
+                throw;
             }
         }
 
         public async Task UpdateBacktestRunTotalsAsync(Guid runId, BacktestResult result)
         {
             if (result.Trades.Any())
-            {
-                // Call the dedicated save method within the repository
                 await SaveBacktestTradesAsync(runId, result.Trades);
-            }
 
-            // Assumes table BacktestRuns exists and has columns for totals/metrics
             const string sql = @"
                 UPDATE [TradingBotDb].[Constellations].[BacktestRuns]
                 SET Status = @Status,
@@ -216,8 +213,8 @@ namespace Temperance.Data.Data.Repositories.Trade.Implementations
                 await connection.ExecuteAsync(sql, new
                 {
                     RunId = runId,
-                    result.Status, // Should be 'Completed' or 'Failed' here
-                    EndTime = result.EndTime ?? DateTime.UtcNow, // Use result EndTime
+                    result.Status,
+                    EndTime = result.EndTime ?? DateTime.UtcNow,
                     result.TotalProfitLoss,
                     result.TotalReturn,
                     result.MaxDrawdown,
@@ -230,7 +227,6 @@ namespace Temperance.Data.Data.Repositories.Trade.Implementations
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Failed to update final totals for backtest run {RunId}.", runId);
-                // Log is likely sufficient here, as the run is already finished/failed.
             }
         }
 
@@ -251,18 +247,16 @@ namespace Temperance.Data.Data.Repositories.Trade.Implementations
 
         public async Task<IEnumerable<TradeSummary>> GetBacktestTradesAsync(Guid runId)
         {
-            // Fetches all trades associated with a run
             const string sql = "SELECT * FROM BacktestTrades WHERE RunId = @RunId ORDER BY EntryDate;";
             try
             {
                 using var connection = CreateConnection();
-                // Assumes BacktestTrades columns map directly to TradeSummary properties
                 return await connection.QueryAsync<TradeSummary>(sql, new { RunId = runId });
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Failed to get backtest trades for {RunId}.", runId);
-                return Enumerable.Empty<TradeSummary>(); // Return empty list on error
+                return Enumerable.Empty<TradeSummary>();
             }
         }
     }

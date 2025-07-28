@@ -100,6 +100,49 @@ namespace Temperance.Services.Trading.Strategies.MeanReversion.Implementations
             return (currentSpread - movingAverage) / standardDeviation;
         }
 
+        public string GetEntryReason(HistoricalPriceModel barA, HistoricalPriceModel barB, Dictionary<string, double> currentIndicatorValues)
+        {
+            currentIndicatorValues.TryGetValue("ZScore", out double currentZScore);
+            if (currentZScore < -_entryZScoreThreshold)
+            {
+                return $"Z-Score ({currentZScore:N2}) below entry threshold (-{_entryZScoreThreshold:N2}) - Long Spread";
+            }
+            else if (currentZScore > _entryZScoreThreshold)
+            {
+                return $"Z-Score ({currentZScore:N2}) above entry threshold ({_entryZScoreThreshold:N2}) - Short Spread";
+            }
+            return "No specific entry signal reason for pair";
+        }
+
+        public string GetExitReason(Position currentPosition, HistoricalPriceModel barA, HistoricalPriceModel barB, Dictionary<string, double> currentIndicatorValues)
+        {
+            currentIndicatorValues.TryGetValue("ZScore", out double currentZScore);
+
+            if (currentPosition.Direction == PositionDirection.Long)
+            {
+                if (currentZScore >= -_exitZScoreThreshold)
+                {
+                    return $"Z-Score ({currentZScore:N2}) reverted to mean (>= -{_exitZScoreThreshold:N2}) - Exit Long Spread";
+                }
+                if (currentZScore >= _entryZScoreThreshold)
+                {
+                    return $"Z-Score ({currentZScore:N2}) hit stop-loss (>= {_entryZScoreThreshold:N2}) - Exit Long Spread";
+                }
+            }
+            else if (currentPosition.Direction == PositionDirection.Short)
+            {
+                if (currentZScore <= _exitZScoreThreshold)
+                {
+                    return $"Z-Score ({currentZScore:N2}) reverted to mean (<= {_exitZScoreThreshold:N2}) - Exit Short Spread";
+                }
+                if (currentZScore <= -_entryZScoreThreshold)
+                {
+                    return $"Z-Score ({currentZScore:N2}) hit stop-loss (<= -{_entryZScoreThreshold:N2}) - Exit Short Spread";
+                }
+            }
+            return "No specific exit signal reason for pair";
+        }
+
         public TradeSummary ClosePosition(TradeSummary activeTrade, HistoricalPriceModel currentBar, SignalDecision exitSignal)
         {
             throw new NotImplementedException();

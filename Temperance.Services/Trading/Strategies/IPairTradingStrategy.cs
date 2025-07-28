@@ -1,10 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-using Temperance.Data.Models.HistoricalPriceData;
-using Temperance.Data.Models.Strategy;
+﻿using Temperance.Data.Models.HistoricalPriceData;
 using Temperance.Data.Models.Trading;
 
 namespace Temperance.Services.Trading.Strategies
@@ -34,5 +28,7 @@ namespace Temperance.Services.Trading.Strategies
            double kellyHalfFraction);
 
         long GetMinimumAverageDailyVolume();
+        string GetEntryReason(HistoricalPriceModel barA, HistoricalPriceModel barB, Dictionary<string, double> currentIndicatorValues);
+        string GetExitReason(Position currentPosition, HistoricalPriceModel barA, HistoricalPriceModel barB, Dictionary<string, double> currentIndicatorValues);
     }
 }

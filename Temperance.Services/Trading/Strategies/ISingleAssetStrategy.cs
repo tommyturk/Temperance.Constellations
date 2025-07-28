@@ -34,6 +34,10 @@ namespace Temperance.Services.Trading.Strategies
         long GetMinimumAverageDailyVolume();
 
         double[] CalculateRSI(double[] prices, int period);
+
+        string GetEntryReason(HistoricalPriceModel currentBar, List<HistoricalPriceModel> dataWindow, Dictionary<string, double> currentIndicatorValues);
+        string GetExitReason(Position currentPosition, HistoricalPriceModel currentBar, List<HistoricalPriceModel> dataWindow, Dictionary<string, double> currentIndicatorValues);
+
     }
 }
     
