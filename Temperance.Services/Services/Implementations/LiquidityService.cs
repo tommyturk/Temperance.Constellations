@@ -16,6 +16,23 @@ namespace Temperance.Services.Services.Implementations
         }
 
         public bool IsSymbolLiquidAtTime(string symbol, string interval, long minAverageVolume, DateTime currentTimestamp, int rollingLookbackBars,
+            ReadOnlySpan<HistoricalPriceModel> fullHistoricalData)
+        {
+            if (fullHistoricalData.Length < rollingLookbackBars)
+                return false;
+
+            var relevantData = fullHistoricalData.Slice(fullHistoricalData.Length - rollingLookbackBars);
+
+            long totalVolume = 0;
+            foreach (var bar in relevantData)
+                totalVolume += bar.Volume;
+
+            double averageVolume = (double)totalVolume / relevantData.Length;
+
+            return averageVolume < minAverageVolume;
+        }
+
+        public bool IsSymbolLiquidAtTime(string symbol, string interval, long minAverageVolume, DateTime currentTimestamp, int rollingLookbackBars,
             IReadOnlyList<HistoricalPriceModel> fullHistoricalData)
         {
             var relevantData = fullHistoricalData
@@ -24,17 +41,14 @@ namespace Temperance.Services.Services.Implementations
                 .Take(rollingLookbackBars)
                 .ToList();
 
-            if (relevantData.Count < rollingLookbackBars * 0.8) 
+            if (relevantData.Count < rollingLookbackBars * 0.8)
                 return false;
 
             long totalVolume = relevantData.Sum(x => x.Volume);
+            if (relevantData.Count == 0) return false;
 
             double averageVolume = (double)totalVolume / relevantData.Count;
-
-            if (averageVolume < minAverageVolume)
-                return false;
-
-            return true;
+            return averageVolume >= minAverageVolume;
         }
 
         public async Task<bool> ISymbolLiquidForPeriod(string symbol, string interval, long minADV, DateTime startDate, DateTime endDate)

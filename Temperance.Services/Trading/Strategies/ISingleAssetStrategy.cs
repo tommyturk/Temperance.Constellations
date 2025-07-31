@@ -6,32 +6,27 @@ namespace Temperance.Services.Trading.Strategies
     public interface ISingleAssetStrategy : IBaseStrategy
     {
         string Name { get; }
-
         Dictionary<string, object> GetDefaultParameters();
-
         void Initialize(double initialCapital, Dictionary<string, object> parameters);
 
-        SignalDecision GenerateSignal(HistoricalPriceModel currentBar, IReadOnlyList<HistoricalPriceModel> historicalData);
-
-        SignalDecision GenerateSignal(HistoricalPriceModel currentBar, IReadOnlyList<HistoricalPriceModel> historicalDataWindow, Dictionary<string, double> currentIndicatorValues);
+        SignalDecision GenerateSignal(in HistoricalPriceModel currentBar, Position currentPosition, ReadOnlySpan<HistoricalPriceModel> historicalDataWindow, Dictionary<string, double> currentIndicatorValues);
 
         TradeSummary ClosePosition(TradeSummary activeTrade, HistoricalPriceModel currentBar, SignalDecision exitSignal);
 
-        bool ShouldExitPosition(Position position, HistoricalPriceModel currentBar, IReadOnlyList<HistoricalPriceModel> historaicalDataWindow);
+        bool ShouldExitPosition(Position position, in HistoricalPriceModel currentBar, ReadOnlySpan<HistoricalPriceModel> historicalDataWindow, Dictionary<string, double> currentIndicatorValues);
 
-        bool ShouldExitPosition(Position position, HistoricalPriceModel currentBar, IReadOnlyList<HistoricalPriceModel> historicalDataWindow, Dictionary<string, double> currentIndicatorValues);
         int GetRequiredLookbackPeriod();
+        long GetMinimumAverageDailyVolume();
 
         double GetAllocationAmount(HistoricalPriceModel currentBar, IReadOnlyList<HistoricalPriceModel> historicalDataWindow, double maxTradeAllocation);
 
         double GetAllocationAmount(
-           HistoricalPriceModel currentBar,
-           IReadOnlyList<HistoricalPriceModel> historicalDataWindow,
-           double maxTradeAllocationInitialCapital,
-           double currentTotalEquity,
-           double kellyHalfFraction);
-
-        long GetMinimumAverageDailyVolume();
+            in HistoricalPriceModel currentBar,
+            ReadOnlySpan<HistoricalPriceModel> historicalDataWindow,
+            Dictionary<string, double> currentIndicatorValues,
+            double maxTradeAllocationInitialCapital,
+            double currentTotalEquity,
+            double kellyHalfFraction);
 
         double[] CalculateRSI(double[] prices, int period);
     }

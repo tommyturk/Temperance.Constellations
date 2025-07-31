@@ -1,8 +1,8 @@
 ﻿using Dapper;
 using Microsoft.Data.SqlClient;
+using Microsoft.Extensions.Logging;
 using Temperance.Data.Data.Repositories.Securities.Interfaces;
 using Temperance.Data.Models.HistoricalData;
-using TradingApp.src.Data.Repositories.HistoricalPrices.Interfaces;
 
 namespace Temperance.Data.Repositories.Securities.Implementations
 {
@@ -10,9 +10,21 @@ namespace Temperance.Data.Repositories.Securities.Implementations
     {
         private readonly string _connectionString;
         private static readonly object _lock = new object();
-        public SecuritiesOverviewRepository(string connectionString)
+        private ILogger<SecuritiesOverviewRepository> _logger;
+
+        public SecuritiesOverviewRepository(string connectionString, ILogger<SecuritiesOverviewRepository> logger)
         {
             _connectionString = connectionString;
+            _logger = logger;
+
+            if (string.IsNullOrWhiteSpace(_connectionString))
+                _logger.LogCritical("FATAL: SecuritiesOverviewRepository created with a NULL or EMPTY connection string!");
+            else
+            {
+                var builder = new SqlConnectionStringBuilder(_connectionString);
+                _logger.LogInformation("SecuritiesOverviewRepository instance created.");
+                _logger.LogInformation("Attempting to connect to SERVER: [{Server}], DATABASE: [{Database}]", builder.DataSource, builder.InitialCatalog);
+            }
         }
 
         public async Task<List<string>> GetSecurities()
@@ -22,6 +34,68 @@ namespace Temperance.Data.Repositories.Securities.Implementations
             return (await connection.QueryAsync<string>(query)).ToList();
         }
 
+        public async IAsyncEnumerable<SymbolCoverageBacktestModel> StreamSecuritiesForBacktest(
+            List<string> symbols,
+            List<string> intervals,
+            [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            var finalIntervals = intervals;
+            if (finalIntervals == null || !finalIntervals.Any())
+                finalIntervals = new List<string>() { "1min", "5min", "15min", "60min", "1d" };
+
+            if (symbols != null && symbols.Any())
+            {
+                foreach (var symbol in symbols)
+                {
+                    if (cancellationToken.IsCancellationRequested) yield break;
+                    foreach (var interval in finalIntervals)
+                    {
+                        yield return new SymbolCoverageBacktestModel { Symbol = symbol, Interval = interval };
+                    }
+                }
+            }
+            else
+            {
+                _logger.LogInformation("Streaming from database: Attempting to connect with connection string: {ConnectionString}", _connectionString);
+                await using var connection = new SqlConnection(_connectionString);
+
+                try
+                {
+                    await connection.OpenAsync(cancellationToken);
+                    _logger.LogInformation("Database connection opened successfully.");
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogCritical(ex, "FATAL: Failed to open database connection. The backtest cannot proceed.");
+                    yield break;
+                }
+
+                const string query = "SELECT Symbol FROM [TradingBotDb].[Financials].[SecuritiesOverview] WHERE MarketCapitalization > 10000000000";
+                await using var command = new SqlCommand(query, connection);
+                await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+
+                int symbolsRead = 0;
+                while (await reader.ReadAsync(cancellationToken))
+                {
+                    symbolsRead++;
+                    var symbol = reader.GetString(0);
+                    _logger.LogDebug("Read symbol from database: {Symbol}", symbol);
+
+                    foreach (var interval in finalIntervals)
+                    {
+                        yield return new SymbolCoverageBacktestModel
+                        {
+                            Symbol = symbol,
+                            Interval = interval
+                        };
+                    }
+                }
+
+                _logger.LogInformation("Finished reading from database. Total symbols read that meet criteria: {SymbolCount}", symbolsRead);
+            }
+        }
+
+        [Obsolete]
         public async Task<List<SymbolCoverageBacktestModel>> GetSecuritiesForBacktest(List<string> symbols = null, List<string> intervals = null)
         {
             using var connection = new SqlConnection(_connectionString);

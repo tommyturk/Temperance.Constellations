@@ -64,88 +64,60 @@ namespace Temperance.Services.Trading.Strategies.MeanReversion.Implementation
             return (long)_minimumAverageDailyVolume;
         }
 
-        public SignalDecision GenerateSignal(HistoricalPriceModel currentBar, IReadOnlyList<HistoricalPriceModel> historicalDataWindow, Dictionary<string, double> currentIndicatorValues)
+        public SignalDecision GenerateSignal(in HistoricalPriceModel currentBar, Position currentPosition, ReadOnlySpan<HistoricalPriceModel> historicalDataWindow, Dictionary<string, double> currentIndicatorValues)
         {
-            double lowerBollingerBand = currentIndicatorValues["LowerBand"];
-            double upperBollingerBand = currentIndicatorValues["UpperBand"];
-            double currentRelativeStrengthIndex = currentIndicatorValues["RSI"];
+            int totalBars = historicalDataWindow.Length;
+            if (totalBars < GetRequiredLookbackPeriod())
+                return SignalDecision.Hold;
 
-            if (currentBar.ClosePrice < lowerBollingerBand && currentRelativeStrengthIndex < _rsiOversoldThreshold)
+            // --- On-the-fly Bollinger Bands Calculation ---
+            var bbWindow = historicalDataWindow.Slice(totalBars - _movingAveragePeriod);
+            double simpleMovingAverage = 0;
+            foreach (var bar in bbWindow) { simpleMovingAverage += bar.ClosePrice; }
+            simpleMovingAverage /= _movingAveragePeriod;
+
+            double stdDev = CalculateStdDev(bbWindow, simpleMovingAverage);
+            double lowerBollingerBand = simpleMovingAverage - (_stdDevMultiplier * stdDev);
+            double upperBollingerBand = simpleMovingAverage + (_stdDevMultiplier * stdDev);
+
+            // --- On-the-fly RSI Calculation ---
+            var rsiWindow = historicalDataWindow.Slice(totalBars - (_rsiPeriod + 1));
+            double currentRsi = currentIndicatorValues["RSI"];
+
+            // --- Signal Logic ---
+            if (currentBar.ClosePrice < lowerBollingerBand && currentRsi < _rsiOversoldThreshold)
                 return SignalDecision.Buy;
 
-            if (currentBar.ClosePrice > upperBollingerBand && currentRelativeStrengthIndex > _rsiOverboughtThreshold)
+            if (currentBar.ClosePrice > upperBollingerBand && currentRsi > _rsiOverboughtThreshold)
                 return SignalDecision.Sell;
 
             return SignalDecision.Hold;
         }
 
-        public SignalDecision GenerateSignal(HistoricalPriceModel currentBar, IReadOnlyList<HistoricalPriceModel> historicalDataWindow)
+        public bool ShouldExitPosition(
+            Position position,
+            in HistoricalPriceModel currentBar,
+            ReadOnlySpan<HistoricalPriceModel> historicalDataWindow,
+            Dictionary<string, double> currentIndicatorValues)
         {
-            if (historicalDataWindow.Count < _movingAveragePeriod || historicalDataWindow.Count < _rsiPeriod + 1)
-                return SignalDecision.Hold;
+            // --- 1. Primary Exit: Reversion to the Mean ---
+            // We need to calculate the simple moving average for the current bar.
+            var smaWindow = historicalDataWindow.Slice(historicalDataWindow.Length - _movingAveragePeriod);
+            double simpleMovingAverage = 0;
+            foreach (var bar in smaWindow)
+                simpleMovingAverage += bar.ClosePrice;
+            
+            simpleMovingAverage /= _movingAveragePeriod;
 
-            var bbWindowPrices = historicalDataWindow.TakeLast(_movingAveragePeriod).Select(h => h.ClosePrice).ToList();
-            if (bbWindowPrices.Count < _movingAveragePeriod) return SignalDecision.Hold;
-
-            double simpleMovingAverage = bbWindowPrices.Average();
-            double standardDeviation = CalculateStdDev(bbWindowPrices);
-            double upperBollingerBand = simpleMovingAverage + _stdDevMultiplier * standardDeviation;
-            double lowerBollingerBand = simpleMovingAverage - _stdDevMultiplier * standardDeviation;
-
-            var rsiWindowPrices = historicalDataWindow.Select(h => h.ClosePrice).ToArray();
-            double[] rsiValues = CalculateRSI(rsiWindowPrices, _rsiPeriod);
-            if (rsiValues.Length == 0 || rsiValues.Length< historicalDataWindow.Count)
-                return SignalDecision.Hold;
-
-            double currentRelativeStrengthIndex = rsiValues.Last();
-
-            if (currentBar.ClosePrice < lowerBollingerBand && currentRelativeStrengthIndex < _rsiOversoldThreshold)
-                return SignalDecision.Buy;
-
-            if (currentBar.ClosePrice > upperBollingerBand && currentRelativeStrengthIndex > _rsiOverboughtThreshold)
-                return SignalDecision.Sell;
-
-            return SignalDecision.Hold;
-        }
-
-        public bool ShouldExitPosition(Position position, HistoricalPriceModel currentBar, IReadOnlyList<HistoricalPriceModel> historicalDataWindow)
-        {
-            var currentSignal = GenerateSignal(currentBar, historicalDataWindow);
-
-            if (position.Direction == PositionDirection.Long && currentSignal == SignalDecision.Sell)
-                return true;
-            if (position.Direction == PositionDirection.Short && currentSignal == SignalDecision.Buy)
+            if (position.Direction == PositionDirection.Long && currentBar.ClosePrice >= simpleMovingAverage)
                 return true;
 
-            double stopLossPrice = CalculateStopLoss(position);
-            if (position.Direction == PositionDirection.Long && currentBar.LowPrice <= stopLossPrice) return true;
-            if (position.Direction == PositionDirection.Short && currentBar.HighPrice >= stopLossPrice) return true;
-
-            double takeProfitPrice = CalculateTakeProfit(position);
-            if (position.Direction == PositionDirection.Long && currentBar.HighPrice >= takeProfitPrice) return true;
-            if (position.Direction == PositionDirection.Short && currentBar.LowPrice <= takeProfitPrice) return true;
-
-            return false;
-        }
-
-        public bool ShouldExitPosition(Position position, HistoricalPriceModel currentBar, IReadOnlyList<HistoricalPriceModel> historicalDataWindow, Dictionary<string, double> currentIndicatorValues)
-        {
-            var currentSignal = GenerateSignal(currentBar, historicalDataWindow, currentIndicatorValues);
-
-            // Exit on opposing signal
-            if (position.Direction == PositionDirection.Long && currentSignal == SignalDecision.Sell)
-                return true;
-            if (position.Direction == PositionDirection.Short && currentSignal == SignalDecision.Buy)
+            if (position.Direction == PositionDirection.Short && currentBar.ClosePrice <= simpleMovingAverage)
                 return true;
 
-            // --- Stop Loss / Take Profit logic remains the same ---
-            double stopLossPrice = CalculateStopLoss(position);
-            if (position.Direction == PositionDirection.Long && currentBar.LowPrice <= stopLossPrice) return true;
-            if (position.Direction == PositionDirection.Short && currentBar.HighPrice >= stopLossPrice) return true;
-
-            double takeProfitPrice = CalculateTakeProfit(position);
-            if (position.Direction == PositionDirection.Long && currentBar.HighPrice >= takeProfitPrice) return true;
-            if (position.Direction == PositionDirection.Short && currentBar.LowPrice <= takeProfitPrice) return true;
+            var currentSignal = GenerateSignal(in currentBar, position, historicalDataWindow, currentIndicatorValues);
+            if (position.Direction == PositionDirection.Long && currentSignal == SignalDecision.Sell) return true;
+            if (position.Direction == PositionDirection.Short && currentSignal == SignalDecision.Buy) return true;
 
             return false;
         }
@@ -174,148 +146,61 @@ namespace Temperance.Services.Trading.Strategies.MeanReversion.Implementation
         }
 
         public double GetAllocationAmount(
-            HistoricalPriceModel currentBar,
-            IReadOnlyList<HistoricalPriceModel> historicalDataWindow,
+            in HistoricalPriceModel currentBar,
+            ReadOnlySpan<HistoricalPriceModel> historicalDataWindow,
+            Dictionary<string, double> currentIndicatorValues,
             double maxTradeAllocationInitialCapital,
             double currentTotalEquity,
             double kellyHalfFraction)
         {
-            if (historicalDataWindow.Count < GetRequiredLookbackPeriod())
-                return 0;
-
-            var bbWindowPrices = historicalDataWindow.TakeLast(_movingAveragePeriod).Select(h => h.ClosePrice).ToList();
-            if (bbWindowPrices.Count < _movingAveragePeriod)
-                return 0;
-
-            double simpleMovingAverage = bbWindowPrices.Average();
-            double standardDeviation = CalculateStdDev(bbWindowPrices);
-            double upperBollingerBand = simpleMovingAverage + _stdDevMultiplier * standardDeviation;
-            double lowerBollingerBand = simpleMovingAverage - _stdDevMultiplier * standardDeviation;
-
-            var rsiWindowPrices = historicalDataWindow.Select(h => h.ClosePrice).ToArray();
-            double[] rsiValues = CalculateRSI(rsiWindowPrices, _rsiPeriod);
-            if (!rsiValues.Any() || rsiValues.Length < historicalDataWindow.Count) 
-                return 0;
-
-            double currentRelativeStrengthIndex = rsiValues.Last();
-
-            SignalDecision signal = GenerateSignal(currentBar, historicalDataWindow);
-
-            double calculatedAllocationFromStrategyLogic = 0; 
-
-            if (signal == SignalDecision.Buy)
+            if (currentIndicatorValues == null || !currentIndicatorValues.ContainsKey("RSI"))
             {
-                double distanceBelowLowerBand = Math.Max(0, lowerBollingerBand - currentBar.ClosePrice);
-                double distanceBelowRSIOversold = Math.Max(0, _rsiOversoldThreshold - currentRelativeStrengthIndex);
-
-                if (distanceBelowRSIOversold > 0 && currentBar.ClosePrice < lowerBollingerBand)
-                {
-                    double rsiScalingFactor = Math.Min(1.0, distanceBelowRSIOversold / (_rsiOversoldThreshold - 0));
-                    calculatedAllocationFromStrategyLogic = maxTradeAllocationInitialCapital * rsiScalingFactor;
-                }
+                _logger.LogWarning("GetAllocationAmount called without required RSI indicator values.");
+                return 0;
             }
-            else if (signal == SignalDecision.Sell) 
-            {
-                double distanceAboveUpperBand = Math.Max(0, currentBar.ClosePrice - upperBollingerBand);
-                double distanceAboveRSIOverbought = Math.Max(0, currentRelativeStrengthIndex - _rsiOverboughtThreshold);
 
-                if (distanceAboveRSIOverbought > 0 && currentBar.ClosePrice > upperBollingerBand)
-                {
-                    double rsiScalingFactor = Math.Min(1.0, distanceAboveRSIOverbought / (100 - _rsiOverboughtThreshold));
-                    calculatedAllocationFromStrategyLogic = maxTradeAllocationInitialCapital * rsiScalingFactor;
-                }
+            double lowerBollingerBand = currentIndicatorValues["LowerBand"];
+            double upperBollingerBand = currentIndicatorValues["UpperBand"];
+            double currentRelativeStrengthIndex = currentIndicatorValues["RSI"];
+
+            double calculatedAllocationFromStrategyLogic = 0;
+
+            if (currentBar.ClosePrice < lowerBollingerBand && currentRelativeStrengthIndex < _rsiOversoldThreshold)
+            {
+                double distanceBelowRSIOversold = Math.Max(0, _rsiOversoldThreshold - currentRelativeStrengthIndex);
+                double rsiScalingFactor = Math.Min(1.0, distanceBelowRSIOversold / _rsiOversoldThreshold);
+                calculatedAllocationFromStrategyLogic = maxTradeAllocationInitialCapital * rsiScalingFactor;
+            }
+            else if (currentBar.ClosePrice > upperBollingerBand && currentRelativeStrengthIndex > _rsiOverboughtThreshold)
+            {
+                double distanceAboveRSIOverbought = Math.Max(0, currentRelativeStrengthIndex - _rsiOverboughtThreshold);
+                double rsiScalingFactor = Math.Min(1.0, distanceAboveRSIOverbought / (100.0 - _rsiOverboughtThreshold));
+                calculatedAllocationFromStrategyLogic = maxTradeAllocationInitialCapital * rsiScalingFactor;
             }
 
             if (calculatedAllocationFromStrategyLogic <= 0)
                 return 0;
 
             double kellySizedAllocation = currentTotalEquity * kellyHalfFraction;
-            _logger.LogInformation($"Calculating Kelly: CurrentTotalEquity = {currentTotalEquity}, Kelly Half fraction = {kellyHalfFraction}; KellySizedAllocation = {kellySizedAllocation}");
-            
             if (kellySizedAllocation < 0) kellySizedAllocation = 0;
 
             double finalAllocationAmount = Math.Min(
-                calculatedAllocationFromStrategyLogic, 
+                calculatedAllocationFromStrategyLogic,
                 Math.Min(maxTradeAllocationInitialCapital, kellySizedAllocation)
             );
 
-            if (finalAllocationAmount <= 0)
-                return 0;
-
-            _logger.LogDebug("Symbol: {Symbol}, Bar: {Timestamp} - Signal: {Signal}. Strategy Allocation: {StratAlloc:C}, Kelly Alloc: {KellyAlloc:C}, Max Alloc: {MaxAlloc:C}. Final Allocation: {FinalAlloc:C}",
-                currentBar.Symbol, currentBar.Timestamp, signal, calculatedAllocationFromStrategyLogic, kellySizedAllocation, maxTradeAllocationInitialCapital, finalAllocationAmount);
-
-            return finalAllocationAmount;
+            return finalAllocationAmount > 0 ? finalAllocationAmount : 0;
         }
 
-        private double CalculateStdDev(List<double> values)
+        private double CalculateStdDev(ReadOnlySpan<HistoricalPriceModel> values, double average)
         {
-            if (values == null || values.Count <= 1)
-                return 0;
-
-            double average = values.Average();
-            double sumOfSquares = values.Sum(val => Math.Pow((val - average), 2));
-            return Math.Sqrt(sumOfSquares / (values.Count - 1));
-        }
-
-        public double[] CalculateRSI(double[] prices, int period)
-        {
-            if (prices == null || prices.Length <= period)
+            if (values.Length <= 1) return 0;
+            double sumOfSquares = 0;
+            foreach (var val in values)
             {
-                var neutralRsi = new double[prices?.Length ?? 0];
-                Array.Fill(neutralRsi, 50);
-                return neutralRsi;
+                sumOfSquares += Math.Pow(val.ClosePrice - average, 2);
             }
-
-            var rsiValues = new double[prices.Length];
-            double initialGainSum = 0;
-            double initialLossSum = 0;
-
-            for (int i = 1; i <= period; i++)
-            {
-                double change = prices[i] - prices[i - 1];
-                if (change > 0)
-                {
-                    initialGainSum += change;
-                }
-                else
-                {
-                    initialLossSum -= change; 
-                }
-            }
-
-            double avgGain = initialGainSum / period;
-            double avgLoss = initialLossSum / period;
-
-            for (int i = 0; i < prices.Length; i++)
-            {
-                if (i < period)
-                {
-                    rsiValues[i] = 50; 
-                    continue;
-                }
-
-                if (i > period) 
-                {
-                    double change = prices[i] - prices[i - 1];
-                    double currentGain = change > 0 ? change : 0;
-                    double currentLoss = change < 0 ? -change : 0;
-
-                    avgGain = ((avgGain * (period - 1)) + currentGain) / period;
-                    avgLoss = ((avgLoss * (period - 1)) + currentLoss) / period;
-                }
-
-                if (avgLoss == 0)
-                    rsiValues[i] = 100;
-
-                else
-                {
-                    double relativeStrength = avgGain / avgLoss;
-                    rsiValues[i] = 100 - (100 / (1 + relativeStrength));
-                }
-            }
-
-            return rsiValues;
+            return Math.Sqrt(sumOfSquares / (values.Length - 1));
         }
 
         protected double CalculateStopLoss(Position position)
@@ -341,6 +226,66 @@ namespace Temperance.Services.Trading.Strategies.MeanReversion.Implementation
         public double GetAllocationAmount(HistoricalPriceModel currentBar, IReadOnlyList<HistoricalPriceModel> historicalDataWindow, double maxTradeAllocation)
         {
             throw new NotImplementedException();
+        }
+
+        public double[] CalculateRSI(double[] prices, int period)
+        {
+            if (prices == null || prices.Length <= period)
+            {
+                var neutralRsi = new double[prices?.Length ?? 0];
+                Array.Fill(neutralRsi, 50);
+                return neutralRsi;
+            }
+
+            var rsiValues = new double[prices.Length];
+            double initialGainSum = 0;
+            double initialLossSum = 0;
+
+            for (int i = 1; i <= period; i++)
+            {
+                double change = prices[i] - prices[i - 1];
+                if (change > 0)
+                {
+                    initialGainSum += change;
+                }
+                else
+                {
+                    initialLossSum -= change;
+                }
+            }
+
+            double avgGain = initialGainSum / period;
+            double avgLoss = initialLossSum / period;
+
+            for (int i = 0; i < prices.Length; i++)
+            {
+                if (i < period)
+                {
+                    rsiValues[i] = 50;
+                    continue;
+                }
+
+                if (i > period)
+                {
+                    double change = prices[i] - prices[i - 1];
+                    double currentGain = change > 0 ? change : 0;
+                    double currentLoss = change < 0 ? -change : 0;
+
+                    avgGain = ((avgGain * (period - 1)) + currentGain) / period;
+                    avgLoss = ((avgLoss * (period - 1)) + currentLoss) / period;
+                }
+
+                if (avgLoss == 0)
+                    rsiValues[i] = 100;
+
+                else
+                {
+                    double relativeStrength = avgGain / avgLoss;
+                    rsiValues[i] = 100 - (100 / (1 + relativeStrength));
+                }
+            }
+
+            return rsiValues;
         }
     }
 }

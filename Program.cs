@@ -63,7 +63,7 @@ builder.Services.AddScoped<IBacktestRunner, BacktestRunner>();
 builder.Services.AddTransient<ITransactionCostService, TransactionCostService>();
 builder.Services.AddTransient<ILiquidityService, LiquidityService>();
 builder.Services.AddTransient<IGpuIndicatorService, GpuIndicatorService>();
-builder.Services.AddTransient<IPortfolioManager, PortfolioManager>();
+builder.Services.AddSingleton<IPortfolioManager, PortfolioManager>();
 builder.Services.AddTransient<ISecuritiesOverviewService, SecuritiesOverviewService>();
 builder.Services.AddTransient<IBalanceSheetService, BalanceSheetService>();
 builder.Services.AddTransient<IPriceService, PriceService>();
@@ -73,7 +73,8 @@ builder.Services.AddTransient<ITradeService, TradesService>();
 builder.Services.AddTransient<ISecuritiesOverviewRepository>(provider =>
 {
     var cs = provider.GetRequiredService<DefaultConnectionString>().Value;
-    return new SecuritiesOverviewRepository(cs);
+    var logger = provider.GetRequiredService<ILogger<SecuritiesOverviewRepository>>();
+    return new SecuritiesOverviewRepository(cs, logger);
 });
 
 builder.Services.AddTransient<IHistoricalPriceRepository>(provider =>
@@ -120,33 +121,46 @@ builder.Services.AddSingleton<ISqlHelper>(provider =>
 
 builder.Services.AddSingleton<Accelerator>(sp =>
 {
-    var logger = sp.GetRequiredService<ILogger<Program>>(); 
+    //var logger = sp.GetRequiredService<ILogger<Program>>(); 
+    //logger.LogInformation("Initializing ILGPU Context and Accelerator...");
+
+    //try
+    //{
+    //    var context = Context.Create(builder => builder.Default().EnableAlgorithms());
+
+    //    var device = context.GetPreferredDevice(preferCPU: false);
+
+    //    if (device == null)
+    //    {
+    //        logger.LogWarning("No suitable ILGPU device found. GPU acceleration will be unavailable.");
+    //        throw new InvalidOperationException("ILGPU Accelerator could not be created as no suitable device was found.");
+    //    }
+
+    //    logger.LogInformation("Found ILGPU Device: {DeviceName}", device.Name);
+
+    //    var accelerator = device.CreateAccelerator(context);
+    //    logger.LogInformation("ILGPU Accelerator created successfully for {AcceleratorName}", accelerator.Name);
+
+    //    return accelerator;
+    //}
+    //catch (Exception ex)
+    //{
+    //    logger.LogCritical(ex, "A critical error occurred while initializing the ILGPU Accelerator. The application cannot start.");
+    //    throw;
+    //}
+    var logger = sp.GetRequiredService<ILogger<Program>>();
     logger.LogInformation("Initializing ILGPU Context and Accelerator...");
-
-    try
+    var context = Context.Create(builder => builder.Default().EnableAlgorithms());
+    var device = context.GetPreferredDevice(preferCPU: false);
+    if (device == null)
     {
-        var context = Context.Create(builder => builder.Default().EnableAlgorithms());
-
-        var device = context.GetPreferredDevice(preferCPU: false);
-
-        if (device == null)
-        {
-            logger.LogWarning("No suitable ILGPU device found. GPU acceleration will be unavailable.");
-            throw new InvalidOperationException("ILGPU Accelerator could not be created as no suitable device was found.");
-        }
-
-        logger.LogInformation("Found ILGPU Device: {DeviceName}", device.Name);
-
-        var accelerator = device.CreateAccelerator(context);
-        logger.LogInformation("ILGPU Accelerator created successfully for {AcceleratorName}", accelerator.Name);
-
-        return accelerator;
+        logger.LogCritical("No suitable ILGPU device found.");
+        throw new InvalidOperationException("ILGPU Accelerator could not be created.");
     }
-    catch (Exception ex)
-    {
-        logger.LogCritical(ex, "A critical error occurred while initializing the ILGPU Accelerator. The application cannot start.");
-        throw;
-    }
+    logger.LogInformation("Found ILGPU Device: {DeviceName}", device.Name);
+    var accelerator = device.CreateAccelerator(context);
+    logger.LogInformation("ILGPU Accelerator created successfully for {AcceleratorName}", accelerator.Name);
+    return accelerator;
 });
 
 builder.Services.AddHangfire(configuration => configuration
@@ -166,7 +180,6 @@ builder.Services.AddHangfire(configuration => configuration
 builder.Services.AddHangfireServer(options =>
 {
     options.WorkerCount = Environment.ProcessorCount;
-    options.Queues = new[] { "default" };
 });
 
 builder.Services.AddEndpointsApiExplorer();
@@ -209,6 +222,7 @@ app.UseHangfireDashboard("/hangfire", new DashboardOptions
 {
     Authorization = new[] { new Hangfire.Dashboard.AllowAllConnectionsFilter() }
 });
+
 app.MapControllers();
 
 app.MapGet("/", () => Results.Redirect("/swagger"));

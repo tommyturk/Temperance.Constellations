@@ -1,4 +1,5 @@
-﻿using Temperance.Data.Data.Repositories.Securities.Interfaces;
+﻿using Microsoft.Extensions.Logging;
+using Temperance.Data.Data.Repositories.Securities.Interfaces;
 using Temperance.Data.Models.HistoricalData;
 using Temperance.Data.Models.Securities.SecurityOverview;
 using Temperance.Services.Services.Interfaces;
@@ -9,11 +10,19 @@ namespace Temperance.Services.Services.Implementations
     {
         private readonly ISecuritiesOverviewRepository _securitiesOverviewRepository;
         private readonly IAlphaVantageService _alphaVantageService;
+        private readonly ILogger<SecuritiesOverviewService> _logger;
 
-        public SecuritiesOverviewService(ISecuritiesOverviewRepository securitiesOverviewRepository, IAlphaVantageService alphaVantageService)
+        public SecuritiesOverviewService(ISecuritiesOverviewRepository securitiesOverviewRepository, IAlphaVantageService alphaVantageService,
+            ILogger<SecuritiesOverviewService> logger)
         {
             _securitiesOverviewRepository = securitiesOverviewRepository;
             _alphaVantageService = alphaVantageService;
+            _logger = logger; 
+
+            if (_securitiesOverviewRepository == null)
+                _logger.LogCritical("FATAL: SecuritiesOverviewService was created, but its ISecuritiesOverviewRepository is NULL!");
+            else
+                _logger.LogInformation("SecuritiesOverviewService instance created successfully with a valid repository.");
         }
 
         public async Task<int> GetSecurityId(string symbol)
@@ -26,9 +35,18 @@ namespace Temperance.Services.Services.Implementations
             return await _securitiesOverviewRepository.GetSecurities();
         }
 
+        [Obsolete("This method is deprecated. Use StreamSecuritiesForBacktest instead.")]
         public async Task<List<SymbolCoverageBacktestModel>> GetSecuritiesForBacktest(List<string> symbols = null, List<string> intervals = null)
         {
             return await _securitiesOverviewRepository.GetSecuritiesForBacktest(symbols, intervals);
+        }
+
+        public IAsyncEnumerable<SymbolCoverageBacktestModel> StreamSecuritiesForBacktest(
+           List<string> symbols,
+           List<string> intervals,
+           CancellationToken cancellationToken = default)
+        {
+            return _securitiesOverviewRepository.StreamSecuritiesForBacktest(symbols, intervals, cancellationToken);
         }
 
         public async Task<SecuritySearchResponse> SearchSecuritiesAsync(string query)

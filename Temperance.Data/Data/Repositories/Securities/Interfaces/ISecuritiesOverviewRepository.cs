@@ -7,6 +7,8 @@ namespace Temperance.Data.Data.Repositories.Securities.Interfaces
     {
         Task<List<string>> GetSecurities();
 
+        IAsyncEnumerable<SymbolCoverageBacktestModel> StreamSecuritiesForBacktest(List<string> symbols, List<string> intervals, CancellationToken cancellationToken = default);
+
         Task<List<SymbolCoverageBacktestModel>> GetSecuritiesForBacktest(List<string> symbols = null, List<string> intervals = null);
 
         Task<bool> UpdateSecuritiesOverview(int securityId, SecuritiesOverview SecuritiesOverview);

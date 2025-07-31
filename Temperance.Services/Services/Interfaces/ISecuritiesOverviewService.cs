@@ -7,6 +7,10 @@ namespace Temperance.Services.Services.Interfaces
     {
         Task<List<string>> GetSecurities();
         Task<List<SymbolCoverageBacktestModel>> GetSecuritiesForBacktest(List<string> symbol = null, List<string> intervals = null);
+        IAsyncEnumerable<SymbolCoverageBacktestModel> StreamSecuritiesForBacktest(
+           List<string> symbols,
+           List<string> intervals,
+           [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default);
         Task<bool> UpdateSecuritiesOverviewData(int securityId, string symbols);
         Task<SecuritySearchResponse> SearchSecuritiesAsync(string query);
         Task<SecuritiesOverview> GetSecurityOverview(string symbol);

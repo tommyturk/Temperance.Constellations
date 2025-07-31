@@ -2,6 +2,7 @@
 {
     public class TradeSummary
     {
+        public Guid Id { get; set; } = Guid.NewGuid();
         public Guid RunId { get; set; }
         public string Symbol { get; set; } = string.Empty;
         public string Interval { get; set; } = string.Empty;

@@ -20,5 +20,7 @@ namespace Temperance.Data.Data.Repositories.Trade.Interfaces
         Task<BacktestRun?> GetBacktestRunAsync(Guid runId); // Fetch run summary data
         Task<IEnumerable<TradeSummary>> GetBacktestTradesAsync(Guid runId); // Fetch trades for a run
         // Optional: Task<string?> GetBacktestRunStatusOnlyAsync(Guid runId); if needed
+
+        Task SaveOrUpdateBacktestTradeAsync(TradeSummary trade);
     }
 }

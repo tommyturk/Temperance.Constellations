@@ -3,7 +3,6 @@ using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Logging;
 using System.Data;
 using System.Text.Json;
-using TradingApp.src.Data.Repositories.HistoricalPrices.Interfaces;
 using Temperance.Data.Data.Repositories.Trade.Interfaces;
 using Temperance.Data.Models.Backtest;
 using Temperance.Data.Models.Trading;
@@ -38,7 +37,7 @@ namespace Temperance.Data.Data.Repositories.Trade.Implementations
             catch (Exception ex) { _logger.LogError(ex, "Error saving live/sim trade for Symbol {Symbol}", trade?.Symbol); throw; }
         }
 
-        public async Task<int> ExecuteOrderAsync(Models.Trading.Order order)
+        public async Task<int> ExecuteOrderAsync(Order order)
         {
             // ... your existing implementation ...
             using var connection = new SqlConnection(_connectionString);
@@ -51,7 +50,7 @@ namespace Temperance.Data.Data.Repositories.Trade.Implementations
             catch (Exception ex) { _logger.LogError(ex, "Error executing order for TradeID {TradeID}", order?.TradeID); throw; }
         }
 
-        public async Task<int> UpdatePositionAsync(Models.Trading.Position position)
+        public async Task<int> UpdatePositionAsync(Position position)
         {
             // ... your existing implementation ...
             // WARNING: This MERGE logic for average price might be inaccurate for complex scenarios (e.g., shorting, partial closes)
@@ -263,6 +262,50 @@ namespace Temperance.Data.Data.Repositories.Trade.Implementations
             {
                 _logger.LogError(ex, "Failed to get backtest trades for {RunId}.", runId);
                 return Enumerable.Empty<TradeSummary>(); // Return empty list on error
+            }
+        }
+
+        public async Task SaveOrUpdateBacktestTradeAsync(TradeSummary trade)
+        {
+            const string sql = @"
+            MERGE INTO [TradingBotDb].[Constellations].[BacktestTrades] AS target
+            USING (SELECT @Id AS Id) AS source
+            ON target.Id = source.Id
+            WHEN MATCHED THEN
+                UPDATE SET
+                    ExitDate = @ExitDate,
+                    ExitPrice = @ExitPrice,
+                    ProfitLoss = @ProfitLoss,
+                    TotalTransactionCost = @TotalTransactionCost
+            WHEN NOT MATCHED THEN
+                INSERT (Id, RunId, Symbol, Interval, StrategyName, EntryDate, EntryPrice, Quantity, Direction, TotalTransactionCost, CreatedDate)
+                VALUES (@Id, @RunId, @Symbol, @Interval, @StrategyName, @EntryDate, @EntryPrice, @Quantity, @Direction, @TotalTransactionCost, @CreatedDate);
+        ";
+            try
+            {
+                using var connection = CreateConnection();
+                await connection.ExecuteAsync(sql, new
+                {
+                    trade.Id,
+                    trade.RunId,
+                    trade.Symbol,
+                    trade.Interval,
+                    trade.StrategyName,
+                    trade.EntryDate,
+                    trade.ExitDate,
+                    trade.EntryPrice,
+                    trade.ExitPrice,
+                    trade.Quantity,
+                    trade.Direction,
+                    trade.ProfitLoss,
+                    TotalTransactionCost = trade.TransactionCost,
+                    CreatedDate = DateTime.UtcNow
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to save or update backtest trade {TradeId} for run {RunId}.", trade.Id, trade.RunId);
+                throw;
             }
         }
     }

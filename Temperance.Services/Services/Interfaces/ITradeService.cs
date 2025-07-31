@@ -23,5 +23,7 @@ namespace TradingApp.src.Core.Services.Interfaces
         Task SaveBacktestResults(Guid runId, BacktestResult backtestResult, string symbol, string interval);
 
         Task UpdateBacktestPerformanceMetrics(Guid runId, BacktestResult metrics, double initialCapital);
+
+        Task SaveOrUpdateBacktestTrade(TradeSummary trade);
     }
 }

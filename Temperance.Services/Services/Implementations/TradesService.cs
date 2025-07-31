@@ -111,6 +111,10 @@ namespace TradingApp.src.Core.Services.Implementations
                 await _tradeRepository.SaveBacktestTradesAsync(runId, backtestResult.Trades);
             }
         }
+        public async Task SaveOrUpdateBacktestTrade(TradeSummary trade)
+        {
+            await _tradeRepository.SaveOrUpdateBacktestTradeAsync(trade);
+        }
 
         public async Task UpdateBacktestRunTotalsAsync(Guid runId, BacktestResult result)
         {
