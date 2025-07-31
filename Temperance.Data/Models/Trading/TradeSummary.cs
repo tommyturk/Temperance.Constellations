@@ -16,5 +16,16 @@
         public int Quantity { get; set; }
         public DateTime HoldingPeriod { get; set; }
         public double TransactionCost { get; set; }
+
+        public double? CommissionCost { get; set; }
+        public double? SlippageCost { get; set; }
+        public double? OtherTransactionCost { get; set; } 
+        public double? TotalTransactionCost { get; set; }
+        public double? GrossProfitLoss { get; set; }
+        public int? HoldingPeriodMinutes { get; set; }
+        public double? MaxAdverseExcursion { get; set; }
+        public double? MaxFavorableExcursion { get; set; }
+        public string? EntryReason { get; set; }
+        public string? ExitReason { get; set; }
     }
 }

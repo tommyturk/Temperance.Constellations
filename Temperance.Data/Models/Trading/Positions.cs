@@ -9,6 +9,9 @@
         public PositionDirection Direction { get; set; }
         //public int PositionID { get; set; }
         public int SecurityID { get; set; }
+
+        public double TotalEntryCost { get; set; }
+
         //public string Symbol { get; set; } = string.Empty;
         //public int Quantity { get; set; }
         //public decimal AveragePrice { get; set; }

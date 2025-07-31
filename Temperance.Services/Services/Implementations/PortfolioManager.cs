@@ -59,13 +59,18 @@ namespace Temperance.Services.Services.Implementations
             return Task.FromResult(GetAvailableCapital() >= allocationAmount);
         }
 
-        public Task OpenPosition(string symbol, string interval, PositionDirection direction, int quantity, double entryPrice, DateTime entryDate, double transactionCost)
+        public Task OpenPosition(string symbol, string interval, PositionDirection direction, int quantity, double entryPrice, DateTime entryDate, double totalEntryCost)
         {
-            double totalCost = (quantity * entryPrice) + transactionCost;
+            double totalCashOutlay = (quantity * entryPrice) + totalEntryCost;
 
             lock (_cashLock)
             {
-                _currentCash -= totalCost;
+                if (_currentCash < totalCashOutlay)
+                {
+                    _logger.LogWarning("Insufficient cash to open position for {Symbol}. Required: {Required}, Available: {Available}", symbol, totalCashOutlay, _currentCash);
+                    return Task.CompletedTask;
+                }
+                _currentCash -= totalCashOutlay;
             }
 
             var newPosition = new Position
@@ -74,18 +79,15 @@ namespace Temperance.Services.Services.Implementations
                 Direction = direction,
                 Quantity = quantity,
                 EntryPrice = entryPrice,
-                EntryDate = entryDate
+                EntryDate = entryDate,
+                TotalEntryCost = totalEntryCost
             };
 
             if (!_openPositions.TryAdd(symbol, newPosition))
             {
                 _logger.LogError("Failed to open position for {Symbol} as one already exists.", symbol);
-                lock (_cashLock)
-                {
-                    _currentCash += totalCost;
-                }
+                lock (_cashLock) { _currentCash += totalCashOutlay; }
             }
-
             return Task.CompletedTask;
         }
 

@@ -179,22 +179,26 @@ namespace Temperance.Services.BackTesting.Implementations
                             {
                                 if (!liquidityService.IsSymbolLiquidAtTime(symbol, interval, minimumAdv, currentBar.Timestamp, rollingAdvLookbackBars, orderedData)) continue;
 
-                                double effectiveEntryPrice = await transactionCostService.CalculateEntryCost(currentBar.ClosePrice, signal, symbol, interval, currentBar.Timestamp);
-                                if (effectiveEntryPrice <= 0) continue;
-
-                                int quantity = (int)Math.Round(allocationAmount / effectiveEntryPrice);
+                                double rawEntryPrice = currentBar.ClosePrice;
+                                int quantity = (int)Math.Round(allocationAmount / rawEntryPrice);
                                 if (quantity <= 0) continue;
 
-                                double entrySpreadCost = await transactionCostService.GetSpreadCost(currentBar.ClosePrice, quantity, symbol, interval, currentBar.Timestamp);
-                                double totalCost = (quantity * effectiveEntryPrice) + entrySpreadCost;
+                                // --- Calculate ALL Entry Costs ---
+                                double effectiveEntryPrice = await transactionCostService.CalculateEntryCost(rawEntryPrice, signal, symbol, interval, currentBar.Timestamp);
+                                double commissionCost = await transactionCostService.CalculateCommissionCost(rawEntryPrice, quantity, symbol, interval, currentBar.Timestamp);
+                                double slippageCost = await transactionCostService.CalculateSlippageCost(rawEntryPrice, quantity, (signal == SignalDecision.Buy ? PositionDirection.Long : PositionDirection.Short), symbol, interval, currentBar.Timestamp);
+                                double spreadAndOtherCost = await transactionCostService.GetSpreadCost(rawEntryPrice, quantity, symbol, interval, currentBar.Timestamp);
+                                double totalEntryCost = commissionCost + slippageCost + spreadAndOtherCost;
 
-                                if (await portfolioManager.CanOpenPosition(totalCost))
+                                double totalCashOutlay = (quantity * effectiveEntryPrice) + totalEntryCost;
+                                if (await portfolioManager.CanOpenPosition(totalCashOutlay))
                                 {
                                     var direction = (signal == SignalDecision.Buy) ? PositionDirection.Long : PositionDirection.Short;
-                                    await portfolioManager.OpenPosition(symbol, interval, direction, quantity, effectiveEntryPrice, currentBar.Timestamp, entrySpreadCost);
+                                    await portfolioManager.OpenPosition(symbol, interval, direction, quantity, effectiveEntryPrice, currentBar.Timestamp, totalEntryCost);
 
                                     activeTrade = new TradeSummary
                                     {
+                                        Id = Guid.NewGuid(),
                                         RunId = runId,
                                         StrategyName = strategyInstance.Name,
                                         EntryDate = currentBar.Timestamp,
@@ -203,13 +207,16 @@ namespace Temperance.Services.BackTesting.Implementations
                                         Quantity = quantity,
                                         Symbol = symbol,
                                         Interval = interval,
-                                        TransactionCost = entrySpreadCost,
+                                        CommissionCost = commissionCost,
+                                        SlippageCost = slippageCost,
+                                        OtherTransactionCost = spreadAndOtherCost,
+                                        TotalTransactionCost = totalEntryCost,
+                                        EntryReason = strategyInstance.GetEntryReason(in currentBar, dataWindowSpan, currentIndicatorValues)
                                     };
-
                                     currentPosition = portfolioManager.GetOpenPositions().FirstOrDefault(p => p.Symbol == symbol);
-                                    _logger.LogInformation("RunId: {RunId} - Position OPENED: {Symbol}", runId, symbol);
 
                                     await tradesService.SaveOrUpdateBacktestTrade(activeTrade);
+                                    _logger.LogInformation("RunId: {RunId} - Position OPENED and SAVED for {Symbol}", runId, symbol);
                                 }
                             }
                         }
@@ -248,29 +255,52 @@ namespace Temperance.Services.BackTesting.Implementations
         }
 
         private async Task<TradeSummary?> ClosePositionAsync(
-            IPortfolioManager portfolioManager,
-            ITransactionCostService transactionCostService,
-            IPerformanceCalculator performanceCalculator,
-            ITradeService tradesService, // Add the scoped trade service
+            IPortfolioManager portfolioManager, ITransactionCostService transactionCostService,
+            IPerformanceCalculator performanceCalculator, ITradeService tradesService,
             ISingleAssetStrategy strategyInstance,
-            TradeSummary activeTrade, Position currentPosition, HistoricalPriceModel exitBar,
+            TradeSummary activeTrade, Position currentPosition, HistoricalPriceModel exitBar, List<HistoricalPriceModel> orderedData,
             string symbol, string interval, Guid runId, int rollingKellyLookbackTrades,
             ConcurrentDictionary<string, double> symbolKellyHalfFractions)
         {
             double rawExitPrice = exitBar.ClosePrice;
-            PositionDirection exitPositionDirection = currentPosition.Direction;
-            double effectiveExitPrice = await transactionCostService.CalculateExitCost(rawExitPrice, exitPositionDirection, symbol, interval, exitBar.Timestamp);
+            PositionDirection exitDirection = currentPosition.Direction;
+
+            double effectiveExitPrice = await transactionCostService.CalculateExitCost(rawExitPrice, exitDirection, symbol, interval, exitBar.Timestamp);
+            double commissionCost = await transactionCostService.CalculateCommissionCost(rawExitPrice, currentPosition.Quantity, symbol, interval, exitBar.Timestamp);
+            double slippageCost = await transactionCostService.CalculateSlippageCost(rawExitPrice, currentPosition.Quantity, exitDirection, symbol, interval, exitBar.Timestamp);
+            double spreadAndOtherCost = await transactionCostService.GetSpreadCost(rawExitPrice, currentPosition.Quantity, symbol, interval, exitBar.Timestamp);
+            double totalExitCost = commissionCost + slippageCost + spreadAndOtherCost;
+
+            double grossPnl = (exitDirection == PositionDirection.Long)
+             ? (rawExitPrice - currentPosition.EntryPrice) * currentPosition.Quantity
+             : (currentPosition.EntryPrice - rawExitPrice) * currentPosition.Quantity;
+
+            double totalTransactionCost = (activeTrade.TotalTransactionCost ?? 0) + totalExitCost;
+            double netPnl = grossPnl - totalTransactionCost;
+
+            var tradeHistoricalData = orderedData.Where(d => d.Timestamp >= activeTrade.EntryDate && d.Timestamp <= exitBar.Timestamp).ToList();
+            double maxAdverseExcursion = 0, maxFavorableExcursion = 0;
+
             double exitSpreadCost = await transactionCostService.GetSpreadCost(rawExitPrice, currentPosition.Quantity, symbol, interval, exitBar.Timestamp);
-            double profitLoss = (exitPositionDirection == PositionDirection.Long)
+            double profitLoss = (exitDirection == PositionDirection.Long)
                 ? (effectiveExitPrice - activeTrade.EntryPrice) * currentPosition.Quantity
                 : (activeTrade.EntryPrice - effectiveExitPrice) * currentPosition.Quantity;
-            double totalTradeTransactionCost = activeTrade.TransactionCost + exitSpreadCost;
 
-            var closedTrade = await portfolioManager.ClosePosition(
-                strategyInstance.Name, symbol, interval, exitPositionDirection,
-                currentPosition.Quantity, effectiveExitPrice, exitBar.Timestamp,
-                totalTradeTransactionCost, profitLoss
-            );
+            activeTrade.ExitDate = exitBar.Timestamp;
+            activeTrade.ExitPrice = effectiveExitPrice;
+            activeTrade.GrossProfitLoss = grossPnl;
+            activeTrade.ProfitLoss = netPnl;
+            activeTrade.CommissionCost = (activeTrade.CommissionCost ?? 0) + commissionCost;
+            activeTrade.SlippageCost = (activeTrade.SlippageCost ?? 0) + slippageCost;
+            activeTrade.OtherTransactionCost = (activeTrade.OtherTransactionCost ?? 0) + spreadAndOtherCost;
+            activeTrade.TotalTransactionCost = totalTransactionCost;
+            activeTrade.HoldingPeriodMinutes = (int)(exitBar.Timestamp - activeTrade.EntryDate).TotalMinutes;
+            activeTrade.MaxAdverseExcursion = maxAdverseExcursion;
+            activeTrade.MaxFavorableExcursion = maxFavorableExcursion;
+            activeTrade.ExitReason = strategyInstance.GetExitReason(in exitBar, CollectionsMarshal.AsSpan(orderedData).Slice(0, orderedData.Count), new Dictionary<string, double>()); // You'll need to get indicators here if reason depends on them.
+
+
+            var closedTrade = await portfolioManager.ClosePosition(activeTrade);
 
             if (closedTrade != null)
             {
