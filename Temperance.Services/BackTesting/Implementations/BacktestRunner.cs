@@ -169,7 +169,7 @@ namespace Temperance.Services.BackTesting.Implementations
                             if (shouldExit && currentPosition != null && activeTrade != null)
                             {
                                 var closedTrade = await ClosePositionAsync(portfolioManager, transactionCostService, performanceCalculator, tradesService, strategyInstance, activeTrade, currentPosition,
-                                    currentBar, symbol, interval, runId, rollingKellyLookbackTrades, symbolKellyHalfFractions);
+                                    currentBar, orderedData, symbol, interval, runId, rollingKellyLookbackTrades, symbolKellyHalfFractions);
 
                                 if (closedTrade != null) allTrades.Add(closedTrade);
                                 currentPosition = null;
@@ -211,7 +211,7 @@ namespace Temperance.Services.BackTesting.Implementations
                                         SlippageCost = slippageCost,
                                         OtherTransactionCost = spreadAndOtherCost,
                                         TotalTransactionCost = totalEntryCost,
-                                        EntryReason = strategyInstance.GetEntryReason(in currentBar, dataWindowSpan, currentIndicatorValues)
+                                        EntryReason = strategyInstance.GetEntryReason(in currentBar, orderedData.Take(i + 1).ToList(), currentIndicatorValues)
                                     };
                                     currentPosition = portfolioManager.GetOpenPositions().FirstOrDefault(p => p.Symbol == symbol);
 
@@ -224,7 +224,8 @@ namespace Temperance.Services.BackTesting.Implementations
                         if (currentPosition != null && activeTrade != null)
                         {
                             var lastBar = orderedData.LastOrDefault(b => b.Timestamp <= config.EndDate) ?? orderedData.Last();
-                            var closedTrade = await ClosePositionAsync(portfolioManager, transactionCostService, performanceCalculator, _tradesService, strategyInstance, activeTrade, currentPosition, lastBar, symbol, interval, runId, rollingKellyLookbackTrades, symbolKellyHalfFractions);
+                            var closedTrade = await ClosePositionAsync(portfolioManager, transactionCostService, performanceCalculator, tradesService, strategyInstance, activeTrade, currentPosition, lastBar, orderedData, 
+                                symbol, interval, runId, rollingKellyLookbackTrades, symbolKellyHalfFractions);
                             if (closedTrade != null) allTrades.Add(closedTrade);
                         }
                     }
@@ -297,8 +298,7 @@ namespace Temperance.Services.BackTesting.Implementations
             activeTrade.HoldingPeriodMinutes = (int)(exitBar.Timestamp - activeTrade.EntryDate).TotalMinutes;
             activeTrade.MaxAdverseExcursion = maxAdverseExcursion;
             activeTrade.MaxFavorableExcursion = maxFavorableExcursion;
-            activeTrade.ExitReason = strategyInstance.GetExitReason(in exitBar, CollectionsMarshal.AsSpan(orderedData).Slice(0, orderedData.Count), new Dictionary<string, double>()); // You'll need to get indicators here if reason depends on them.
-
+            activeTrade.ExitReason = strategyInstance.GetExitReason(in exitBar, orderedData.Slice(0, orderedData.Count), new Dictionary<string, double>()); // You'll need to get indicators here if reason depends on them.
 
             var closedTrade = await portfolioManager.ClosePosition(activeTrade);
 

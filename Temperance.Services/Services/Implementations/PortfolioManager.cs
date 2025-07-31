@@ -171,6 +171,26 @@ namespace Temperance.Services.Services.Implementations
             return Task.FromResult<TradeSummary?>(null);
         }
 
+        public Task<TradeSummary?> ClosePosition(TradeSummary completedTrade)
+        {
+            if (_openPositions.TryRemove(completedTrade.Symbol, out var closedPosition))
+            {
+                // Proceeds are the value of the shares at exit. Costs are handled separately.
+                double proceeds = completedTrade.Quantity * (completedTrade.ExitPrice ?? 0);
+
+                lock (_cashLock)
+                {
+                    _currentCash += proceeds;
+                }
+
+                _completedTradesHistory.Add(completedTrade);
+                return Task.FromResult<TradeSummary?>(completedTrade);
+            }
+
+            _logger.LogWarning("Attempted to close position for {Symbol} but no open position found.", completedTrade.Symbol);
+            return Task.FromResult<TradeSummary?>(null);
+        }
+
         public Task<TradeSummary?> ClosePairPosition(
         ActivePairTrade activeTrade,
         double exitPriceA,

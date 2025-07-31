@@ -19,6 +19,7 @@ namespace Temperance.Services.Services.Interfaces
         Task OpenPairPosition(string strategyName, string pairIdentifier, string interval, ActivePairTrade trade);
 
         Task<TradeSummary?> ClosePosition(string strategyName, string symbol, string interval, PositionDirection direction, int quantity, double exitPrice, DateTime exitDate, double transactionCost, double profitLoss);
+        Task<TradeSummary?> ClosePosition(TradeSummary completedTrade);
         Task<TradeSummary?> ClosePairPosition(
         ActivePairTrade activeTrade,
         double exitPriceA,

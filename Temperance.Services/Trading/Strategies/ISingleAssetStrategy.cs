@@ -29,6 +29,20 @@ namespace Temperance.Services.Trading.Strategies
             double kellyHalfFraction);
 
         double[] CalculateRSI(double[] prices, int period);
+
+        string GetExitReason(Position currentPosition, HistoricalPriceModel currentBar, List<HistoricalPriceModel> dataWindow, Dictionary<string, double> currentIndicatorValues);
+
+        string GetEntryReason(HistoricalPriceModel currentBar, List<HistoricalPriceModel> dataWindow, Dictionary<string, double> currentIndicatorValues);
+
+        string GetEntryReason(
+            in HistoricalPriceModel currentBar,
+            IReadOnlyList<HistoricalPriceModel> historicalDataWindow,
+            Dictionary<string, double> currentIndicatorValues);
+
+        string GetExitReason(
+            in HistoricalPriceModel currentBar,
+            IReadOnlyList<HistoricalPriceModel> historicalDataWindow,
+            Dictionary<string, double> currentIndicatorValues);
     }
 }
     
