@@ -149,47 +149,54 @@ namespace Temperance.Services.Trading.Strategies.MeanReversion.Implementation
             in HistoricalPriceModel currentBar,
             ReadOnlySpan<HistoricalPriceModel> historicalDataWindow,
             Dictionary<string, double> currentIndicatorValues,
-            double maxTradeAllocationInitialCapital,
+            double maxTradeAllocationInitialCapital, // e.g., 2% of initial capital
             double currentTotalEquity,
             double kellyHalfFraction)
         {
-            if (currentIndicatorValues == null || !currentIndicatorValues.ContainsKey("RSI"))
+            // --- 1. Generate the signal first to see if a trade is warranted ---
+            var signal = GenerateSignal(in currentBar, null, historicalDataWindow, currentIndicatorValues);
+            if (signal == SignalDecision.Hold)
             {
-                _logger.LogWarning("GetAllocationAmount called without required RSI indicator values.");
                 return 0;
             }
 
+            // --- 2. Calculate the RSI Scaling Factor based on signal strength ---
+            double rsiScalingFactor = 0;
             double lowerBollingerBand = currentIndicatorValues["LowerBand"];
             double upperBollingerBand = currentIndicatorValues["UpperBand"];
-            double currentRelativeStrengthIndex = currentIndicatorValues["RSI"];
+            double currentRsi = currentIndicatorValues["RSI"];
 
-            double calculatedAllocationFromStrategyLogic = 0;
-
-            if (currentBar.ClosePrice < lowerBollingerBand && currentRelativeStrengthIndex < _rsiOversoldThreshold)
+            if (signal == SignalDecision.Buy && currentBar.ClosePrice < lowerBollingerBand && currentRsi < _rsiOversoldThreshold)
             {
-                double distanceBelowRSIOversold = Math.Max(0, _rsiOversoldThreshold - currentRelativeStrengthIndex);
-                double rsiScalingFactor = Math.Min(1.0, distanceBelowRSIOversold / _rsiOversoldThreshold);
-                calculatedAllocationFromStrategyLogic = maxTradeAllocationInitialCapital * rsiScalingFactor;
+                double distanceBelowRSIOversold = Math.Max(0, _rsiOversoldThreshold - currentRsi);
+                // Scale from 0.5 to 1.0 to ensure the factor is always significant
+                rsiScalingFactor = 0.5 + (0.5 * Math.Min(1.0, distanceBelowRSIOversold / _rsiOversoldThreshold));
             }
-            else if (currentBar.ClosePrice > upperBollingerBand && currentRelativeStrengthIndex > _rsiOverboughtThreshold)
+            else if (signal == SignalDecision.Sell && currentBar.ClosePrice > upperBollingerBand && currentRsi > _rsiOverboughtThreshold)
             {
-                double distanceAboveRSIOverbought = Math.Max(0, currentRelativeStrengthIndex - _rsiOverboughtThreshold);
-                double rsiScalingFactor = Math.Min(1.0, distanceAboveRSIOverbought / (100.0 - _rsiOverboughtThreshold));
-                calculatedAllocationFromStrategyLogic = maxTradeAllocationInitialCapital * rsiScalingFactor;
+                double distanceAboveRSIOverbought = Math.Max(0, currentRsi - _rsiOverboughtThreshold);
+                // Scale from 0.5 to 1.0
+                rsiScalingFactor = 0.5 + (0.5 * Math.Min(1.0, distanceAboveRSIOverbought / (100.0 - _rsiOverboughtThreshold)));
             }
 
-            if (calculatedAllocationFromStrategyLogic <= 0)
-                return 0;
+            if (rsiScalingFactor <= 0) return 0; // No allocation if scaling is zero
 
-            double kellySizedAllocation = currentTotalEquity * kellyHalfFraction;
-            if (kellySizedAllocation < 0) kellySizedAllocation = 0;
+            // --- 3. Establish the BASELINE risk and apply the RSI scaling ---
+            const double baselineRiskPercentage = 0.01; // 1% baseline risk
+            double scaledAllocation = (currentTotalEquity * baselineRiskPercentage) * rsiScalingFactor;
 
-            double finalAllocationAmount = Math.Min(
-                calculatedAllocationFromStrategyLogic,
-                Math.Min(maxTradeAllocationInitialCapital, kellySizedAllocation)
-            );
+            // --- 4. Use Kelly Criterion as a dynamic CAP on the scaled allocation ---
+            // Ensure Kelly fraction has a minimum value to prevent it from going to zero
+            double effectiveKellyFraction = Math.Max(0.005, kellyHalfFraction);
+            double kellySizedCap = currentTotalEquity * effectiveKellyFraction;
 
-            return finalAllocationAmount > 0 ? finalAllocationAmount : 0;
+            // --- 5. Determine the Final Allocation ---
+            // Start with the RSI-scaled allocation
+            // Then, ensure it does not exceed the Kelly cap OR the fixed maximum safeguard
+            double finalAllocationAmount = Math.Min(scaledAllocation, kellySizedCap);
+            finalAllocationAmount = Math.Min(finalAllocationAmount, maxTradeAllocationInitialCapital);
+
+            return finalAllocationAmount;
         }
 
         private double CalculateStdDev(ReadOnlySpan<HistoricalPriceModel> values, double average)

@@ -175,7 +175,6 @@ namespace Temperance.Services.Services.Implementations
         {
             if (_openPositions.TryRemove(completedTrade.Symbol, out var closedPosition))
             {
-                // Proceeds are the value of the shares at exit. Costs are handled separately.
                 double proceeds = completedTrade.Quantity * (completedTrade.ExitPrice ?? 0);
 
                 lock (_cashLock)
@@ -211,11 +210,9 @@ namespace Temperance.Services.Services.Implementations
                 return Task.FromResult<TradeSummary?>(null);
             }
 
-            // 2. Remove the positions from the open list.
             _openPositions.Remove(positionA.Key, out Position valueA);
             _openPositions.Remove(positionB.Key, out Position valueB);
 
-            // 3. Update cash balance by adding back the value of the closing positions.
             double closingValueA = positionA.Value.Quantity * exitPriceA;
             double closingValueB = positionB.Value.Quantity * exitPriceB;
             _currentCash += closingValueA + closingValueB - totalExitTransactionCost;
@@ -223,7 +220,6 @@ namespace Temperance.Services.Services.Implementations
             var positionAValue = positionA.Value;
             var positionBValue = positionB.Value;
 
-            // 4. Calculate P&L internally to ensure data integrity. This should match the runner's calculation.
             double pnlA = (positionAValue.Direction == PositionDirection.Long)
                 ? (exitPriceA - positionAValue.EntryPrice) * positionAValue.Quantity
                 : (positionAValue.EntryPrice - exitPriceA) * positionAValue.Quantity;
@@ -233,19 +229,17 @@ namespace Temperance.Services.Services.Implementations
             double totalTransactionCost = activeTrade.TotalEntryTransactionCost + totalExitTransactionCost;
             double netProfitLoss = (pnlA + pnlB) - totalTransactionCost;
 
-            // 5. Create a single TradeSummary object to represent the aggregate result of the pair trade.
             var summary = new TradeSummary
             {
-                Symbol = $"{activeTrade.SymbolA}/{activeTrade.SymbolB}", // Use a pair identifier
-                Direction = activeTrade.Direction.ToString(), // "Long" or "Short" the spread
+                Symbol = $"{activeTrade.SymbolA}/{activeTrade.SymbolB}", 
+                Direction = activeTrade.Direction.ToString(),
                 EntryDate = activeTrade.EntryDate,
                 ExitDate = exitTimestamp,
                 ProfitLoss = netProfitLoss,
                 TransactionCost = totalTransactionCost,
-                Quantity = positionAValue.Quantity + positionBValue.Quantity, // Total quantity of both legs
+                Quantity = positionAValue.Quantity + positionBValue.Quantity,
             };
 
-            // 6. Add to completed trades and return.
             _completedTradesHistory.Add(summary);
 
             return Task.FromResult<TradeSummary?>(summary);

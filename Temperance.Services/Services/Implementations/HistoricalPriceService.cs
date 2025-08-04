@@ -1,12 +1,9 @@
 ﻿using Polly;
 using System.Collections.Concurrent;
-using System.Diagnostics.Contracts;
-using System.Text;
-using TradingApp.src.Data.Repositories.HistoricalPrices.Interfaces;
 using Temperance.Data.Models.HistoricalData;
 using Temperance.Data.Models.HistoricalPriceData;
 using Temperance.Services.Services.Interfaces;
-using Temperance.Utilities.Common;
+using TradingApp.src.Data.Repositories.HistoricalPrices.Interfaces;
 
 namespace TradingApp.src.Core.Services.Implementations
 {
@@ -52,7 +49,6 @@ namespace TradingApp.src.Core.Services.Implementations
 
         public async Task RunBacktestInternalAsync(string symbol, string interval, CancellationToken ct, BackfillStatus status)
         {
-            // Create a semaphore with a count of 1 (or a higher number if you want some parallelism).
             var semaphore = new SemaphoreSlim(1, 1);
 
             try

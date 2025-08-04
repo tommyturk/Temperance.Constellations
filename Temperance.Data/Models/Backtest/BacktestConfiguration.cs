@@ -10,5 +10,7 @@
         public DateTime EndDate { get; set; }
         public double InitialCapital { get; set; } = 10000;
         public int MaxParallelism { get; set; } = Environment.ProcessorCount;
+
+        public bool UseMocExit { get; set; } = false;
     }
 }
