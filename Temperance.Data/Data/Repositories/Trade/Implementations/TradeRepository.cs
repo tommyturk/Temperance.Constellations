@@ -268,19 +268,33 @@ namespace Temperance.Data.Data.Repositories.Trade.Implementations
         public async Task SaveOrUpdateBacktestTradeAsync(TradeSummary trade)
         {
             const string sql = @"
-            MERGE INTO [TradingBotDb].[Constellations].[BacktestTrades] AS target
-            USING (SELECT @Id AS Id) AS source
-            ON target.Id = source.Id
-            WHEN MATCHED THEN
-                UPDATE SET
-                    ExitDate = @ExitDate,
-                    ExitPrice = @ExitPrice,
-                    ProfitLoss = @ProfitLoss,
-                    TotalTransactionCost = @TotalTransactionCost
-            WHEN NOT MATCHED THEN
-                INSERT (Id, RunId, Symbol, Interval, StrategyName, EntryDate, EntryPrice, Quantity, Direction, TotalTransactionCost, CreatedDate)
-                VALUES (@Id, @RunId, @Symbol, @Interval, @StrategyName, @EntryDate, @EntryPrice, @Quantity, @Direction, @TotalTransactionCost, @CreatedDate);
-        ";
+                MERGE INTO [TradingBotDb].[Constellations].[BacktestTrades] AS target
+                USING (SELECT @Id AS Id) AS source
+                ON target.Id = source.Id
+                WHEN MATCHED THEN
+                    UPDATE SET
+                        ExitDate = @ExitDate,
+                        ExitPrice = @ExitPrice,
+                        ProfitLoss = @ProfitLoss,
+                        CommissionCost = @CommissionCost,
+                        SlippageCost = @SlippageCost,
+                        OtherTransactionCost = @OtherTransactionCost,
+                        TotalTransactionCost = @TotalTransactionCost,
+                        GrossProfitLoss = @GrossProfitLoss,
+                        HoldingPeriodMinutes = @HoldingPeriodMinutes,
+                        MaxAdverseExcursion = @MaxAdverseExcursion,
+                        MaxFavorableExcursion = @MaxFavorableExcursion,
+                        ExitReason = @ExitReason
+                WHEN NOT MATCHED THEN
+                    INSERT (
+                        Id, RunId, Symbol, Interval, StrategyName, EntryDate, EntryPrice, Quantity, Direction, 
+                        CommissionCost, SlippageCost, OtherTransactionCost, TotalTransactionCost, EntryReason, CreatedDate
+                    )
+                    VALUES (
+                        @Id, @RunId, @Symbol, @Interval, @StrategyName, @EntryDate, @EntryPrice, @Quantity, @Direction, 
+                        @CommissionCost, @SlippageCost, @OtherTransactionCost, @TotalTransactionCost, @EntryReason, @CreatedDate
+                    );
+            ";
             try
             {
                 using var connection = CreateConnection();
@@ -298,7 +312,16 @@ namespace Temperance.Data.Data.Repositories.Trade.Implementations
                     trade.Quantity,
                     trade.Direction,
                     trade.ProfitLoss,
-                    TotalTransactionCost = trade.TransactionCost,
+                    trade.CommissionCost,
+                    trade.SlippageCost,
+                    trade.OtherTransactionCost,
+                    trade.TotalTransactionCost,
+                    trade.GrossProfitLoss,
+                    trade.HoldingPeriodMinutes,
+                    trade.MaxAdverseExcursion,
+                    trade.MaxFavorableExcursion,
+                    trade.EntryReason,
+                    trade.ExitReason,
                     CreatedDate = DateTime.UtcNow
                 });
             }

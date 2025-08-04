@@ -235,13 +235,9 @@ namespace Temperance.Services.BackTesting.Implementations
                     }
                 });
 
-                // --- 5. FINALIZATION ---
                 result.Trades.AddRange(allTrades);
                 result.TotalTrades = result.Trades.Count;
                 _logger.LogInformation("RunId: {RunId} - Backtest completed. Total trades generated: {TradeCount}", runId, result.TotalTrades);
-
-                // Save all trades to the database in one single, safe operation after the parallel work is done.
-                await _tradesService.SaveBacktestResults(runId, result, "AGGREGATE", "AGGREGATE");
 
                 await _performanceCalculator.CalculatePerformanceMetrics(result, config.InitialCapital);
                 await _tradesService.UpdateBacktestPerformanceMetrics(runId, result, config.InitialCapital);
