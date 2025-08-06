@@ -81,8 +81,7 @@ namespace Temperance.Services.BackTesting.Implementations
                 await Parallel.ForEachAsync(testCaseStream, parallelOptions, async (testCase, cancellationToken) =>
                 {
                     await using var scope = _serviceProvider.CreateAsyncScope();
-                    var strategyInstance = _strategyFactory.CreateStrategy<ISingleAssetStrategy>(
-                        config.StrategyName, config.InitialCapital, config.StrategyParameters);
+                    var strategyInstance = _strategyFactory.CreateStrategy<ISingleAssetStrategy>(config.StrategyName, config.InitialCapital, config.StrategyParameters);
                     if (strategyInstance == null) return;
 
                     var portfolioManager = scope.ServiceProvider.GetRequiredService<IPortfolioManager>();
@@ -107,13 +106,12 @@ namespace Temperance.Services.BackTesting.Implementations
                         var lastBarTimestamps = new HashSet<DateTime>();
                         if (config.UseMocExit)
                         {
-                            lastBarTimestamps = orderedData
-                                .GroupBy(p => p.Timestamp.Date)
-                                .Select(g => g.Max(p => p.Timestamp))
-                                .ToHashSet();
+                            lastBarTimestamps = orderedData.GroupBy(p => p.Timestamp.Date)
+                                                           .Select(g => g.Max(p => p.Timestamp))
+                                                           .ToHashSet();
                         }
 
-                        _logger.LogInformation("RunId: {RunId} - Processing {Symbol} [{Interval}]", runId, symbol, interval);
+                        _logger.LogInformation($"RunId: {runId} - Processing {symbol} [{interval}]");
 
                         var closePrices = orderedData.Select(p => p.ClosePrice).ToArray();
                         var movingAverage = _gpuIndicatorService.CalculateSma(closePrices, strategyMinimumLookback);
@@ -123,7 +121,7 @@ namespace Temperance.Services.BackTesting.Implementations
                         var lowerBand = movingAverage.Zip(standardDeviation, (m, s) => m - (2 * s)).ToArray();
                         var indicators = new Dictionary<string, double[]>
                         {
-                    { "RSI", rsi }, { "UpperBand", upperBand }, { "LowerBand", lowerBand }
+                            { "RSI", rsi }, { "UpperBand", upperBand }, { "LowerBand", lowerBand }
                         };
 
                         var timestampIndexMap = orderedData.Select((data, index) => new { data.Timestamp, index }).ToDictionary(x => x.Timestamp, x => x.index);
@@ -132,7 +130,7 @@ namespace Temperance.Services.BackTesting.Implementations
 
                         Position? currentPosition = null;
                         TradeSummary? activeTrade = null;
-                        double currentSymbolKellyHalfFraction = symbolKellyHalfFractions.GetOrAdd(symbol + "_" + interval, 0.01);
+                        double currentSymbolKellyHalfFraction = symbolKellyHalfFractions.GetOrAdd($"{symbol}_{interval}", 0.01);
 
                         for (int i = backtestStartIndex; i < orderedData.Count; i++)
                         {
@@ -142,14 +140,14 @@ namespace Temperance.Services.BackTesting.Implementations
 
                             var currentIndicatorValues = new Dictionary<string, double>
                             {
-                        { "RSI", indicators["RSI"][globalIndex] },
-                        { "UpperBand", indicators["UpperBand"][globalIndex] },
-                        { "LowerBand", indicators["LowerBand"][globalIndex] },
+                                { "RSI", indicators["RSI"][globalIndex] },
+                                { "UpperBand", indicators["UpperBand"][globalIndex] },
+                                { "LowerBand", indicators["LowerBand"][globalIndex] }
                             };
 
+                            ReadOnlySpan<HistoricalPriceModel> dataWindowSpan = CollectionsMarshal.AsSpan(orderedData).Slice(0, i + 1);
                             bool shouldExit = false;
                             var exitReason = "Hold";
-                            ReadOnlySpan<HistoricalPriceModel> dataWindowSpan = CollectionsMarshal.AsSpan(orderedData).Slice(0, i + 1);
 
                             if (currentPosition != null)
                             {
@@ -157,22 +155,10 @@ namespace Temperance.Services.BackTesting.Implementations
                                 if (config.UseMocExit)
                                 {
                                     bool isMocBar = lastBarTimestamps.Contains(currentBar.Timestamp);
-                                    if (strategyExitTriggered)
-                                    {
-                                        shouldExit = true;
-                                        exitReason = "Strategy Exit (Stop-Loss)";
-                                    }
-                                    else if (isMocBar)
-                                    {
-                                        shouldExit = true;
-                                        exitReason = "Market on Close";
-                                    }
+                                    if (strategyExitTriggered) { shouldExit = true; exitReason = "Strategy Exit (Stop-Loss)"; }
+                                    else if (isMocBar) { shouldExit = true; exitReason = "Market on Close"; }
                                 }
-                                else if (strategyExitTriggered)
-                                {
-                                    shouldExit = true;
-                                    exitReason = "Strategy Exit";
-                                }
+                                else if (strategyExitTriggered) { shouldExit = true; exitReason = "Strategy Exit"; }
                             }
 
                             if (shouldExit && currentPosition != null && activeTrade != null)
@@ -185,32 +171,34 @@ namespace Temperance.Services.BackTesting.Implementations
                                 }
                                 currentPosition = null;
                                 activeTrade = null;
+                                continue;
                             }
-                            else if (currentPosition == null)
+
+                            var signal = strategyInstance.GenerateSignal(in currentBar, currentPosition, dataWindowSpan, currentIndicatorValues);
+                            if (signal != SignalDecision.Hold)
                             {
-                                var signal = strategyInstance.GenerateSignal(in currentBar, currentPosition, dataWindowSpan, currentIndicatorValues);
-                                if (signal != SignalDecision.Hold)
+                                if (currentPosition == null)
                                 {
                                     long minimumAdv = strategyInstance.GetMinimumAverageDailyVolume();
                                     if (!liquidityService.IsSymbolLiquidAtTime(symbol, interval, minimumAdv, currentBar.Timestamp, 20, orderedData)) continue;
 
-                                    double allocationAmount = strategyInstance.GetAllocationAmount(in currentBar, dataWindowSpan, currentIndicatorValues, config.InitialCapital * 0.02, portfolioManager.GetTotalEquity(), currentSymbolKellyHalfFraction);
+                                    double allocationAmount = strategyInstance.GetAllocationAmount(in currentBar, dataWindowSpan, currentIndicatorValues, config.InitialCapital * 0.02, portfolioManager.GetTotalEquity(), currentSymbolKellyHalfFraction, 1);
                                     if (allocationAmount > 0)
                                     {
                                         double rawEntryPrice = currentBar.ClosePrice;
                                         int quantity = (int)Math.Round(allocationAmount / rawEntryPrice);
                                         if (quantity <= 0) continue;
 
+                                        var direction = (signal == SignalDecision.Buy) ? PositionDirection.Long : PositionDirection.Short;
                                         double effectiveEntryPrice = await transactionCostService.CalculateEntryCost(rawEntryPrice, signal, symbol, interval, currentBar.Timestamp);
                                         double commissionCost = await transactionCostService.CalculateCommissionCost(rawEntryPrice, quantity, symbol, interval, currentBar.Timestamp);
-                                        double slippageCost = await transactionCostService.CalculateSlippageCost(rawEntryPrice, quantity, (signal == SignalDecision.Buy ? PositionDirection.Long : PositionDirection.Short), symbol, interval, currentBar.Timestamp);
+                                        double slippageCost = await transactionCostService.CalculateSlippageCost(rawEntryPrice, quantity, direction, symbol, interval, currentBar.Timestamp);
                                         double spreadAndOtherCost = await transactionCostService.GetSpreadCost(rawEntryPrice, quantity, symbol, interval, currentBar.Timestamp);
                                         double totalEntryCost = commissionCost + slippageCost + spreadAndOtherCost;
                                         double totalCashOutlay = (quantity * effectiveEntryPrice) + totalEntryCost;
 
                                         if (await portfolioManager.CanOpenPosition(totalCashOutlay))
                                         {
-                                            var direction = (signal == SignalDecision.Buy) ? PositionDirection.Long : PositionDirection.Short;
                                             await portfolioManager.OpenPosition(symbol, interval, direction, quantity, effectiveEntryPrice, currentBar.Timestamp, totalEntryCost);
                                             activeTrade = new TradeSummary
                                             {
@@ -231,6 +219,29 @@ namespace Temperance.Services.BackTesting.Implementations
                                             };
                                             currentPosition = portfolioManager.GetOpenPositions().FirstOrDefault(p => p.Symbol == symbol);
                                             await tradesService.SaveOrUpdateBacktestTrade(activeTrade);
+                                        }
+                                    }
+                                }
+                                else
+                                {
+                                    var expectedDirection = signal == SignalDecision.Buy ? PositionDirection.Long : PositionDirection.Short;
+                                    if (expectedDirection == currentPosition.Direction && currentPosition.PyramidEntries < strategyInstance.GetMaxPyramidEntries())
+                                    {
+                                        double allocationAmount = strategyInstance.GetAllocationAmount(in currentBar, dataWindowSpan, currentIndicatorValues, config.InitialCapital * 0.02, portfolioManager.GetTotalEquity(), currentSymbolKellyHalfFraction, currentPosition.PyramidEntries + 1);
+                                        if (allocationAmount > 0)
+                                        {
+                                            double rawEntryPrice = currentBar.ClosePrice;
+                                            int quantityToAdd = (int)Math.Round(allocationAmount / rawEntryPrice);
+                                            if (quantityToAdd <= 0) continue;
+
+                                            double effectiveEntryPrice = await transactionCostService.CalculateEntryCost(rawEntryPrice, signal, symbol, interval, currentBar.Timestamp);
+                                            double commissionCost = await transactionCostService.CalculateCommissionCost(rawEntryPrice, quantityToAdd, symbol, interval, currentBar.Timestamp);
+                                            double slippageCost = await transactionCostService.CalculateSlippageCost(rawEntryPrice, quantityToAdd, expectedDirection, symbol, interval, currentBar.Timestamp);
+                                            double spreadAndOtherCost = await transactionCostService.GetSpreadCost(rawEntryPrice, quantityToAdd, symbol, interval, currentBar.Timestamp);
+                                            double totalEntryCostForTranche = commissionCost + slippageCost + spreadAndOtherCost;
+
+                                            await portfolioManager.AddToPosition(symbol, quantityToAdd, effectiveEntryPrice, totalEntryCostForTranche);
+                                            currentPosition = portfolioManager.GetOpenPositions().FirstOrDefault(p => p.Symbol == symbol);
                                         }
                                     }
                                 }

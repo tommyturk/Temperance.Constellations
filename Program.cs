@@ -63,7 +63,7 @@ builder.Services.AddScoped<IBacktestRunner, BacktestRunner>();
 builder.Services.AddTransient<ITransactionCostService, TransactionCostService>();
 builder.Services.AddTransient<ILiquidityService, LiquidityService>();
 builder.Services.AddTransient<IGpuIndicatorService, GpuIndicatorService>();
-builder.Services.AddSingleton<IPortfolioManager, PortfolioManager>();
+builder.Services.AddScoped<IPortfolioManager, PortfolioManager>();
 builder.Services.AddTransient<ISecuritiesOverviewService, SecuritiesOverviewService>();
 builder.Services.AddTransient<IBalanceSheetService, BalanceSheetService>();
 builder.Services.AddTransient<IPriceService, PriceService>();

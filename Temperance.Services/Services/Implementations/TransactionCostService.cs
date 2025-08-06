@@ -98,6 +98,7 @@ namespace Temperance.Services.Services.Implementations
             else
                 return (effectiveEntryPrice - entryPrice) + (exitPrie - effectiveExitPrice) * quantity;
         }
+
         public async Task<double> CalculateTotalTradeCost(double entryPrice, double exitPrice, SignalDecision entrySignal, PositionDirection exitPositionDirection, int quantity, string symbol, string interval, DateTime entryTimestamp, DateTime exitTimestamp)
         {
             double entrySpreadCost = await GetSpreadCost(entryPrice, quantity, symbol, interval, entryTimestamp);

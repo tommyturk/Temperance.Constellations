@@ -70,7 +70,9 @@ namespace Temperance.Data.Repositories.Securities.Implementations
                     yield break;
                 }
 
-                const string query = "SELECT Symbol FROM [TradingBotDb].[Financials].[SecuritiesOverview] WHERE MarketCapitalization > 10000000000";
+                //const string query = "SELECT Symbol FROM [TradingBotDb].[Financials].[Securities]"; // trying all securities.
+
+                const string query = "SELECT Symbol FROM [TradingBotDb].[Financials].[SecuritiesOverview] WHERE MarketCapitalization > 5000000000";
                 await using var command = new SqlCommand(query, connection);
                 await using var reader = await command.ExecuteReaderAsync(cancellationToken);
 

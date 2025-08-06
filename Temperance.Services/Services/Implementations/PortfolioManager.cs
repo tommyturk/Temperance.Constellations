@@ -91,6 +91,39 @@ namespace Temperance.Services.Services.Implementations
             return Task.CompletedTask;
         }
 
+        public Task AddToPosition(string symbol, int quantityToAdd, double entryPrice, double transactionCost)
+        {
+            if (!_openPositions.TryGetValue(symbol, out var existingPosition))
+            {
+                _logger.LogError("Attempted to add to a non-existent position for {Symbol}.", symbol);
+                return Task.CompletedTask;
+            }
+
+            double additionalCashOutlay = (quantityToAdd * entryPrice) + transactionCost;
+            lock (_cashLock)
+            {
+                if (_currentCash < additionalCashOutlay)
+                {
+                    _logger.LogWarning("Insufficient cash to add to position for {Symbol}", symbol);
+                    return Task.CompletedTask;
+                }
+                _currentCash -= additionalCashOutlay;
+            }
+
+            double newTotalQuantity = existingPosition.Quantity + quantityToAdd;
+            double newTotalValue = (existingPosition.AverageEntryPrice * existingPosition.Quantity) + (entryPrice * quantityToAdd);
+
+            existingPosition.AverageEntryPrice = newTotalValue / newTotalQuantity;
+            existingPosition.Quantity = (int)newTotalQuantity;
+            existingPosition.TotalEntryCost += transactionCost;
+            existingPosition.PyramidEntries++;
+
+            _logger.LogInformation("Added {Quantity} shares to {Symbol}. New Avg Price: {AvgPrice}, New Total Quantity: {TotalQuantity}",
+                quantityToAdd, symbol, existingPosition.AverageEntryPrice, existingPosition.Quantity);
+
+            return Task.CompletedTask;
+        }
+
         public async Task OpenPairPosition(string strategyName, string pairIdentifier, string interval, ActivePairTrade trade)
         {
             lock (_cashLock)

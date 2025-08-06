@@ -19,7 +19,8 @@ namespace Temperance.Services.Trading.Strategies.MeanReversion.Implementation
         private double _rsiOversoldThreshold;
         private double _rsiOverboughtThreshold;
         private double _minimumAverageDailyVolume;
-        // ---
+        private int _maxPyramidEntries;
+        private double _initialEntryScale;
 
         private readonly ITransactionCostService _transactionCostService;
         private readonly ILogger<MeanReversionStrategy> _logger;
@@ -51,18 +52,17 @@ namespace Temperance.Services.Trading.Strategies.MeanReversion.Implementation
             _rsiOverboughtThreshold = ParameterHelper.GetParameterOrDefault(parameters, "RSIOverbought", 70);
             _minimumAverageDailyVolume = ParameterHelper.GetParameterOrDefault(parameters, "MinimumAverageDailyVolume", 750000); // Ensure 750000m is decimal literal
 
+            _maxPyramidEntries = ParameterHelper.GetParameterOrDefault(parameters, "MaxPyramidEntries", 1);
+            _initialEntryScale = ParameterHelper.GetParameterOrDefault(parameters, "InitialEntryScale", 1.0);
+
             _logger.LogInformation($"Initializing {Name} with MA:{_movingAveragePeriod}, SDMult:{_stdDevMultiplier}, RSI:{_rsiPeriod}, RSI Levels:{_rsiOversoldThreshold}/{_rsiOverboughtThreshold}");
         }
 
-        public int GetRequiredLookbackPeriod()
-        {
-            return Math.Max(_movingAveragePeriod, _rsiPeriod + 1) + 1;
-        }
+        public int GetMaxPyramidEntries() => _maxPyramidEntries;
 
-        public long GetMinimumAverageDailyVolume()
-        {
-            return (long)_minimumAverageDailyVolume;
-        }
+        public int GetRequiredLookbackPeriod() => Math.Max(_movingAveragePeriod, _rsiPeriod + 1) + 1;
+
+        public long GetMinimumAverageDailyVolume() => (long)_minimumAverageDailyVolume;
 
         public SignalDecision GenerateSignal(in HistoricalPriceModel currentBar, Position currentPosition, ReadOnlySpan<HistoricalPriceModel> historicalDataWindow, Dictionary<string, double> currentIndicatorValues)
         {
@@ -70,7 +70,6 @@ namespace Temperance.Services.Trading.Strategies.MeanReversion.Implementation
             if (totalBars < GetRequiredLookbackPeriod())
                 return SignalDecision.Hold;
 
-            // --- On-the-fly Bollinger Bands Calculation ---
             var bbWindow = historicalDataWindow.Slice(totalBars - _movingAveragePeriod);
             double simpleMovingAverage = 0;
             foreach (var bar in bbWindow) { simpleMovingAverage += bar.ClosePrice; }
@@ -80,11 +79,9 @@ namespace Temperance.Services.Trading.Strategies.MeanReversion.Implementation
             double lowerBollingerBand = simpleMovingAverage - (_stdDevMultiplier * stdDev);
             double upperBollingerBand = simpleMovingAverage + (_stdDevMultiplier * stdDev);
 
-            // --- On-the-fly RSI Calculation ---
             var rsiWindow = historicalDataWindow.Slice(totalBars - (_rsiPeriod + 1));
             double currentRsi = currentIndicatorValues["RSI"];
 
-            // --- Signal Logic ---
             if (currentBar.ClosePrice < lowerBollingerBand && currentRsi < _rsiOversoldThreshold)
                 return SignalDecision.Buy;
 
@@ -100,8 +97,6 @@ namespace Temperance.Services.Trading.Strategies.MeanReversion.Implementation
             ReadOnlySpan<HistoricalPriceModel> historicalDataWindow,
             Dictionary<string, double> currentIndicatorValues)
         {
-            // --- 1. Primary Exit: Reversion to the Mean ---
-            // We need to calculate the simple moving average for the current bar.
             var smaWindow = historicalDataWindow.Slice(historicalDataWindow.Length - _movingAveragePeriod);
             double simpleMovingAverage = 0;
             foreach (var bar in smaWindow)
@@ -149,18 +144,14 @@ namespace Temperance.Services.Trading.Strategies.MeanReversion.Implementation
             in HistoricalPriceModel currentBar,
             ReadOnlySpan<HistoricalPriceModel> historicalDataWindow,
             Dictionary<string, double> currentIndicatorValues,
-            double maxTradeAllocationInitialCapital, // e.g., 2% of initial capital
+            double maxTradeAllocationInitialCapital,
             double currentTotalEquity,
-            double kellyHalfFraction)
+            double kellyHalfFraction,
+            int currentPyramidEntries)
         {
-            // --- 1. Generate the signal first to see if a trade is warranted ---
             var signal = GenerateSignal(in currentBar, null, historicalDataWindow, currentIndicatorValues);
-            if (signal == SignalDecision.Hold)
-            {
-                return 0;
-            }
+            if (signal == SignalDecision.Hold) return 0;
 
-            // --- 2. Calculate the RSI Scaling Factor based on signal strength ---
             double rsiScalingFactor = 0;
             double lowerBollingerBand = currentIndicatorValues["LowerBand"];
             double upperBollingerBand = currentIndicatorValues["UpperBand"];
@@ -169,34 +160,33 @@ namespace Temperance.Services.Trading.Strategies.MeanReversion.Implementation
             if (signal == SignalDecision.Buy && currentBar.ClosePrice < lowerBollingerBand && currentRsi < _rsiOversoldThreshold)
             {
                 double distanceBelowRSIOversold = Math.Max(0, _rsiOversoldThreshold - currentRsi);
-                // Scale from 0.5 to 1.0 to ensure the factor is always significant
                 rsiScalingFactor = 0.5 + (0.5 * Math.Min(1.0, distanceBelowRSIOversold / _rsiOversoldThreshold));
             }
             else if (signal == SignalDecision.Sell && currentBar.ClosePrice > upperBollingerBand && currentRsi > _rsiOverboughtThreshold)
             {
                 double distanceAboveRSIOverbought = Math.Max(0, currentRsi - _rsiOverboughtThreshold);
-                // Scale from 0.5 to 1.0
                 rsiScalingFactor = 0.5 + (0.5 * Math.Min(1.0, distanceAboveRSIOverbought / (100.0 - _rsiOverboughtThreshold)));
             }
 
-            if (rsiScalingFactor <= 0) return 0; // No allocation if scaling is zero
+            if (rsiScalingFactor <= 0) return 0;
 
-            // --- 3. Establish the BASELINE risk and apply the RSI scaling ---
-            const double baselineRiskPercentage = 0.01; // 1% baseline risk
-            double scaledAllocation = (currentTotalEquity * baselineRiskPercentage) * rsiScalingFactor;
+            const double baselineRiskPercentage = 0.01;
+            double totalAllocation = (currentTotalEquity * baselineRiskPercentage) * rsiScalingFactor;
 
-            // --- 4. Use Kelly Criterion as a dynamic CAP on the scaled allocation ---
-            // Ensure Kelly fraction has a minimum value to prevent it from going to zero
             double effectiveKellyFraction = Math.Max(0.005, kellyHalfFraction);
-            double kellySizedCap = currentTotalEquity * effectiveKellyFraction;
+            totalAllocation = Math.Min(totalAllocation, currentTotalEquity * effectiveKellyFraction);
+            totalAllocation = Math.Min(totalAllocation, maxTradeAllocationInitialCapital);
 
-            // --- 5. Determine the Final Allocation ---
-            // Start with the RSI-scaled allocation
-            // Then, ensure it does not exceed the Kelly cap OR the fixed maximum safeguard
-            double finalAllocationAmount = Math.Min(scaledAllocation, kellySizedCap);
-            finalAllocationAmount = Math.Min(finalAllocationAmount, maxTradeAllocationInitialCapital);
+            if (totalAllocation <= 0) return 0;
 
-            return finalAllocationAmount;
+            if (currentPyramidEntries == 1) 
+                return totalAllocation * _initialEntryScale;
+            else 
+            {
+                double remainingAllocation = totalAllocation * (1.0 - _initialEntryScale);
+                int remainingEntries = _maxPyramidEntries - 1;
+                return remainingEntries > 0 ? remainingAllocation / remainingEntries : 0;
+            }
         }
 
         private double CalculateStdDev(ReadOnlySpan<HistoricalPriceModel> values, double average)

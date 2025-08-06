@@ -26,7 +26,10 @@ namespace Temperance.Services.Trading.Strategies
             Dictionary<string, double> currentIndicatorValues,
             double maxTradeAllocationInitialCapital,
             double currentTotalEquity,
-            double kellyHalfFraction);
+            double kellyHalfFraction,
+            int currentPyramidEntries);
+
+        int GetMaxPyramidEntries();
 
         double[] CalculateRSI(double[] prices, int period);
 
