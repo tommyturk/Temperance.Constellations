@@ -12,7 +12,7 @@ services:
       ConnectionStrings__DefaultConnection: "Server=host.docker.internal,1433;Database=TradingBotDb;User ID=developer;Password=K3n5alr1532025!!;Encrypt=False;TrustServerCertificate=True;"
       ConnectionStrings__HistoricalPricesConnection: "Server=host.docker.internal,1433;Database=Historical;User ID=developer;Password=K3n5alr1532025!!;Encrypt=False;TrustServerCertificate=True;"
       AlphaVantageSettings__ApiKey: "Q63WJB6QXCD0USO7"
-      ConnectionStrings__HangfireConnection: "Server=host.docker.internal\\TRADINGBOTSERVER;Database=TradingBotDb;User ID=developer;Password=K3n5alr1532025!!;Encrypt=False;TrustServerCertificate=True;"
+      ConnectionStrings__HangfireConnection: "Server=host.docker.internal,1433;Database=TradingBotDb;User ID=developer;Password=K3n5alr1532025!!;Encrypt=False;TrustServerCertificate=True;"
     restart: unless-stopped
 networks:
   default:
