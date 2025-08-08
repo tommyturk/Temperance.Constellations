@@ -70,8 +70,6 @@ namespace Temperance.Data.Repositories.Securities.Implementations
                     yield break;
                 }
 
-                //const string query = "SELECT Symbol FROM [TradingBotDb].[Financials].[Securities]"; // trying all securities.
-
                 const string query = "SELECT Symbol FROM [TradingBotDb].[Financials].[SecuritiesOverview] WHERE MarketCapitalization > 5000000000";
                 await using var command = new SqlCommand(query, connection);
                 await using var reader = await command.ExecuteReaderAsync(cancellationToken);
@@ -350,7 +348,7 @@ namespace Temperance.Data.Repositories.Securities.Implementations
                 SELECT FiscalDateEnding, CommonStockSharesOutstanding
                 FROM TradingBotDb.Financials.BalanceSheetQuarterly
                 WHERE Symbol = @Symbol AND CommonStockSharesOutstanding IS NOT NULL
-                UNION
+                UNION ALL  -- Use UNION ALL for performance, we will handle duplicates in C#
                 SELECT FiscalDateEnding, CommonStockSharesOutstanding
                 FROM TradingBotDb.Financials.BalanceSheetAnnual
                 WHERE Symbol = @Symbol AND CommonStockSharesOutstanding IS NOT NULL
@@ -358,10 +356,13 @@ namespace Temperance.Data.Repositories.Securities.Implementations
             ";
 
             using var connection = new SqlConnection(_connectionString);
-            var results = await connection.QueryAsync<(DateTime, decimal)>(query, new { Symbol = symbol });
+            var results = await connection.QueryAsync<(DateTime FiscalDate, decimal Shares)>(query, new { Symbol = symbol });
 
-            return new SortedDictionary<DateTime, decimal>(results.ToDictionary(r => r.Item1, r => r.Item2));
+            var distinctResults = results
+                .GroupBy(r => r.FiscalDate)
+                .Select(g => g.First());
+
+            return new SortedDictionary<DateTime, decimal>(distinctResults.ToDictionary(r => r.FiscalDate, r => r.Shares));
         }
-
     }
 }
