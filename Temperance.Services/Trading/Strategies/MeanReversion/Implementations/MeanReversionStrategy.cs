@@ -1,9 +1,7 @@
 ﻿using Microsoft.Extensions.Logging;
-using System.Text.Json;
 using Temperance.Data.Models.HistoricalPriceData;
 using Temperance.Data.Models.Trading;
 using Temperance.Services.Services.Interfaces;
-using Temperance.Services.Trading.Strategies;
 using Temperance.Utilities.Helpers;
 
 namespace Temperance.Services.Trading.Strategies.MeanReversion.Implementation
@@ -21,6 +19,7 @@ namespace Temperance.Services.Trading.Strategies.MeanReversion.Implementation
         private double _minimumAverageDailyVolume;
         private int _maxPyramidEntries;
         private double _initialEntryScale;
+        private double _stopLossPercentage;
 
         private readonly ITransactionCostService _transactionCostService;
         private readonly ILogger<MeanReversionStrategy> _logger;
@@ -52,6 +51,7 @@ namespace Temperance.Services.Trading.Strategies.MeanReversion.Implementation
             _rsiOverboughtThreshold = ParameterHelper.GetParameterOrDefault(parameters, "RSIOverbought", 70);
             _minimumAverageDailyVolume = ParameterHelper.GetParameterOrDefault(parameters, "MinimumAverageDailyVolume", 750000); // Ensure 750000m is decimal literal
 
+            _stopLossPercentage = ParameterHelper.GetParameterOrDefault(parameters, "StopLossPercentage", 0.03);
             _maxPyramidEntries = ParameterHelper.GetParameterOrDefault(parameters, "MaxPyramidEntries", 1);
             _initialEntryScale = ParameterHelper.GetParameterOrDefault(parameters, "InitialEntryScale", 1.0);
 
@@ -59,60 +59,40 @@ namespace Temperance.Services.Trading.Strategies.MeanReversion.Implementation
         }
 
         public int GetMaxPyramidEntries() => _maxPyramidEntries;
-
         public int GetRequiredLookbackPeriod() => Math.Max(_movingAveragePeriod, _rsiPeriod + 1) + 1;
-
         public long GetMinimumAverageDailyVolume() => (long)_minimumAverageDailyVolume;
 
-        public SignalDecision GenerateSignal(in HistoricalPriceModel currentBar, Position currentPosition, ReadOnlySpan<HistoricalPriceModel> historicalDataWindow, Dictionary<string, double> currentIndicatorValues)
+        public SignalDecision GenerateSignal(in HistoricalPriceModel currentBar, Position? currentPosition, IReadOnlyList<HistoricalPriceModel> historicalDataWindow, Dictionary<string, double> currentIndicatorValues)
         {
-            int totalBars = historicalDataWindow.Length;
-            if (totalBars < GetRequiredLookbackPeriod())
-                return SignalDecision.Hold;
+            if (historicalDataWindow.Count < GetRequiredLookbackPeriod()) return SignalDecision.Hold;
 
-            var bbWindow = historicalDataWindow.Slice(totalBars - _movingAveragePeriod);
-            double simpleMovingAverage = 0;
-            foreach (var bar in bbWindow) { simpleMovingAverage += bar.ClosePrice; }
-            simpleMovingAverage /= _movingAveragePeriod;
-
-            double stdDev = CalculateStdDev(bbWindow, simpleMovingAverage);
-            double lowerBollingerBand = simpleMovingAverage - (_stdDevMultiplier * stdDev);
-            double upperBollingerBand = simpleMovingAverage + (_stdDevMultiplier * stdDev);
-
-            var rsiWindow = historicalDataWindow.Slice(totalBars - (_rsiPeriod + 1));
+            double lowerBollingerBand = currentIndicatorValues["LowerBand"];
+            double upperBollingerBand = currentIndicatorValues["UpperBand"];
             double currentRsi = currentIndicatorValues["RSI"];
 
-            if (currentBar.ClosePrice < lowerBollingerBand && currentRsi < _rsiOversoldThreshold)
-                return SignalDecision.Buy;
-
-            if (currentBar.ClosePrice > upperBollingerBand && currentRsi > _rsiOverboughtThreshold)
-                return SignalDecision.Sell;
+            if (currentBar.ClosePrice < lowerBollingerBand && currentRsi < _rsiOversoldThreshold) return SignalDecision.Buy;
+            if (currentBar.ClosePrice > upperBollingerBand && currentRsi > _rsiOverboughtThreshold) return SignalDecision.Sell;
 
             return SignalDecision.Hold;
         }
 
-        public bool ShouldExitPosition(
-            Position position,
-            in HistoricalPriceModel currentBar,
-            ReadOnlySpan<HistoricalPriceModel> historicalDataWindow,
-            Dictionary<string, double> currentIndicatorValues)
+        public bool ShouldExitPosition(Position position, in HistoricalPriceModel currentBar, IReadOnlyList<HistoricalPriceModel> historicalDataWindow, Dictionary<string, double> currentIndicatorValues)
         {
-            var smaWindow = historicalDataWindow.Slice(historicalDataWindow.Length - _movingAveragePeriod);
-            double simpleMovingAverage = 0;
-            foreach (var bar in smaWindow)
-                simpleMovingAverage += bar.ClosePrice;
+            if (position.Direction == PositionDirection.Long)
+                if (currentBar.LowPrice <= position.AverageEntryPrice * (1.0 - _stopLossPercentage)) return true;
+            else
+                if (currentBar.HighPrice >= position.AverageEntryPrice * (1.0 + _stopLossPercentage)) return true;
             
-            simpleMovingAverage /= _movingAveragePeriod;
+            return false;
+        }
 
-            if (position.Direction == PositionDirection.Long && currentBar.ClosePrice >= simpleMovingAverage)
-                return true;
+        public bool ShouldTakePartialProfit(Position position, in HistoricalPriceModel currentBar, Dictionary<string, double> currentIndicatorValues)
+        {
+            double middleBollingerBand = (currentIndicatorValues["UpperBand"] + currentIndicatorValues["LowerBand"]) / 2;
 
-            if (position.Direction == PositionDirection.Short && currentBar.ClosePrice <= simpleMovingAverage)
-                return true;
+            if(position.Direction == PositionDirection.Long && currentBar.HighPrice >= middleBollingerBand) return true;
 
-            var currentSignal = GenerateSignal(in currentBar, position, historicalDataWindow, currentIndicatorValues);
-            if (position.Direction == PositionDirection.Long && currentSignal == SignalDecision.Sell) return true;
-            if (position.Direction == PositionDirection.Short && currentSignal == SignalDecision.Buy) return true;
+            if(position.Direction == PositionDirection.Short && currentBar.LowPrice <= middleBollingerBand) return true;
 
             return false;
         }
@@ -140,48 +120,36 @@ namespace Temperance.Services.Trading.Strategies.MeanReversion.Implementation
             return activeTrade;
         }
 
-        public double GetAllocationAmount(
-            in HistoricalPriceModel currentBar,
-            ReadOnlySpan<HistoricalPriceModel> historicalDataWindow,
-            Dictionary<string, double> currentIndicatorValues,
-            double maxTradeAllocationInitialCapital,
-            double currentTotalEquity,
-            double kellyHalfFraction,
-            int currentPyramidEntries)
+        public double GetAllocationAmount(in HistoricalPriceModel currentBar, IReadOnlyList<HistoricalPriceModel> historicalDataWindow, 
+            Dictionary<string, double> currentIndicatorValues, double maxTradeAllocationInitialCapital, double currentTotalEquity, 
+            double kellyHalfFraction, int currentPyramidEntries)
         {
             var signal = GenerateSignal(in currentBar, null, historicalDataWindow, currentIndicatorValues);
             if (signal == SignalDecision.Hold) return 0;
 
-            double rsiScalingFactor = 0;
-            double lowerBollingerBand = currentIndicatorValues["LowerBand"];
-            double upperBollingerBand = currentIndicatorValues["UpperBand"];
+            double rsiScalingFactor = 0.5;
             double currentRsi = currentIndicatorValues["RSI"];
-
-            if (signal == SignalDecision.Buy && currentBar.ClosePrice < lowerBollingerBand && currentRsi < _rsiOversoldThreshold)
+            if (signal == SignalDecision.Buy)
             {
-                double distanceBelowRSIOversold = Math.Max(0, _rsiOversoldThreshold - currentRsi);
-                rsiScalingFactor = 0.5 + (0.5 * Math.Min(1.0, distanceBelowRSIOversold / _rsiOversoldThreshold));
+                double dist = Math.Max(0, _rsiOversoldThreshold - currentRsi);
+                rsiScalingFactor = 0.5 + (0.5 * Math.Min(1.0, dist / _rsiOversoldThreshold));
             }
-            else if (signal == SignalDecision.Sell && currentBar.ClosePrice > upperBollingerBand && currentRsi > _rsiOverboughtThreshold)
+            else if (signal == SignalDecision.Sell)
             {
-                double distanceAboveRSIOverbought = Math.Max(0, currentRsi - _rsiOverboughtThreshold);
-                rsiScalingFactor = 0.5 + (0.5 * Math.Min(1.0, distanceAboveRSIOverbought / (100.0 - _rsiOverboughtThreshold)));
+                double dist = Math.Max(0, currentRsi - _rsiOverboughtThreshold);
+                rsiScalingFactor = 0.5 + (0.5 * Math.Min(1.0, dist / (100.0 - _rsiOverboughtThreshold)));
             }
-
-            if (rsiScalingFactor <= 0) return 0;
 
             const double baselineRiskPercentage = 0.01;
             double totalAllocation = (currentTotalEquity * baselineRiskPercentage) * rsiScalingFactor;
-
             double effectiveKellyFraction = Math.Max(0.005, kellyHalfFraction);
             totalAllocation = Math.Min(totalAllocation, currentTotalEquity * effectiveKellyFraction);
             totalAllocation = Math.Min(totalAllocation, maxTradeAllocationInitialCapital);
 
             if (totalAllocation <= 0) return 0;
 
-            if (currentPyramidEntries == 1) 
-                return totalAllocation * _initialEntryScale;
-            else 
+            if (currentPyramidEntries == 1) return totalAllocation * _initialEntryScale;
+            else
             {
                 double remainingAllocation = totalAllocation * (1.0 - _initialEntryScale);
                 int remainingEntries = _maxPyramidEntries - 1;
@@ -189,41 +157,25 @@ namespace Temperance.Services.Trading.Strategies.MeanReversion.Implementation
             }
         }
 
-        private double CalculateStdDev(ReadOnlySpan<HistoricalPriceModel> values, double average)
-        {
-            if (values.Length <= 1) return 0;
-            double sumOfSquares = 0;
-            foreach (var val in values)
-            {
-                sumOfSquares += Math.Pow(val.ClosePrice - average, 2);
-            }
-            return Math.Sqrt(sumOfSquares / (values.Length - 1));
-        }
+        //protected double CalculateStopLoss(Position position)
+        //{
+        //    double stopLossPercentage = 0.05;
 
-        protected double CalculateStopLoss(Position position)
-        {
-            double stopLossPercentage = 0.05;
+        //    if (position.Direction == PositionDirection.Long)
+        //        return position.EntryPrice * (1 - stopLossPercentage);
+        //    else
+        //        return position.EntryPrice * (1 + stopLossPercentage);
+        //}
 
-            if (position.Direction == PositionDirection.Long)
-                return position.EntryPrice * (1 - stopLossPercentage);
-            else
-                return position.EntryPrice * (1 + stopLossPercentage);
-        }
+        //protected double CalculateTakeProfit(Position position)
+        //{
+        //    double takeProfitPercentage = 0.05;
 
-        protected double CalculateTakeProfit(Position position)
-        {
-            double takeProfitPercentage = 0.05;
-
-            if (position.Direction == PositionDirection.Long)
-                return position.EntryPrice * (1 + takeProfitPercentage);
-            else
-                return position.EntryPrice * (1 - takeProfitPercentage);
-        }
-
-        public double GetAllocationAmount(HistoricalPriceModel currentBar, IReadOnlyList<HistoricalPriceModel> historicalDataWindow, double maxTradeAllocation)
-        {
-            throw new NotImplementedException();
-        }
+        //    if (position.Direction == PositionDirection.Long)
+        //        return position.EntryPrice * (1 + takeProfitPercentage);
+        //    else
+        //        return position.EntryPrice * (1 - takeProfitPercentage);
+        //}
 
         public double[] CalculateRSI(double[] prices, int period)
         {

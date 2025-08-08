@@ -204,6 +204,53 @@ namespace Temperance.Services.Services.Implementations
             return Task.FromResult<TradeSummary?>(null);
         }
 
+        public async Task<TradeSummary?> PartiallyClosePosition(string symbol, int quantityToClose, double exitPrice, DateTime exitDate, double transactionCost)
+        {
+            if(!_openPositions.TryGetValue(symbol, out var position))
+            {
+                _logger.LogInformation("Attempted to partially close non-existent position for {Symbol}", symbol);
+                return null;
+            }
+
+            if (quantityToClose <= 0 || quantityToClose >= position.Quantity)
+            {
+                _logger.LogError("Invalid quantity for partial close on {Symbol}. Qty: {Qty}", symbol, quantityToClose);
+                return null;
+            }
+
+            _logger.LogInformation("Partially closing {Qty} shares of {Symbol} at {Price}", quantityToClose, symbol, exitPrice);
+
+            double proceeds = (quantityToClose * exitPrice) - transactionCost;
+            
+            lock (_cashLock) _currentCash += proceeds;
+
+            double profitLoss = 0;
+            if (position.Direction == PositionDirection.Long)
+                profitLoss = (exitPrice - position.AverageEntryPrice) * quantityToClose;
+            else
+                profitLoss = (position.AverageEntryPrice - exitPrice) * quantityToClose;
+
+            position.Quantity -= quantityToClose;
+
+            var partialTradeSummary = new TradeSummary()
+            {
+                Id = Guid.NewGuid(),
+                Symbol = position.Symbol,
+                Direction = position.Direction.ToString(),
+                EntryDate = position.InitialEntryDate,
+                EntryPrice = position.AverageEntryPrice,
+                ExitDate = exitDate,
+                ExitPrice = exitPrice,
+                Quantity = quantityToClose,
+                ProfitLoss = profitLoss - transactionCost,
+                TotalTransactionCost = transactionCost,
+                ExitReason = "Partial Profit Target Hit"
+            };
+
+            _completedTradesHistory.Add(partialTradeSummary);
+            return partialTradeSummary;
+        }
+
         public Task<TradeSummary?> ClosePosition(TradeSummary completedTrade)
         {
             if (_openPositions.TryRemove(completedTrade.Symbol, out var closedPosition))

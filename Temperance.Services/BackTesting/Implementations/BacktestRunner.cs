@@ -145,13 +145,32 @@ namespace Temperance.Services.BackTesting.Implementations
                                 { "LowerBand", indicators["LowerBand"][globalIndex] }
                             };
 
-                            ReadOnlySpan<HistoricalPriceModel> dataWindowSpan = CollectionsMarshal.AsSpan(orderedData).Slice(0, i + 1);
+                            IReadOnlyList<HistoricalPriceModel> dataWindow = orderedData.Take(i + 1).ToList();
+
+                            if (currentPosition != null && activeTrade != null && currentPosition.Quantity > 1)
+                            {
+                                if (strategyInstance.ShouldTakePartialProfit(currentPosition, in currentBar, currentIndicatorValues))
+                                {
+                                    int quantityToClose = currentPosition.Quantity / 2; 
+                                    double exitPrice = (currentIndicatorValues["UpperBand"] + currentIndicatorValues["LowerBand"]) / 2;
+                                    double transactionCost = await transactionCostService.GetSpreadCost(exitPrice, quantityToClose, symbol, interval, currentBar.Timestamp);
+
+                                    var partialTrade = await portfolioManager.PartiallyClosePosition(symbol, quantityToClose, exitPrice, currentBar.Timestamp, transactionCost);
+
+                                    if (partialTrade != null)
+                                    {
+                                        partialTrade.RunId = runId;
+                                        allTrades.Add(partialTrade);
+                                        currentPosition = portfolioManager.GetOpenPositions().FirstOrDefault(p => p.Symbol == symbol);
+                                    }
+                                }
+                            }
+
                             bool shouldExit = false;
                             var exitReason = "Hold";
-
                             if (currentPosition != null)
                             {
-                                bool strategyExitTriggered = strategyInstance.ShouldExitPosition(currentPosition, in currentBar, dataWindowSpan, currentIndicatorValues);
+                                bool strategyExitTriggered = strategyInstance.ShouldExitPosition(currentPosition, in currentBar, dataWindow, currentIndicatorValues);
                                 if (config.UseMocExit)
                                 {
                                     bool isMocBar = lastBarTimestamps.Contains(currentBar.Timestamp);
@@ -174,7 +193,7 @@ namespace Temperance.Services.BackTesting.Implementations
                                 continue;
                             }
 
-                            var signal = strategyInstance.GenerateSignal(in currentBar, currentPosition, dataWindowSpan, currentIndicatorValues);
+                            var signal = strategyInstance.GenerateSignal(in currentBar, currentPosition, dataWindow, currentIndicatorValues);
                             if (signal != SignalDecision.Hold)
                             {
                                 if (currentPosition == null)
@@ -182,7 +201,7 @@ namespace Temperance.Services.BackTesting.Implementations
                                     long minimumAdv = strategyInstance.GetMinimumAverageDailyVolume();
                                     if (!liquidityService.IsSymbolLiquidAtTime(symbol, interval, minimumAdv, currentBar.Timestamp, 20, orderedData)) continue;
 
-                                    double allocationAmount = strategyInstance.GetAllocationAmount(in currentBar, dataWindowSpan, currentIndicatorValues, config.InitialCapital * 0.02, portfolioManager.GetTotalEquity(), currentSymbolKellyHalfFraction, 1);
+                                    double allocationAmount = strategyInstance.GetAllocationAmount(in currentBar, dataWindow, currentIndicatorValues, config.InitialCapital * 0.02, portfolioManager.GetTotalEquity(), currentSymbolKellyHalfFraction, 1);
                                     if (allocationAmount > 0)
                                     {
                                         double rawEntryPrice = currentBar.ClosePrice;
@@ -227,7 +246,7 @@ namespace Temperance.Services.BackTesting.Implementations
                                     var expectedDirection = signal == SignalDecision.Buy ? PositionDirection.Long : PositionDirection.Short;
                                     if (expectedDirection == currentPosition.Direction && currentPosition.PyramidEntries < strategyInstance.GetMaxPyramidEntries())
                                     {
-                                        double allocationAmount = strategyInstance.GetAllocationAmount(in currentBar, dataWindowSpan, currentIndicatorValues, config.InitialCapital * 0.02, portfolioManager.GetTotalEquity(), currentSymbolKellyHalfFraction, currentPosition.PyramidEntries + 1);
+                                        double allocationAmount = strategyInstance.GetAllocationAmount(in currentBar, dataWindow, currentIndicatorValues, config.InitialCapital * 0.02, portfolioManager.GetTotalEquity(), currentSymbolKellyHalfFraction, currentPosition.PyramidEntries + 1);
                                         if (allocationAmount > 0)
                                         {
                                             double rawEntryPrice = currentBar.ClosePrice;

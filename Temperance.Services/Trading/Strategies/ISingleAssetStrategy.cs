@@ -9,20 +9,18 @@ namespace Temperance.Services.Trading.Strategies
         Dictionary<string, object> GetDefaultParameters();
         void Initialize(double initialCapital, Dictionary<string, object> parameters);
 
-        SignalDecision GenerateSignal(in HistoricalPriceModel currentBar, Position currentPosition, ReadOnlySpan<HistoricalPriceModel> historicalDataWindow, Dictionary<string, double> currentIndicatorValues);
+        SignalDecision GenerateSignal(in HistoricalPriceModel currentBar, Position currentPosition, IReadOnlyList<HistoricalPriceModel> historicalDataWindow, Dictionary<string, double> currentIndicatorValues);
 
         TradeSummary ClosePosition(TradeSummary activeTrade, HistoricalPriceModel currentBar, SignalDecision exitSignal);
 
-        bool ShouldExitPosition(Position position, in HistoricalPriceModel currentBar, ReadOnlySpan<HistoricalPriceModel> historicalDataWindow, Dictionary<string, double> currentIndicatorValues);
+        bool ShouldExitPosition(Position position, in HistoricalPriceModel currentBar, IReadOnlyList<HistoricalPriceModel> historicalDataWindow, Dictionary<string, double> currentIndicatorValues);
 
         int GetRequiredLookbackPeriod();
         long GetMinimumAverageDailyVolume();
 
-        double GetAllocationAmount(HistoricalPriceModel currentBar, IReadOnlyList<HistoricalPriceModel> historicalDataWindow, double maxTradeAllocation);
-
         double GetAllocationAmount(
             in HistoricalPriceModel currentBar,
-            ReadOnlySpan<HistoricalPriceModel> historicalDataWindow,
+            IReadOnlyList<HistoricalPriceModel> historicalDataWindow,
             Dictionary<string, double> currentIndicatorValues,
             double maxTradeAllocationInitialCapital,
             double currentTotalEquity,
@@ -46,6 +44,8 @@ namespace Temperance.Services.Trading.Strategies
             in HistoricalPriceModel currentBar,
             IReadOnlyList<HistoricalPriceModel> historicalDataWindow,
             Dictionary<string, double> currentIndicatorValues);
+
+        bool ShouldTakePartialProfit(Position position, in HistoricalPriceModel currentBar, Dictionary<string, double> currentIndicatorValues);
     }
 }
     
