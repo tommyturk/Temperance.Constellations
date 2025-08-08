@@ -92,5 +92,10 @@ namespace Temperance.Services.Services.Implementations
         {
             return await _securitiesOverviewRepository.DeleteSecurity(symbol);
         }
+
+        public async Task<SortedDictionary<DateTime, decimal>> GetSharesOutstandingHistoryAsync(string symbol)
+        {
+            return await _securitiesOverviewRepository.GetSharesOutstandingHistoryAsync(symbol);
+        }
     }
 }

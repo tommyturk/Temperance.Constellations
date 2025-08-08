@@ -16,5 +16,7 @@ namespace Temperance.Services.Services.Interfaces
         Task<SecuritiesOverview> GetSecurityOverview(string symbol);
         Task<int> GetSecurityId(string symbol);
         Task<bool> DeleteSecurity(string symbol);
+
+        Task<SortedDictionary<DateTime, decimal>> GetSharesOutstandingHistoryAsync(string symbol);
     }
 }

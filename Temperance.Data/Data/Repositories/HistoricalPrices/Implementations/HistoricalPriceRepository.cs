@@ -131,6 +131,7 @@ namespace TradingApp.src.Data.Repositories.HistoricalPrices.Implementations
             }
         }
 
+
         #region Other Methods
         public Task<decimal> GetLatestPriceAsync(string symbol, DateTime backtestTimestamp)
         {

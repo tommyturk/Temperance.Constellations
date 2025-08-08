@@ -343,5 +343,25 @@ namespace Temperance.Data.Repositories.Securities.Implementations
             var query = "DELETE FROM [TradingBotDb].[Financials].[Securities] WHERE Symbol = @Symbol";
             return await connection.ExecuteAsync(query, new { Symbol = symbol }) > 0;
         }
+
+        public async Task<SortedDictionary<DateTime, decimal>> GetSharesOutstandingHistoryAsync(string symbol)
+        {
+            var query = @"
+                SELECT FiscalDateEnding, CommonStockSharesOutstanding
+                FROM TradingBotDb.Financials.BalanceSheetQuarterly
+                WHERE Symbol = @Symbol AND CommonStockSharesOutstanding IS NOT NULL
+                UNION
+                SELECT FiscalDateEnding, CommonStockSharesOutstanding
+                FROM TradingBotDb.Financials.BalanceSheetAnnual
+                WHERE Symbol = @Symbol AND CommonStockSharesOutstanding IS NOT NULL
+                ORDER BY FiscalDateEnding ASC;
+            ";
+
+            using var connection = new SqlConnection(_connectionString);
+            var results = await connection.QueryAsync<(DateTime, decimal)>(query, new { Symbol = symbol });
+
+            return new SortedDictionary<DateTime, decimal>(results.ToDictionary(r => r.Item1, r => r.Item2));
+        }
+
     }
 }

@@ -132,6 +132,15 @@ namespace Temperance.Services.BackTesting.Implementations
                         TradeSummary? activeTrade = null;
                         double currentSymbolKellyHalfFraction = symbolKellyHalfFractions.GetOrAdd($"{symbol}_{interval}", 0.01);
 
+                        var sharesOutstandingHistory = await _securitiesOverviewService.GetSharesOutstandingHistoryAsync(symbol);
+                        if (sharesOutstandingHistory == null || !sharesOutstandingHistory.Any())
+                        {
+                            _logger.LogWarning("No shares outstanding data for {Symbol}. Skipping.", symbol);
+                            return; 
+                        }
+
+                        decimal currentSharesOutstanding = sharesOutstandingHistory.First().Value;
+
                         for (int i = backtestStartIndex; i < orderedData.Count; i++)
                         {
                             var currentBar = orderedData[i];
@@ -146,6 +155,17 @@ namespace Temperance.Services.BackTesting.Implementations
                             };
 
                             IReadOnlyList<HistoricalPriceModel> dataWindow = orderedData.Take(i + 1).ToList();
+
+                            var relevantSharesEntry = sharesOutstandingHistory.LastOrDefault(kvp => kvp.Key <= currentBar.Timestamp);
+                            if (relevantSharesEntry.Key != DateTime.MinValue)
+                            {
+                                currentSharesOutstanding = relevantSharesEntry.Value;
+                            }
+
+                            double pointInTimeMarketCap = currentBar.ClosePrice * (double)currentSharesOutstanding;
+
+                            if (pointInTimeMarketCap < 5_000_000_000)
+                                continue;
 
                             if (currentPosition != null && activeTrade != null && currentPosition.Quantity > 1)
                             {
