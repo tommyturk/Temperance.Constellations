@@ -157,10 +157,8 @@ namespace Temperance.Services.BackTesting.Implementations
                             IReadOnlyList<HistoricalPriceModel> dataWindow = orderedData.Take(i + 1).ToList();
 
                             var relevantSharesEntry = sharesOutstandingHistory.LastOrDefault(kvp => kvp.Key <= currentBar.Timestamp);
-                            if (relevantSharesEntry.Key != DateTime.MinValue)
-                            {
-                                currentSharesOutstanding = relevantSharesEntry.Value;
-                            }
+                            if (relevantSharesEntry.Key == DateTime.MinValue)
+                                continue; 
 
                             double pointInTimeMarketCap = currentBar.ClosePrice * (double)currentSharesOutstanding;
 
