@@ -83,7 +83,6 @@ namespace Temperance.Services.BackTesting.Implementations
                     await using var scope = _serviceProvider.CreateAsyncScope();
                     var strategyInstance = _strategyFactory.CreateStrategy<ISingleAssetStrategy>(config.StrategyName, config.InitialCapital, config.StrategyParameters);
                     if (strategyInstance == null) return;
-
                     var portfolioManager = scope.ServiceProvider.GetRequiredService<IPortfolioManager>();
                     var historicalPriceService = scope.ServiceProvider.GetRequiredService<IHistoricalPriceService>();
                     var transactionCostService = scope.ServiceProvider.GetRequiredService<ITransactionCostService>();
@@ -92,7 +91,6 @@ namespace Temperance.Services.BackTesting.Implementations
                     var tradesService = scope.ServiceProvider.GetRequiredService<ITradeService>();
 
                     await portfolioManager.Initialize(config.InitialCapital);
-
                     var symbol = testCase.Symbol.Trim();
                     var interval = testCase.Interval.Trim();
 
@@ -105,11 +103,9 @@ namespace Temperance.Services.BackTesting.Implementations
 
                         var lastBarTimestamps = new HashSet<DateTime>();
                         if (config.UseMocExit)
-                        {
                             lastBarTimestamps = orderedData.GroupBy(p => p.Timestamp.Date)
                                                            .Select(g => g.Max(p => p.Timestamp))
                                                            .ToHashSet();
-                        }
 
                         _logger.LogInformation($"RunId: {runId} - Processing {symbol} [{interval}]");
 
