@@ -32,7 +32,6 @@ RUN dotnet publish Temperance.Constellations.csproj --no-restore -c $BUILD_CONFI
 FROM mcr.microsoft.com/dotnet/aspnet:9.0 AS runtime
 WORKDIR /app
 COPY --from=build /app/publish .
-EXPOSE 8080
-EXPOSE 8081
+EXPOSE 8003
 # The DLL name typically matches the assembly name defined in the csproj, usually the project name.
 ENTRYPOINT ["dotnet", "Temperance.Constellations.dll"]
