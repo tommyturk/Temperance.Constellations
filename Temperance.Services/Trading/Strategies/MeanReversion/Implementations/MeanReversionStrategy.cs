@@ -140,7 +140,7 @@ namespace Temperance.Services.Trading.Strategies.MeanReversion.Implementation
                 rsiScalingFactor = 0.5 + (0.5 * Math.Min(1.0, dist / (100.0 - _rsiOverboughtThreshold)));
             }
 
-            const double baselineRiskPercentage = 0.01;
+            const double baselineRiskPercentage = 0.02;
             double totalAllocation = (currentTotalEquity * baselineRiskPercentage) * rsiScalingFactor;
             double effectiveKellyFraction = Math.Max(0.005, kellyHalfFraction);
             totalAllocation = Math.Min(totalAllocation, currentTotalEquity * effectiveKellyFraction);
@@ -149,6 +149,7 @@ namespace Temperance.Services.Trading.Strategies.MeanReversion.Implementation
             if (totalAllocation <= 0) return 0;
 
             if (currentPyramidEntries == 1) return totalAllocation * _initialEntryScale;
+
             else
             {
                 double remainingAllocation = totalAllocation * (1.0 - _initialEntryScale);
