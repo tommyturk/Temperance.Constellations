@@ -18,5 +18,7 @@ namespace Temperance.Services.Services.Interfaces
         Task<bool> DeleteSecurity(string symbol);
 
         Task<SortedDictionary<DateTime, decimal>> GetSharesOutstandingHistoryAsync(string symbol);
+        Task<Dictionary<string, double>> GetSectorAveragePERatiosAsync();
+
     }
 }

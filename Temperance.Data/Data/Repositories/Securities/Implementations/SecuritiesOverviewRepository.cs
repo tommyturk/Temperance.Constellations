@@ -364,5 +364,36 @@ namespace Temperance.Data.Repositories.Securities.Implementations
 
             return new SortedDictionary<DateTime, decimal>(distinctResults.ToDictionary(r => r.FiscalDate, r => r.Shares));
         }
+
+        public async Task<Dictionary<string, double>> GetSectorAveragePERatiosAsync()
+        {
+            const string query = @"
+                SELECT 
+                    Sector, 
+                    AVG(PERatio) AS AveragePE
+                FROM 
+                    [Financials].[SecuritiesOverview]
+                WHERE 
+                    Sector IS NOT NULL 
+                    AND Sector <> ''
+                    AND PERatio > 0
+                GROUP BY 
+                    Sector;";
+
+            try
+            {
+                using var connection = new SqlConnection(_connectionString);
+                var result = await connection.QueryAsync(query);
+                return result.ToDictionary(
+                    row => (string)row.Sector,
+                    row => (double)row.AveragePE
+                );
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to get sector average PE ratios from database.");
+                return new Dictionary<string, double>();
+            }
+        }
     }
 }

@@ -70,6 +70,8 @@ builder.Services.AddTransient<IPriceService, PriceService>();
 builder.Services.AddTransient<IHistoricalPriceService, HistoricalPriceService>();
 builder.Services.AddTransient<IConductorService, ConductorService>();
 builder.Services.AddTransient<ITradeService, TradesService>();
+builder.Services.AddTransient<IQualityFilterService, QualityFilterService>();
+
 builder.Services.AddTransient<ISecuritiesOverviewRepository>(provider =>
 {
     var cs = provider.GetRequiredService<DefaultConnectionString>().Value;

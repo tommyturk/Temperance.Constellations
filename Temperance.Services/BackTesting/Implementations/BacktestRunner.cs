@@ -2,7 +2,6 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using System.Collections.Concurrent;
-using System.Runtime.InteropServices;
 using System.Text.Json;
 using Temperance.Data.Data.Repositories.Trade.Interfaces;
 using Temperance.Data.Models.Backtest;
@@ -31,6 +30,7 @@ namespace Temperance.Services.BackTesting.Implementations
         private readonly IPerformanceCalculator _performanceCalculator;
         private readonly IBacktestRepository _backtestRepository;
         private readonly IServiceProvider _serviceProvider;
+        private readonly IQualityFilterService _qualityFilterService;
         private readonly ILogger<BacktestRunner> _logger;
 
         public BacktestRunner(
@@ -44,6 +44,7 @@ namespace Temperance.Services.BackTesting.Implementations
             IPerformanceCalculator performanceCalculator,
             IBacktestRepository backtestRepository,
             IServiceProvider serviceProvider,
+            IQualityFilterService qualityFilterService,
             ILogger<BacktestRunner> logger)
         {
             _liquidityService = liquidityService;
@@ -73,6 +74,24 @@ namespace Temperance.Services.BackTesting.Implementations
             var result = new BacktestResult();
             try
             {
+                var allSymbols = (config.Symbols?.Any() ?? false)
+                ? config.Symbols
+                : await _securitiesOverviewService.GetSecurities();
+
+                var overviewDataCache = new ConcurrentDictionary<string, SecuritiesOverview>();
+                foreach (var symbol in allSymbols)
+                {
+                    var overview = await _securitiesOverviewService.GetSecurityOverview(symbol);
+                    if (overview != null)
+                    {
+                        overviewDataCache.TryAdd(symbol, overview);
+                    }
+                }
+
+                var sectorPERatios = await _securitiesOverviewService.GetSectorAveragePERatiosAsync();
+                _logger.LogInformation("RunId: {RunId} - Cached data for {SymbolCount} symbols and {SectorCount} sector PE ratios.", runId, overviewDataCache.Count, sectorPERatios.Count);
+
+
                 var testCaseStream = _securitiesOverviewService.StreamSecuritiesForBacktest(config.Symbols, config.Intervals);
                 var parallelOptions = new ParallelOptions { MaxDegreeOfParallelism = config.MaxParallelism };
                 var allTrades = new ConcurrentBag<TradeSummary>();
@@ -80,6 +99,22 @@ namespace Temperance.Services.BackTesting.Implementations
 
                 await Parallel.ForEachAsync(testCaseStream, parallelOptions, async (testCase, cancellationToken) =>
                 {
+                    var symbol = testCase.Symbol.Trim();
+                    var interval = testCase.Interval.Trim();
+
+                    if (!overviewDataCache.TryGetValue(symbol, out var overview))
+                    {
+                        _logger.LogWarning("RunId: {RunId} - SKIPPING {Symbol}: No overview data found in cache.", runId, symbol);
+                        return;
+                    }
+
+                    var (isHighQuality, reason) = await _qualityFilterService.CheckQualityAsync(symbol, overview, sectorPERatios);
+                    if (!isHighQuality)
+                    {
+                        _logger.LogInformation("RunId: {RunId} - SKIPPING {Symbol}: {Reason}", runId, symbol, reason);
+                        return;
+                    }
+
                     await using var scope = _serviceProvider.CreateAsyncScope();
                     var strategyInstance = _strategyFactory.CreateStrategy<ISingleAssetStrategy>(config.StrategyName, config.InitialCapital, config.StrategyParameters);
                     if (strategyInstance == null) return;
@@ -91,8 +126,6 @@ namespace Temperance.Services.BackTesting.Implementations
                     var tradesService = scope.ServiceProvider.GetRequiredService<ITradeService>();
 
                     await portfolioManager.Initialize(config.InitialCapital);
-                    var symbol = testCase.Symbol.Trim();
-                    var interval = testCase.Interval.Trim();
 
                     try
                     {

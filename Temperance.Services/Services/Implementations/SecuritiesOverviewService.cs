@@ -97,5 +97,10 @@ namespace Temperance.Services.Services.Implementations
         {
             return await _securitiesOverviewRepository.GetSharesOutstandingHistoryAsync(symbol);
         }
+
+        public async Task<Dictionary<string, double>> GetSectorAveragePERatiosAsync()
+        {
+            return await _securitiesOverviewRepository.GetSectorAveragePERatiosAsync();
+        }
     }
 }
