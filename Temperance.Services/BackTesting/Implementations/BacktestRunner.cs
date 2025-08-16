@@ -6,6 +6,7 @@ using System.Text.Json;
 using Temperance.Data.Data.Repositories.Trade.Interfaces;
 using Temperance.Data.Models.Backtest;
 using Temperance.Data.Models.HistoricalPriceData;
+using Temperance.Data.Models.MarketHealth;
 using Temperance.Data.Models.Performance;
 using Temperance.Data.Models.Strategy;
 using Temperance.Data.Models.Trading;
@@ -90,7 +91,6 @@ namespace Temperance.Services.BackTesting.Implementations
 
                 var sectorPERatios = await _securitiesOverviewService.GetSectorAveragePERatiosAsync();
                 _logger.LogInformation("RunId: {RunId} - Cached data for {SymbolCount} symbols and {SectorCount} sector PE ratios.", runId, overviewDataCache.Count, sectorPERatios.Count);
-
 
                 var testCaseStream = _securitiesOverviewService.StreamSecuritiesForBacktest(config.Symbols, config.Intervals);
                 var parallelOptions = new ParallelOptions { MaxDegreeOfParallelism = config.MaxParallelism };

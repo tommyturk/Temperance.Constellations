@@ -12,20 +12,20 @@ namespace Temperance.Services.Services.Implementations
         private const double MaxBeta = 1.5;
         private const double MinMarketCap = 5_000_000_000_000; // $10 Billion
         private const double DefaultMaxPERatio = 40.0; // Fallback if sector average is not found
-        private const double MindDollarVolume = 20_000_000; // $20 Million daily volume
+        private const double MinDollarValue = 20_000_000; // $20 Million daily volume
         private const double MaxSpreadPercentage = 0.005; // 0.05% maximum spread
 
         public QualityFilterService(ILogger<QualityFilterService> logger)
         {
             _logger = logger;
         }
-
+         
         public Task<(bool isHighQuality, string reason)> CheckQualityAsync(string symbol, SecuritiesOverview overviewData,
             Dictionary<string, double> sectorAveragePERatios)
         {
             double dollarVolume = (overviewData.FiftyDayMovingAverage ?? 0) * (overviewData.SharesOutstanding ?? 0);
-            if (dollarVolume < MindDollarVolume)
-                return Task.FromResult((false, $"Fails Liquidity: Dollar Volume ${dollarVolume:N0} < ${MindDollarVolume:N0}."));
+            if (dollarVolume < MinDollarValue)
+                return Task.FromResult((false, $"Fails Liquidity: Dollar Volume ${dollarVolume:N0} < ${MinDollarValue:N0}."));
 
             if (overviewData == null)
                 return Task.FromResult((false, "No SecuritiesOverview data available."));
