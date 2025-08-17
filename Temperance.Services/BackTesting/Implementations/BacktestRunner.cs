@@ -110,9 +110,8 @@ namespace Temperance.Services.BackTesting.Implementations
                 var allTrades = new ConcurrentBag<TradeSummary>();
                 var symbolKellyHalfFractions = new ConcurrentDictionary<string, double>();
 
-                //await Parallel.ForEachAsync(testCaseStream, parallelOptions, async (testCase, cancellationToken) =>
-                //{
-                foreach(var testCase in testCaseStream)
+                await Parallel.ForEachAsync(testCaseStream, parallelOptions, async (testCase, cancellationToken) =>
+                {
                     var symbol = testCase.Symbol.Trim();
                     var interval = testCase.Interval.Trim();
 
