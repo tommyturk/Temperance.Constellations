@@ -1,4 +1,5 @@
 ﻿using Temperance.Data.Models.HistoricalPriceData;
+using Temperance.Data.Models.MarketHealth;
 using Temperance.Data.Models.Trading;
 
 namespace Temperance.Services.Trading.Strategies
@@ -9,7 +10,7 @@ namespace Temperance.Services.Trading.Strategies
         Dictionary<string, object> GetDefaultParameters();
         void Initialize(double initialCapital, Dictionary<string, object> parameters);
 
-        SignalDecision GenerateSignal(in HistoricalPriceModel currentBar, Position currentPosition, IReadOnlyList<HistoricalPriceModel> historicalDataWindow, Dictionary<string, double> currentIndicatorValues);
+        SignalDecision GenerateSignal(in HistoricalPriceModel currentBar, Position currentPosition, IReadOnlyList<HistoricalPriceModel> historicalDataWindow, Dictionary<string, double> currentIndicatorValues, MarketHealthScore marketHealth);
 
         TradeSummary ClosePosition(TradeSummary activeTrade, HistoricalPriceModel currentBar, SignalDecision exitSignal);
 
@@ -25,7 +26,8 @@ namespace Temperance.Services.Trading.Strategies
             double maxTradeAllocationInitialCapital,
             double currentTotalEquity,
             double kellyHalfFraction,
-            int currentPyramidEntries);
+            int currentPyramidEntries,
+            MarketHealthScore marketHealth);
 
         int GetMaxPyramidEntries();
 

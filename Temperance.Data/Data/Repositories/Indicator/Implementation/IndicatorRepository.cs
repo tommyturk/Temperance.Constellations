@@ -11,13 +11,11 @@ namespace Temperance.Data.Data.Repositories.Indicator.Implementation
     {
         private readonly string _connectionString;
         private readonly ILogger<IndicatorRepository> _logger;
-        private readonly IIndicatorRepository _indicatorRepository;
 
-        public IndicatorRepository(string connectionString, ILogger<IndicatorRepository> logger, IIndicatorRepository indicatorRepository)
+        public IndicatorRepository(string connectionString, ILogger<IndicatorRepository> logger)
         {
             _connectionString = connectionString;
             _logger = logger;
-            _indicatorRepository = indicatorRepository;
         }
 
         private IDbConnection CreateConnection() => new SqlConnection(_connectionString);

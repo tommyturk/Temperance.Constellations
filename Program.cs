@@ -8,6 +8,8 @@ using Microsoft.OpenApi.Models;
 using System.Text.Json.Serialization;
 using Temperance.Data.Data.Repositories.BalanceSheet.Implementation;
 using Temperance.Data.Data.Repositories.BalanceSheet.Interface;
+using Temperance.Data.Data.Repositories.Indicator.Implementation;
+using Temperance.Data.Data.Repositories.Indicator.Interfaces;
 using Temperance.Data.Data.Repositories.Securities.Implementations;
 using Temperance.Data.Data.Repositories.Securities.Interfaces;
 using Temperance.Data.Data.Repositories.Trade.Implementations;
@@ -71,6 +73,8 @@ builder.Services.AddTransient<IHistoricalPriceService, HistoricalPriceService>()
 builder.Services.AddTransient<IConductorService, ConductorService>();
 builder.Services.AddTransient<ITradeService, TradesService>();
 builder.Services.AddTransient<IQualityFilterService, QualityFilterService>();
+builder.Services.AddTransient<IMarketHealthService, MarketHealthService>();
+builder.Services.AddTransient<IEconomicDataService, EconomicDataService>();
 
 builder.Services.AddTransient<ISecuritiesOverviewRepository>(provider =>
 {
@@ -119,6 +123,13 @@ builder.Services.AddSingleton<ISqlHelper>(provider =>
 {
     var cs = provider.GetRequiredService<HistoricalPriceConnectionString>().Value;
     return new SqlHelper(cs);
+});
+
+builder.Services.AddSingleton<IIndicatorRepository>(provider =>
+{
+    var cs = provider.GetRequiredService<DefaultConnectionString>().Value;
+    var logger = provider.GetRequiredService<ILogger<IndicatorRepository>>();
+    return new IndicatorRepository(cs, logger);
 });
 
 builder.Services.AddSingleton<Accelerator>(sp =>

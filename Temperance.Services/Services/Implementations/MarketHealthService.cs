@@ -43,10 +43,10 @@ namespace Temperance.Services.Services.Implementations
             var fedRateTrend = await _economicDataService.GetFedRateTrend(currentDate);
             totalScore += (fedRateTrend == Trend.Rising) ? -1 : 1;
 
-            var cpi = await _economicDataService.GetCpiYoY(currentDate);
-            if (cpi > 0.04) totalScore -= 2;
-            else if (cpi > 0.025) totalScore -= 1;
-            else totalScore += 1;
+            //var cpi = await _economicDataService.GetCpiYoY(currentDate);
+            //if (cpi > 0.04) totalScore -= 2;
+            //else if (cpi > 0.025) totalScore -= 1;
+            //else totalScore += 1;
 
             var unemploymentTrend = await _economicDataService.GetUnemploymentTrend(currentDate);
             totalScore += (unemploymentTrend == Trend.Rising) ? -2 : 1;

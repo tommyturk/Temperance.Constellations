@@ -1,5 +1,6 @@
 ﻿using Microsoft.Extensions.Logging;
 using Temperance.Data.Models.HistoricalPriceData;
+using Temperance.Data.Models.MarketHealth;
 using Temperance.Data.Models.Trading;
 using Temperance.Services.Services.Interfaces;
 using Temperance.Utilities.Helpers;
@@ -62,8 +63,12 @@ namespace Temperance.Services.Trading.Strategies.MeanReversion.Implementation
         public int GetRequiredLookbackPeriod() => Math.Max(_movingAveragePeriod, _rsiPeriod + 1) + 1;
         public long GetMinimumAverageDailyVolume() => (long)_minimumAverageDailyVolume;
 
-        public SignalDecision GenerateSignal(in HistoricalPriceModel currentBar, Position? currentPosition, IReadOnlyList<HistoricalPriceModel> historicalDataWindow, Dictionary<string, double> currentIndicatorValues)
+        public SignalDecision GenerateSignal(in HistoricalPriceModel currentBar, Position? currentPosition, IReadOnlyList<HistoricalPriceModel> historicalDataWindow, 
+            Dictionary<string, double> currentIndicatorValues, MarketHealthScore marketHealth)
         {
+            if (currentPosition == null && marketHealth <= MarketHealthScore.Bearish)
+                return SignalDecision.Hold;
+
             if (historicalDataWindow.Count < GetRequiredLookbackPeriod()) return SignalDecision.Hold;
 
             double lowerBollingerBand = currentIndicatorValues["LowerBand"];
@@ -82,7 +87,11 @@ namespace Temperance.Services.Trading.Strategies.MeanReversion.Implementation
                 if (currentBar.LowPrice <= position.AverageEntryPrice * (1.0 - _stopLossPercentage)) return true;
             else
                 if (currentBar.HighPrice >= position.AverageEntryPrice * (1.0 + _stopLossPercentage)) return true;
-            
+
+            var exitSignal = GenerateSignal(in currentBar, position, historicalDataWindow, currentIndicatorValues, MarketHealthScore.Neutral);
+            if (position.Direction == PositionDirection.Long && exitSignal == SignalDecision.Sell) return true;
+            if (position.Direction == PositionDirection.Short && exitSignal == SignalDecision.Buy) return true;
+
             return false;
         }
 
@@ -99,33 +108,40 @@ namespace Temperance.Services.Trading.Strategies.MeanReversion.Implementation
 
         public TradeSummary ClosePosition(TradeSummary activeTrade, HistoricalPriceModel currentBar, SignalDecision exitSignal)
         {
-            if (activeTrade == null) return null; // Or throw
+            if (activeTrade == null) return null;
 
             double rawExitPrice = currentBar.ClosePrice;
-
-            double effectiveExitPrice = _transactionCostService.CalculateExitCost(rawExitPrice, activeTrade.Direction == "Long" ? PositionDirection.Long : PositionDirection.Short);
+            var direction = activeTrade.Direction == "Long" ? PositionDirection.Long : PositionDirection.Short;
+            double effectiveExitPrice = _transactionCostService.CalculateExitCost(rawExitPrice, direction);
 
             activeTrade.ExitDate = currentBar.Timestamp;
             activeTrade.ExitPrice = effectiveExitPrice;
 
-            double profitLoss = 0;
-            if (activeTrade.Direction == "Long")
-                profitLoss = (activeTrade.ExitPrice.Value - activeTrade.EntryPrice) * activeTrade.Quantity; // Use effective entry/exit
-            else if (activeTrade.Direction == "Short")
-                profitLoss = (activeTrade.EntryPrice - activeTrade.ExitPrice.Value) * activeTrade.Quantity;
+            double profitLoss = direction == PositionDirection.Long
+                ? (effectiveExitPrice - activeTrade.EntryPrice) * activeTrade.Quantity
+                : (activeTrade.EntryPrice - effectiveExitPrice) * activeTrade.Quantity;
 
-            activeTrade.ProfitLoss = profitLoss;
-            activeTrade.TransactionCost = _transactionCostService.CalculateTotalCost(activeTrade.EntryPrice, rawExitPrice, (activeTrade.Direction == "Long" ? SignalDecision.Buy : SignalDecision.Sell), (activeTrade.Direction == "Long" ? PositionDirection.Long : PositionDirection.Short), activeTrade.Quantity);
+            activeTrade.ProfitLoss = profitLoss - activeTrade.TransactionCost; 
 
             return activeTrade;
         }
 
         public double GetAllocationAmount(in HistoricalPriceModel currentBar, IReadOnlyList<HistoricalPriceModel> historicalDataWindow, 
             Dictionary<string, double> currentIndicatorValues, double maxTradeAllocationInitialCapital, double currentTotalEquity, 
-            double kellyHalfFraction, int currentPyramidEntries)
+            double kellyHalfFraction, int currentPyramidEntries, MarketHealthScore marketHealthScore)
         {
-            var signal = GenerateSignal(in currentBar, null, historicalDataWindow, currentIndicatorValues);
+            var signal = GenerateSignal(in currentBar, null, historicalDataWindow, currentIndicatorValues, marketHealthScore);
             if (signal == SignalDecision.Hold) return 0;
+
+            double marketHealthMultiplier = marketHealthScore switch
+            {
+                MarketHealthScore.StronglyBullish => 1.2,
+                MarketHealthScore.Bullish => 1.0,
+                MarketHealthScore.Neutral => 0.75,
+                _ => 0.0
+            };
+
+            if (marketHealthMultiplier <= 0) return 0;
 
             double rsiScalingFactor = 0.5;
             double currentRsi = currentIndicatorValues["RSI"];
@@ -141,21 +157,16 @@ namespace Temperance.Services.Trading.Strategies.MeanReversion.Implementation
             }
 
             const double baselineRiskPercentage = 0.02;
-            double totalAllocation = (currentTotalEquity * baselineRiskPercentage) * rsiScalingFactor;
+            double totalAllocation = (currentTotalEquity * baselineRiskPercentage) * rsiScalingFactor * marketHealthMultiplier;
             double effectiveKellyFraction = Math.Max(0.005, kellyHalfFraction);
             totalAllocation = Math.Min(totalAllocation, currentTotalEquity * effectiveKellyFraction);
             totalAllocation = Math.Min(totalAllocation, maxTradeAllocationInitialCapital);
 
             if (totalAllocation <= 0) return 0;
 
-            if (currentPyramidEntries == 1) return totalAllocation * _initialEntryScale;
-
-            else
-            {
-                double remainingAllocation = totalAllocation * (1.0 - _initialEntryScale);
-                int remainingEntries = _maxPyramidEntries - 1;
-                return remainingEntries > 0 ? remainingAllocation / remainingEntries : 0;
-            }
+            return currentPyramidEntries == 1
+                ? totalAllocation * _initialEntryScale
+                : totalAllocation * (1.0 - _initialEntryScale / (_maxPyramidEntries - 1 > 0 ? _maxPyramidEntries - 1 : 1));
         }
 
         //protected double CalculateStopLoss(Position position)
