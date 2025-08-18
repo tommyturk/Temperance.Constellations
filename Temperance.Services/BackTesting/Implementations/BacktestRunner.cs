@@ -32,6 +32,7 @@ namespace Temperance.Services.BackTesting.Implementations
         private readonly IBacktestRepository _backtestRepository;
         private readonly IServiceProvider _serviceProvider;
         private readonly IQualityFilterService _qualityFilterService;
+        private readonly IMarketHealthService _marketHealthService;
         private readonly ILogger<BacktestRunner> _logger;
 
         public BacktestRunner(
@@ -46,6 +47,7 @@ namespace Temperance.Services.BackTesting.Implementations
             IBacktestRepository backtestRepository,
             IServiceProvider serviceProvider,
             IQualityFilterService qualityFilterService,
+            IMarketHealthService marketHealthService,
             ILogger<BacktestRunner> logger)
         {
             _liquidityService = liquidityService;
@@ -57,6 +59,8 @@ namespace Temperance.Services.BackTesting.Implementations
             _securitiesOverviewService = securitiesOverviewService;
             _performanceCalculator = performanceCalculator;
             _serviceProvider = serviceProvider;
+            _qualityFilterService = qualityFilterService;
+            _marketHealthService = marketHealthService;
             _logger = logger;
         }
 
@@ -89,8 +93,12 @@ namespace Temperance.Services.BackTesting.Implementations
                     }
                 }
 
-                var sectorPERatios = await _securitiesOverviewService.GetSectorAveragePERatiosAsync();
-                _logger.LogInformation("RunId: {RunId} - Cached data for {SymbolCount} symbols and {SectorCount} sector PE ratios.", runId, overviewDataCache.Count, sectorPERatios.Count);
+                var marketHealthCache = new ConcurrentDictionary<DateTime, MarketHealthScore>();
+                for(var day = config.StartDate.Date; day <= config.EndDate.Date; day = day.AddDays(1))
+                {
+                    var score = await _marketHealthService.GetCurrentMarketHealth(day);
+                    marketHealthCache.TryAdd(day, score);
+                }
 
                 var testCaseStream = _securitiesOverviewService.StreamSecuritiesForBacktest(config.Symbols, config.Intervals);
                 var parallelOptions = new ParallelOptions { MaxDegreeOfParallelism = config.MaxParallelism };
@@ -105,13 +113,6 @@ namespace Temperance.Services.BackTesting.Implementations
                     if (!overviewDataCache.TryGetValue(symbol, out var overview))
                     {
                         _logger.LogWarning("RunId: {RunId} - SKIPPING {Symbol}: No overview data found in cache.", runId, symbol);
-                        return;
-                    }
-
-                    var (isHighQuality, reason) = await _qualityFilterService.CheckQualityAsync(symbol, overview, sectorPERatios);
-                    if (!isHighQuality)
-                    {
-                        _logger.LogInformation("RunId: {RunId} - SKIPPING {Symbol}: {Reason}", runId, symbol, reason);
                         return;
                     }
 
@@ -183,6 +184,8 @@ namespace Temperance.Services.BackTesting.Implementations
                                 { "LowerBand", indicators["LowerBand"][globalIndex] }
                             };
 
+                            marketHealthCache.TryGetValue(currentBar.Timestamp.Date, out var currentMarketHealth);
+
                             IReadOnlyList<HistoricalPriceModel> dataWindow = orderedData.Take(i + 1).ToList();
 
                             var relevantSharesEntry = sharesOutstandingHistory.LastOrDefault(kvp => kvp.Key <= currentBar.Timestamp);
@@ -240,7 +243,7 @@ namespace Temperance.Services.BackTesting.Implementations
                                 continue;
                             }
 
-                            var signal = strategyInstance.GenerateSignal(in currentBar, currentPosition, dataWindow, currentIndicatorValues);
+                            var signal = strategyInstance.GenerateSignal(in currentBar, currentPosition, dataWindow, currentIndicatorValues, currentMarketHealth);
                             if (signal != SignalDecision.Hold)
                             {
                                 if (currentPosition == null)
@@ -248,7 +251,8 @@ namespace Temperance.Services.BackTesting.Implementations
                                     long minimumAdv = strategyInstance.GetMinimumAverageDailyVolume();
                                     if (!liquidityService.IsSymbolLiquidAtTime(symbol, interval, minimumAdv, currentBar.Timestamp, 20, orderedData)) continue;
 
-                                    double allocationAmount = strategyInstance.GetAllocationAmount(in currentBar, dataWindow, currentIndicatorValues, config.InitialCapital * 0.02, portfolioManager.GetTotalEquity(), currentSymbolKellyHalfFraction, 1);
+                                    double allocationAmount = strategyInstance.GetAllocationAmount(in currentBar, dataWindow, currentIndicatorValues, 
+                                            config.InitialCapital * 0.02, portfolioManager.GetTotalEquity(), currentSymbolKellyHalfFraction, currentPosition.PyramidEntries + 1, currentMarketHealth);
                                     if (allocationAmount > 0)
                                     {
                                         double rawEntryPrice = currentBar.ClosePrice;
@@ -293,7 +297,7 @@ namespace Temperance.Services.BackTesting.Implementations
                                     var expectedDirection = signal == SignalDecision.Buy ? PositionDirection.Long : PositionDirection.Short;
                                     if (expectedDirection == currentPosition.Direction && currentPosition.PyramidEntries < strategyInstance.GetMaxPyramidEntries())
                                     {
-                                        double allocationAmount = strategyInstance.GetAllocationAmount(in currentBar, dataWindow, currentIndicatorValues, config.InitialCapital * 0.02, portfolioManager.GetTotalEquity(), currentSymbolKellyHalfFraction, currentPosition.PyramidEntries + 1);
+                                        double allocationAmount = strategyInstance.GetAllocationAmount(in currentBar, dataWindow, currentIndicatorValues, config.InitialCapital * 0.02, portfolioManager.GetTotalEquity(), currentSymbolKellyHalfFraction, currentPosition.PyramidEntries + 1, currentMarketHealth);
                                         if (allocationAmount > 0)
                                         {
                                             double rawEntryPrice = currentBar.ClosePrice;
