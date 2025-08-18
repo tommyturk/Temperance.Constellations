@@ -32,6 +32,7 @@ namespace TradingApp.src.Core.Services.Implementations
 
             _httpClient = new HttpClient(handler);
             _baseUrl = settings.Value.BaseUrl;
+            Console.Write("baseUrl: ", _baseUrl);
         }
 
         public async Task<SecuritySearchResponse> SearchSecurities(string query)
