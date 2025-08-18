@@ -33,6 +33,9 @@ var builder = WebApplication.CreateBuilder(args);
 var connectionString = builder.Configuration.GetConnectionString("DefaultConnection");
 var historicalConnectionString = builder.Configuration.GetConnectionString("HistoricalPricesConnection");
 
+Console.WriteLine("Default: ", connectionString);
+Console.WriteLine("historical: ", historicalConnectionString);
+
 builder.Services.AddLogging(loggingBuilder =>
 {
     loggingBuilder.AddConfiguration(builder.Configuration.GetSection("Logging"));
