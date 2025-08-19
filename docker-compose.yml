@@ -12,6 +12,7 @@ services:
       ASPNETCORE_URLS: "http://+:8003"
       ASPNETCORE_ENVIRONMENT: "Development"
       ConnectionStrings__DefaultConnection: "Server=host.docker.internal\\TRADINGBOTSERVER,1433;Database=TradingBotDb;User ID=developer;Password=K3n5alr1532025!!;Encrypt=False;TrustServerCertificate=True;"
+      ConnectionStrings__HistoricalPricesConnection: "Server=host.docker.internal\\TRADINGBOTSERVER,1433;Database=Historical;User ID=developer;Password=K3n5alr1532025!!;Encrypt=False;TrustServerCertificate=True;"
       AlphaVantageSettings__BaseUrl: "https://www.alphavantage.co/query"
       AlphaVantageSettings__ApiKey: "Q63WJB6QXCD0USO7"
       ConductorSettings__BaseUrl: "http://conductor-api:8002"
