@@ -87,7 +87,7 @@ namespace Temperance.Services.BackTesting.Implementations
                 foreach (var symbol in allSymbols)
                 {
                     var overview = await _securitiesOverviewService.GetSecurityOverview(symbol);
-                    if (overview != null)
+                    if (overview != null && overview.Symbol != null)
                     {
                         overviewDataCache.TryAdd(symbol, overview);
                     }
@@ -252,7 +252,7 @@ namespace Temperance.Services.BackTesting.Implementations
                                     if (!liquidityService.IsSymbolLiquidAtTime(symbol, interval, minimumAdv, currentBar.Timestamp, 20, orderedData)) continue;
 
                                     double allocationAmount = strategyInstance.GetAllocationAmount(in currentBar, dataWindow, currentIndicatorValues, 
-                                            config.InitialCapital * 0.02, portfolioManager.GetTotalEquity(), currentSymbolKellyHalfFraction, currentPosition.PyramidEntries + 1, currentMarketHealth);
+                                            config.InitialCapital * 0.02, portfolioManager.GetTotalEquity(), currentSymbolKellyHalfFraction, (currentPosition?.PyramidEntries ?? 0) + 1, currentMarketHealth);
                                     if (allocationAmount > 0)
                                     {
                                         double rawEntryPrice = currentBar.ClosePrice;

@@ -1,4 +1,5 @@
 ﻿using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Newtonsoft.Json;
 using System.Text;
 using Temperance.Data.Models.Conductor;
@@ -15,11 +16,11 @@ namespace Temperance.Services.Services.Implementations
         private readonly ConductorSettings _conductorSettings;
         private readonly ILogger<ConductorService> _logger;
 
-        public ConductorService(HttpClient httpClient, ConductorSettings conductorSettings, ILogger<ConductorService> logger)
+        public ConductorService(HttpClient httpClient, IOptions<ConductorSettings> conductorSettings, ILogger<ConductorService> logger)
         {
             _httpClient = httpClient;
             _httpClient.Timeout = TimeSpan.FromMinutes(5);
-            _conductorSettings = conductorSettings;
+            _conductorSettings = conductorSettings.Value;
             _logger = logger;
         }
 
@@ -35,6 +36,8 @@ namespace Temperance.Services.Services.Implementations
         {
             var url = $"{_conductorSettings.BaseUrl}/api/securities/overview?symbol={symbol}";
             var response = await _httpClient.GetStringAsync(url);
+            if (response == null)
+                return null;
             var data = JsonConvert.DeserializeObject<SecuritiesOverview>(response);
             return data;
         }
