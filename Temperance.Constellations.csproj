@@ -37,4 +37,6 @@
     <ProjectReference Include="Temperance.Settings\Temperance.Settings.csproj" />
     <ProjectReference Include="Temperance.Utilities\Temperance.Utilities.csproj" />
   </ItemGroup>
+
+  <ProjectExtensions><VisualStudio><UserProperties appsettings_1json__JsonSchema="https://www.schemastore.org/azure-iot-edge-deployment-2.0.json" /></VisualStudio></ProjectExtensions>
 </Project>

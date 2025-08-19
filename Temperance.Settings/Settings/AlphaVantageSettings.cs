@@ -1,8 +1,8 @@
-﻿namespace Temperance.Settings
+﻿namespace Temperance.Settings.Settings
 {
     public class AlphaVantageSettings
     {
         public string BaseUrl { get; set; }
-        public string[] ApiKeys { get; set; }
+        public List<string> ApiKey { get; set; }
     }
 }

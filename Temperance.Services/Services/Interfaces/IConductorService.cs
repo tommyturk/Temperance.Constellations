@@ -5,6 +5,7 @@ namespace Temperance.Services.Services.Interfaces
     public interface IConductorService
     {
         Task<List<string>> GetSecurities();
+        Task<SecuritiesOverview> GetSecuritiesOverviewData(string symbol);
         Task<bool> UpdateHistoricalPrices(string symbol, string interval);
 
         Task<PortfolioSnapshotDto?> GetPortfolioSnapshotAsync();

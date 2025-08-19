@@ -30,11 +30,14 @@ using TradingApp.src.Data.Repositories.HistoricalPrices.Interfaces;
 
 var builder = WebApplication.CreateBuilder(args);
 
-var connectionString = builder.Configuration.GetConnectionString("DefaultConnection");
-var historicalConnectionString = builder.Configuration.GetConnectionString("HistoricalPricesConnection");
+builder.Services.Configure<ConnectionStrings>(
+    builder.Configuration.GetSection("ConnectionStrings"));
 
-Console.WriteLine("Default: ", connectionString);
-Console.WriteLine("historical: ", historicalConnectionString);
+builder.Services.Configure<AlphaVantageSettings>(
+    builder.Configuration.GetSection("AlphaVantageSettings"));
+
+builder.Services.Configure<ConductorSettings>(
+    builder.Configuration.GetSection("ConductorSettings"));
 
 builder.Services.AddLogging(loggingBuilder =>
 {
@@ -43,24 +46,16 @@ builder.Services.AddLogging(loggingBuilder =>
     loggingBuilder.AddDebug();
 });
 
-// Add services to the container.
-
 builder.Services.AddControllers()
     .AddJsonOptions(options =>
     {
         options.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter());
     });
 
-builder.Services.Configure<ConductorSettings>(builder.Configuration.GetSection("ConductorSettings"));
 builder.Services.AddSingleton(sp => sp.GetRequiredService<IOptions<ConductorSettings>>().Value);
 
 builder.Services.AddHttpClient<IAlphaVantageService, AlphaVantageService>();
-
-builder.Services.AddSingleton(new DefaultConnectionString(connectionString));
-builder.Services.AddSingleton(new HistoricalPriceConnectionString(historicalConnectionString));
-
 builder.Services.AddTransient<IHangfireTestService, HangfireTestService>();
-
 builder.Services.AddTransient<IEarningsService, EarningsService>();
 builder.Services.AddTransient<IStrategyFactory, StrategyFactory>();
 builder.Services.AddTransient<IPerformanceCalculator, PerformanceCalculator>();
@@ -81,14 +76,16 @@ builder.Services.AddTransient<IEconomicDataService, EconomicDataService>();
 
 builder.Services.AddTransient<ISecuritiesOverviewRepository>(provider =>
 {
-    var cs = provider.GetRequiredService<DefaultConnectionString>().Value;
+    var connectionStrings = provider.GetRequiredService<IOptions<ConnectionStrings>>().Value;
+    var cs = connectionStrings.DefaultConnection;
     var logger = provider.GetRequiredService<ILogger<SecuritiesOverviewRepository>>();
     return new SecuritiesOverviewRepository(cs, logger);
 });
 
 builder.Services.AddTransient<IHistoricalPriceRepository>(provider =>
 {
-    var historicalConnectionString = provider.GetRequiredService<HistoricalPriceConnectionString>().Value;
+    var connectionStrings = provider.GetRequiredService<IOptions<ConnectionStrings>>().Value;
+    var historicalConnectionString = connectionStrings.HistoricalPricesConnection;
     var sqlHelper = provider.GetRequiredService<ISqlHelper>();
     var securitiesOverviewRepository = provider.GetRequiredService<ISecuritiesOverviewRepository>();
     return new HistoricalPriceRepository(historicalConnectionString, securitiesOverviewRepository, sqlHelper);
@@ -96,74 +93,51 @@ builder.Services.AddTransient<IHistoricalPriceRepository>(provider =>
 
 builder.Services.AddTransient<IEarningsRepository>(provider =>
 {
-    var connectionString = provider.GetRequiredService<DefaultConnectionString>().Value;
-
-    return new EarningsRepository(connectionString);
+    var connectionString = provider.GetRequiredService<IOptions<ConnectionStrings>>().Value;
+    var defaultConnnection = connectionString.DefaultConnection;
+    return new EarningsRepository(defaultConnnection);
 });
 
 builder.Services.AddTransient<IBalanceSheetRepository>(provider =>
 {
-    var connectionString = provider.GetRequiredService<DefaultConnectionString>().Value;
-
-    return new BalanceSheetRepository(connectionString);
+    var connectionString = provider.GetRequiredService<IOptions<ConnectionStrings>>().Value;
+    var defaultConnnection = connectionString.DefaultConnection;
+    return new BalanceSheetRepository(defaultConnnection);
 });
 
 builder.Services.AddTransient<IBacktestRepository>(provider =>
 {
-    var cs = provider.GetRequiredService<DefaultConnectionString>().Value;
+    var connectionString = provider.GetRequiredService<IOptions<ConnectionStrings>>().Value;
+    var defaultConnnection = connectionString.DefaultConnection;
     var logger = provider.GetRequiredService<ILogger<BacktestRepository>>();
-    return new BacktestRepository(cs, logger);
+    return new BacktestRepository(defaultConnnection, logger);
 });
 
 builder.Services.AddTransient<ITradeRepository>(provider =>
 {
-    var connectionString = provider.GetRequiredService<DefaultConnectionString>().Value;
+    var connectionString = provider.GetRequiredService<IOptions<ConnectionStrings>>().Value;
+    var defaultConnnection = connectionString.DefaultConnection;
     var logger = provider.GetRequiredService<ILogger<TradeRepository>>();
-    return new TradeRepository(connectionString, logger);
+    return new TradeRepository(defaultConnnection, logger);
 });
 
 builder.Services.AddSingleton<ISqlHelper>(provider =>
 {
-    var cs = provider.GetRequiredService<HistoricalPriceConnectionString>().Value;
-    return new SqlHelper(cs);
+    var connectionString = provider.GetRequiredService<IOptions<ConnectionStrings>>().Value;
+    var historicalDbConnection = connectionString.HistoricalPricesConnection;
+    return new SqlHelper(historicalDbConnection);
 });
 
 builder.Services.AddSingleton<IIndicatorRepository>(provider =>
 {
-    var cs = provider.GetRequiredService<DefaultConnectionString>().Value;
+    var connectionString = provider.GetRequiredService<IOptions<ConnectionStrings>>().Value;
+    var defaultConnnection = connectionString.DefaultConnection;
     var logger = provider.GetRequiredService<ILogger<IndicatorRepository>>();
-    return new IndicatorRepository(cs, logger);
+    return new IndicatorRepository(defaultConnnection, logger);
 });
 
 builder.Services.AddSingleton<Accelerator>(sp =>
-{
-    //var logger = sp.GetRequiredService<ILogger<Program>>(); 
-    //logger.LogInformation("Initializing ILGPU Context and Accelerator...");
-
-    //try
-    //{
-    //    var context = Context.Create(builder => builder.Default().EnableAlgorithms());
-
-    //    var device = context.GetPreferredDevice(preferCPU: false);
-
-    //    if (device == null)
-    //    {
-    //        logger.LogWarning("No suitable ILGPU device found. GPU acceleration will be unavailable.");
-    //        throw new InvalidOperationException("ILGPU Accelerator could not be created as no suitable device was found.");
-    //    }
-
-    //    logger.LogInformation("Found ILGPU Device: {DeviceName}", device.Name);
-
-    //    var accelerator = device.CreateAccelerator(context);
-    //    logger.LogInformation("ILGPU Accelerator created successfully for {AcceleratorName}", accelerator.Name);
-
-    //    return accelerator;
-    //}
-    //catch (Exception ex)
-    //{
-    //    logger.LogCritical(ex, "A critical error occurred while initializing the ILGPU Accelerator. The application cannot start.");
-    //    throw;
-    //}
+{ 
     var logger = sp.GetRequiredService<ILogger<Program>>();
     logger.LogInformation("Initializing ILGPU Context and Accelerator...");
     var context = Context.Create(builder => builder.Default().EnableAlgorithms());
@@ -183,7 +157,7 @@ builder.Services.AddHangfire(configuration => configuration
     .SetDataCompatibilityLevel(CompatibilityLevel.Version_180)
     .UseSimpleAssemblyNameTypeSerializer()
     .UseRecommendedSerializerSettings()
-    .UseSqlServerStorage(connectionString, new SqlServerStorageOptions
+    .UseSqlServerStorage(builder.Configuration.GetConnectionString("DefaultConnection"), new SqlServerStorageOptions
     {
         CommandBatchMaxTimeout = TimeSpan.FromMinutes(10),
         SlidingInvisibilityTimeout = TimeSpan.FromMinutes(10),

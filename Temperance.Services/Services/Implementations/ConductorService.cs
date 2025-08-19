@@ -31,6 +31,14 @@ namespace Temperance.Services.Services.Implementations
             return data;
         }
 
+        public async Task<SecuritiesOverview> GetSecuritiesOverviewData(string symbol)
+        {
+            var url = $"{_conductorSettings.BaseUrl}/api/securities/overview?symbol={symbol}";
+            var response = await _httpClient.GetStringAsync(url);
+            var data = JsonConvert.DeserializeObject<SecuritiesOverview>(response);
+            return data;
+        }
+
         public async Task<bool> UpdateHistoricalPrices(string symbol, string interval)
         {
             var url = $"{_conductorSettings.BaseUrl}/api/historical?symbol={symbol}&interval={interval}";

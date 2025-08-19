@@ -11,8 +11,6 @@ namespace Temperance.Services.Services.Interfaces
            List<string> symbols,
            List<string> intervals,
            [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default);
-        Task<bool> UpdateSecuritiesOverviewData(int securityId, string symbols);
-        Task<SecuritySearchResponse> SearchSecuritiesAsync(string query);
         Task<SecuritiesOverview> GetSecurityOverview(string symbol);
         Task<int> GetSecurityId(string symbol);
         Task<bool> DeleteSecurity(string symbol);

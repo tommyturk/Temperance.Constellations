@@ -2,12 +2,12 @@
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using System.Net;
-using Temperance.Settings;
 using Temperance.Data.Models.HistoricalPriceData;
 using Temperance.Data.Models.Securities.BalanceSheet;
 using Temperance.Data.Models.Securities.Earnings;
 using Temperance.Data.Models.Securities.SecurityOverview;
 using Temperance.Services.Services.Interfaces;
+using Temperance.Settings.Settings;
 
 namespace TradingApp.src.Core.Services.Implementations
 {
