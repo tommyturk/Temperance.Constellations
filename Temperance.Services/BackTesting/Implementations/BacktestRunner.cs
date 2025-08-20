@@ -277,37 +277,29 @@ namespace Temperance.Services.BackTesting.Implementations
             double rawExitPrice;
 
             if (exitReason.StartsWith("ATR Stop-Loss"))
-            {
                 rawExitPrice = currentPosition.StopLossPrice;
-            }
             else if (exitReason.StartsWith("Profit Target"))
-            {
                 rawExitPrice = currentIndicatorValues["SMA"];
-            }
-            else // For all other cases (Time Stop, MOC, End of Backtest, Signal Reversal)
-            {
+            else
                 rawExitPrice = exitBar.ClosePrice;
-            }
 
             PositionDirection exitDirection = currentPosition.Direction;
             double effectiveExitPrice = await transactionCostService.CalculateExitCost(rawExitPrice, exitDirection, symbol, interval, exitBar.Timestamp);
 
-            // Calculate costs based on the raw exit price
             double commissionCost = await transactionCostService.CalculateCommissionCost(rawExitPrice, currentPosition.Quantity, symbol, interval, exitBar.Timestamp);
             double slippageCost = await transactionCostService.CalculateSlippageCost(rawExitPrice, currentPosition.Quantity, exitDirection, symbol, interval, exitBar.Timestamp);
             double spreadAndOtherCost = await transactionCostService.GetSpreadCost(rawExitPrice, currentPosition.Quantity, symbol, interval, exitBar.Timestamp);
             double totalExitCost = commissionCost + slippageCost + spreadAndOtherCost;
 
             double grossPnl = (exitDirection == PositionDirection.Long)
-                ? (rawExitPrice - currentPosition.AverageEntryPrice) * currentPosition.Quantity
-                : (currentPosition.AverageEntryPrice - rawExitPrice) * currentPosition.Quantity;
+                 ? (rawExitPrice - currentPosition.AverageEntryPrice) * currentPosition.Quantity
+                 : (currentPosition.AverageEntryPrice - rawExitPrice) * currentPosition.Quantity;
 
             double totalTransactionCost = (activeTrade.TotalTransactionCost ?? 0) + totalExitCost;
             double netPnl = grossPnl - totalTransactionCost;
 
-            // Update the trade summary with all correct values
             activeTrade.ExitDate = exitBar.Timestamp;
-            activeTrade.ExitPrice = effectiveExitPrice; // The price after costs
+            activeTrade.ExitPrice = effectiveExitPrice;
             activeTrade.GrossProfitLoss = grossPnl;
             activeTrade.ProfitLoss = netPnl;
             activeTrade.CommissionCost = (activeTrade.CommissionCost ?? 0) + commissionCost;
@@ -316,6 +308,8 @@ namespace Temperance.Services.BackTesting.Implementations
             activeTrade.TotalTransactionCost = totalTransactionCost;
             activeTrade.HoldingPeriodMinutes = (int)(exitBar.Timestamp - activeTrade.EntryDate).TotalMinutes;
             activeTrade.ExitReason = exitReason;
+
+            activeTrade.EntryPrice = currentPosition.AverageEntryPrice;
 
             var closedTrade = await portfolioManager.ClosePosition(activeTrade);
 
@@ -330,7 +324,6 @@ namespace Temperance.Services.BackTesting.Implementations
             }
             return closedTrade;
         }
-
 
         //[AutomaticRetry(Attempts = 1)]
         //public async Task RunBacktest(string configJson, Guid runId)
