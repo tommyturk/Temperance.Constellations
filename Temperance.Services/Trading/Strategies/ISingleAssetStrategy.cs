@@ -10,6 +10,10 @@ namespace Temperance.Services.Trading.Strategies
         Dictionary<string, object> GetDefaultParameters();
         void Initialize(double initialCapital, Dictionary<string, object> parameters);
 
+        double GetAtrMultiplier();
+
+        double GetStdDevMultiplier();
+
         SignalDecision GenerateSignal(in HistoricalPriceModel currentBar, Position currentPosition, IReadOnlyList<HistoricalPriceModel> historicalDataWindow, Dictionary<string, double> currentIndicatorValues, MarketHealthScore marketHealth);
 
         TradeSummary ClosePosition(TradeSummary activeTrade, HistoricalPriceModel currentBar, SignalDecision exitSignal);
@@ -33,8 +37,6 @@ namespace Temperance.Services.Trading.Strategies
 
         double[] CalculateRSI(double[] prices, int period);
 
-        string GetExitReason(Position currentPosition, HistoricalPriceModel currentBar, List<HistoricalPriceModel> dataWindow, Dictionary<string, double> currentIndicatorValues);
-
         string GetEntryReason(HistoricalPriceModel currentBar, List<HistoricalPriceModel> dataWindow, Dictionary<string, double> currentIndicatorValues);
 
         string GetEntryReason(
@@ -42,10 +44,8 @@ namespace Temperance.Services.Trading.Strategies
             IReadOnlyList<HistoricalPriceModel> historicalDataWindow,
             Dictionary<string, double> currentIndicatorValues);
 
-        string GetExitReason(
-            in HistoricalPriceModel currentBar,
-            IReadOnlyList<HistoricalPriceModel> historicalDataWindow,
-            Dictionary<string, double> currentIndicatorValues);
+        string GetExitReason(Position position, in HistoricalPriceModel currentBar, IReadOnlyList<HistoricalPriceModel> historicalDataWindow, Dictionary<string, double> currentIndicatorValues);
+
 
         bool ShouldTakePartialProfit(Position position, in HistoricalPriceModel currentBar, Dictionary<string, double> currentIndicatorValues);
     }

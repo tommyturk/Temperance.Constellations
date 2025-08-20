@@ -33,9 +33,7 @@ namespace Temperance.Services.Trading.Strategies.MeanReversion.Implementation
             _logger = logger;
             _logger.LogDebug("MeanReversionStrategy instance created via DI.");
         }
-
-
-        // Define default parameters
+        
         public Dictionary<string, object> GetDefaultParameters() => new()
         {
             { "MovingAveragePeriod", 20 },
@@ -56,7 +54,7 @@ namespace Temperance.Services.Trading.Strategies.MeanReversion.Implementation
             _rsiPeriod = ParameterHelper.GetParameterOrDefault(parameters, "RSIPeriod", 14);
             _rsiOversoldThreshold = ParameterHelper.GetParameterOrDefault(parameters, "RSIOversold", 30);
             _rsiOverboughtThreshold = ParameterHelper.GetParameterOrDefault(parameters, "RSIOverbought", 70);
-            _minimumAverageDailyVolume = ParameterHelper.GetParameterOrDefault(parameters, "MinimumAverageDailyVolume", 750000); // Ensure 750000m is decimal literal
+            _minimumAverageDailyVolume = ParameterHelper.GetParameterOrDefault(parameters, "MinimumAverageDailyVolume", 1500000); 
             _atrPeriod = ParameterHelper.GetParameterOrDefault(parameters, "AtrPeriod", 14);
             _atrMultiplier = ParameterHelper.GetParameterOrDefault(parameters, "AtrMultiplier", 2.5);
             _maxHoldingBars = ParameterHelper.GetParameterOrDefault(parameters, "MaxHoldingBars", 10); 
@@ -71,6 +69,8 @@ namespace Temperance.Services.Trading.Strategies.MeanReversion.Implementation
         public int GetMaxPyramidEntries() => _maxPyramidEntries;
         public int GetRequiredLookbackPeriod() => Math.Max(_movingAveragePeriod, _rsiPeriod + 1) + 1;
         public long GetMinimumAverageDailyVolume() => (long)_minimumAverageDailyVolume;
+        public double GetAtrMultiplier() => _atrMultiplier;
+        public double GetStdDevMultiplier() => _stdDevMultiplier;
 
         public SignalDecision GenerateSignal(in HistoricalPriceModel currentBar, Position? currentPosition, IReadOnlyList<HistoricalPriceModel> historicalDataWindow, 
             Dictionary<string, double> currentIndicatorValues, MarketHealthScore marketHealth)
@@ -90,29 +90,9 @@ namespace Temperance.Services.Trading.Strategies.MeanReversion.Implementation
             return SignalDecision.Hold;
         }
 
-        public bool ShouldExitPosition(Position position, in HistoricalPriceModel currentBar, IReadOnlyList<HistoricalPriceModel> historicalDataWindow,
-            Dictionary<string, double> currentIndicatorValues)
+        public bool ShouldExitPosition(Position position, in HistoricalPriceModel currentBar, IReadOnlyList<HistoricalPriceModel> historicalDataWindow, Dictionary<string, double> currentIndicatorValues)
         {
-            double atrValue = currentIndicatorValues.TryGetValue("ATR", out var atr) ? atr : 0;
-            if(atrValue > 0)
-            {
-                double stopLossPrice;
-                if(position.Direction == PositionDirection.Long)
-                {
-                    stopLossPrice = position.AverageEntryPrice - (_atrMultiplier * atrValue);
-                    if (currentBar.LowPrice <= stopLossPrice) return true;
-                }
-                else
-                {
-                    stopLossPrice = position.AverageEntryPrice + (_atrMultiplier * atrValue);
-                    if (currentBar.HighPrice >= stopLossPrice) return true;
-                }
-            }
-            var exitSignal = GenerateSignal(in currentBar, position, historicalDataWindow, currentIndicatorValues, MarketHealthScore.Neutral);
-            if (position.Direction == PositionDirection.Long && exitSignal == SignalDecision.Sell) return true;
-            if (position.Direction == PositionDirection.Short && exitSignal == SignalDecision.Buy) return true;
-
-            return false;
+            return GetExitReason(position, in currentBar, historicalDataWindow, currentIndicatorValues) != "Hold";
         }
 
         public bool ShouldTakePartialProfit(Position position, in HistoricalPriceModel currentBar, Dictionary<string, double> currentIndicatorValues)
@@ -350,51 +330,44 @@ namespace Temperance.Services.Trading.Strategies.MeanReversion.Implementation
             return "No specific entry signal reason";
         }
 
-        public string GetExitReason(Position currentPosition, HistoricalPriceModel currentBar, List<HistoricalPriceModel> dataWindow, Dictionary<string, double> currentIndicatorValues)
+        public string GetExitReason(Position position, in HistoricalPriceModel currentBar, IReadOnlyList<HistoricalPriceModel> historicalDataWindow, Dictionary<string, double> currentIndicatorValues)
         {
-            currentIndicatorValues.TryGetValue("RSI", out double currentRSI);
-            double entryPrice = currentPosition.EntryPrice;
-            double currentClose = (double)currentBar.ClosePrice;
+            // --- Layer 1: Protective Stop-Loss (Thesis is Wrong) ---
+            if (position.Direction == PositionDirection.Long && currentBar.LowPrice <= position.StopLossPrice)
+            {
+                return $"ATR Stop-Loss hit at {currentBar.LowPrice:F2}";
+            }
+            if (position.Direction == PositionDirection.Short && currentBar.HighPrice >= position.StopLossPrice)
+            {
+                return $"ATR Stop-Loss hit at {currentBar.HighPrice:F2}";
+            }
 
-            if (currentPosition.Direction == PositionDirection.Long)
+            // --- Layer 2: Profit Target at the Mean (Thesis is Correct) ---
+            double movingAverage = currentIndicatorValues["SMA"];
+            if (position.Direction == PositionDirection.Long && currentBar.HighPrice >= movingAverage)
             {
-                if (currentClose > currentIndicatorValues["RSI"]) // Placeholder for middle band cross
-                {
-                    return "Price crossed above middle band (SMA)";
-                }
-                if (currentRSI > _rsiOverboughtThreshold)
-                {
-                    return $"RSI ({currentRSI:N2}) became overbought (>{_rsiOverboughtThreshold})";
-                }
-                if (currentClose <= entryPrice * 0.98)
-                {
-                    return $"Stop Loss Hit (Price: {currentClose:N2} <= {entryPrice * 0.98:N2})";
-                }
-                if (currentClose >= entryPrice * 1.05)
-                {
-                    return $"Take Profit Hit (Price: {currentClose:N2} >= {entryPrice * 1.05:N2})";
-                }
+                return $"Profit Target hit at SMA ({movingAverage:F2})";
             }
-            else if (currentPosition.Direction == PositionDirection.Short)
+            if (position.Direction == PositionDirection.Short && currentBar.LowPrice <= movingAverage)
             {
-                if (currentClose < currentIndicatorValues["RSI"]) // Placeholder for middle band cross
-                {
-                    return "Price crossed below middle band (SMA)";
-                }
-                if (currentRSI < _rsiOversoldThreshold)
-                {
-                    return $"RSI ({currentRSI:N2}) became oversold (<{_rsiOversoldThreshold})";
-                }
-                if (currentClose >= entryPrice * 1.02)
-                {
-                    return $"Stop Loss Hit (Price: {currentClose:N2} >= {entryPrice * 1.02:N2})";
-                }
-                if (currentClose <= entryPrice * 0.95)
-                {
-                    return $"Take Profit Hit (Price: {currentClose:N2} <= {entryPrice * 0.95:N2})";
-                }
+                return $"Profit Target hit at SMA ({movingAverage:F2})";
             }
-            return "No specific exit signal reason";
+
+            // --- Layer 3: Time-Based Stop (Thesis has Expired) ---
+            if (position.BarsHeld >= _maxHoldingBars)
+            {
+                return $"Time Stop hit after {position.BarsHeld} bars";
+            }
+
+            // --- Final Check: Signal Reversal ---
+            var exitSignal = GenerateSignal(in currentBar, position, historicalDataWindow, currentIndicatorValues, MarketHealthScore.Neutral);
+            if ((position.Direction == PositionDirection.Long && exitSignal == SignalDecision.Sell) ||
+                (position.Direction == PositionDirection.Short && exitSignal == SignalDecision.Buy))
+            {
+                return "Signal Reversal";
+            }
+
+            return "Hold"; // No exit condition met
         }
     }
 }
