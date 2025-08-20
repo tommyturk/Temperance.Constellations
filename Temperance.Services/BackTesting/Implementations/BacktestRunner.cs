@@ -349,7 +349,7 @@ namespace Temperance.Services.BackTesting.Implementations
 
         //    var result = new BacktestResult();
         //    try
-        //    {
+        //    { 
         //        var strategyInstance = _strategyFactory.CreateStrategy<ISingleAssetStrategy>(
         //            config.StrategyName, config.InitialCapital, config.StrategyParameters);
 
