@@ -76,14 +76,10 @@ namespace Temperance.Services.BackTesting.Implementations
             }
 
             await _tradesService.UpdateBacktestRunStatusAsync(runId, "Running");
-
             var result = new BacktestResult();
+
             try
             {
-                var allSymbols = (config.Symbols?.Any() ?? false)
-                    ? config.Symbols
-                    : await _securitiesOverviewService.GetSecurities();
-
                 var marketHealthCache = new ConcurrentDictionary<DateTime, MarketHealthScore>();
                 for (var day = config.StartDate.Date; day <= config.EndDate.Date; day = day.AddDays(1))
                 {
@@ -129,7 +125,7 @@ namespace Temperance.Services.BackTesting.Implementations
                         var closePrices = orderedData.Select(p => p.ClosePrice).ToArray();
 
                         var atrPeriod = ParameterHelper.GetParameterOrDefault(config.StrategyParameters, "AtrPeriod", 14);
-                        var stdDevMultiplier = ParameterHelper.GetParameterOrDefault(config.StrategyParameters, "StdDevMultiplier", 2.0);
+                        var stdDevMultiplier = strategyInstance.GetStdDevMultiplier();
 
                         var movingAverage = _gpuIndicatorService.CalculateSma(closePrices, strategyMinimumLookback);
                         var standardDeviation = _gpuIndicatorService.CalculateStdDev(closePrices, strategyMinimumLookback);
@@ -139,10 +135,10 @@ namespace Temperance.Services.BackTesting.Implementations
                         var lowerBand = movingAverage.Zip(standardDeviation, (m, s) => m - (stdDevMultiplier * s)).ToArray();
 
                         var indicators = new Dictionary<string, double[]>
-                {
-                    { "RSI", rsi }, { "UpperBand", upperBand }, { "LowerBand", lowerBand },
-                    { "ATR", atr }, { "SMA", movingAverage }
-                };
+                        {
+                            { "RSI", rsi }, { "UpperBand", upperBand }, { "LowerBand", lowerBand },
+                            { "ATR", atr }, { "SMA", movingAverage }
+                        };
 
                         var timestampIndexMap = orderedData.Select((data, index) => new { data.Timestamp, index }).ToDictionary(x => x.Timestamp, x => x.index);
                         int backtestStartIndex = orderedData.FindIndex(p => p.Timestamp >= config.StartDate);
@@ -159,41 +155,33 @@ namespace Temperance.Services.BackTesting.Implementations
                             if (!timestampIndexMap.TryGetValue(currentBar.Timestamp, out var globalIndex) || globalIndex < strategyMinimumLookback) continue;
 
                             var currentIndicatorValues = new Dictionary<string, double>
-                    {
-                        { "RSI", indicators["RSI"][globalIndex] }, { "UpperBand", indicators["UpperBand"][globalIndex] },
-                        { "LowerBand", indicators["LowerBand"][globalIndex] }, { "ATR", indicators["ATR"][globalIndex] },
-                        { "SMA", indicators["SMA"][globalIndex] }
-                    };
+                            {
+                                { "RSI", indicators["RSI"][globalIndex] }, { "UpperBand", indicators["UpperBand"][globalIndex] },
+                                { "LowerBand", indicators["LowerBand"][globalIndex] }, { "ATR", indicators["ATR"][globalIndex] },
+                                { "SMA", indicators["SMA"][globalIndex] }
+                            };
 
                             if (currentPosition != null) { currentPosition.BarsHeld++; }
 
                             marketHealthCache.TryGetValue(currentBar.Timestamp.Date, out var currentMarketHealth);
                             var dataWindow = orderedData.Take(i + 1).ToList();
 
-                            // --- EXIT LOGIC ---
                             if (currentPosition != null && activeTrade != null)
                             {
                                 string exitReason = strategyInstance.GetExitReason(currentPosition, in currentBar, dataWindow, currentIndicatorValues);
                                 bool isMocBar = config.UseMocExit && lastBarTimestamps.Contains(currentBar.Timestamp);
-
                                 if (isMocBar && exitReason == "Hold") { exitReason = "Market on Close"; }
 
                                 if (exitReason != "Hold")
                                 {
-                                    var closedTrade = await ClosePositionAsync(portfolioManager, transactionCostService, performanceCalculator, tradesService, 
-                                        strategyInstance, activeTrade, currentPosition, currentBar, orderedData, symbol, interval, runId, 50, symbolKellyHalfFractions, exitReason);
-                                    if (closedTrade != null)
-                                    {
-                                        closedTrade.ExitReason = exitReason;
-                                        allTrades.Add(closedTrade);
-                                    }
+                                    var closedTrade = await ClosePositionAsync(portfolioManager, transactionCostService, performanceCalculator, tradesService, activeTrade, currentPosition, currentBar, symbol, interval, runId, 50, symbolKellyHalfFractions, exitReason, currentIndicatorValues);
+                                    if (closedTrade != null) { allTrades.Add(closedTrade); }
                                     currentPosition = null;
                                     activeTrade = null;
                                     continue;
                                 }
                             }
 
-                            // --- ENTRY LOGIC ---
                             var signal = strategyInstance.GenerateSignal(in currentBar, currentPosition, dataWindow, currentIndicatorValues, currentMarketHealth);
                             if (signal != SignalDecision.Hold && currentPosition == null)
                             {
@@ -247,13 +235,14 @@ namespace Temperance.Services.BackTesting.Implementations
                         if (currentPosition != null && activeTrade != null)
                         {
                             var lastBar = orderedData.LastOrDefault(b => b.Timestamp <= config.EndDate) ?? orderedData.Last();
-                            var closedTrade = await ClosePositionAsync(portfolioManager, transactionCostService, performanceCalculator, 
-                                tradesService, strategyInstance, activeTrade, currentPosition, lastBar, orderedData, symbol, interval, runId, 50, symbolKellyHalfFractions, "End of backtest");
-                            if (closedTrade != null)
+                            var lastBarIndex = timestampIndexMap[lastBar.Timestamp];
+                            var lastIndicators = new Dictionary<string, double>
                             {
-                                closedTrade.ExitReason = "End of Backtest";
-                                allTrades.Add(closedTrade);
-                            }
+                                { "RSI", indicators["RSI"][lastBarIndex] }, { "ATR", indicators["ATR"][lastBarIndex] },
+                                { "SMA", indicators["SMA"][lastBarIndex] }
+                            };
+                            var closedTrade = await ClosePositionAsync(portfolioManager, transactionCostService, _performanceCalculator, _tradesService, activeTrade, currentPosition, lastBar, symbol, interval, runId, 50, symbolKellyHalfFractions, "End of Backtest", lastIndicators);
+                            if (closedTrade != null) { allTrades.Add(closedTrade); }
                         }
                     }
                     catch (Exception ex)
@@ -271,7 +260,7 @@ namespace Temperance.Services.BackTesting.Implementations
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "RunId: {RunId} - Critical error during backtest execution", runId);
+                _logger.LogError(ex, "Critical error during backtest {RunId}", runId);
                 await _tradesService.UpdateBacktestRunStatusAsync(runId, "Failed", ex.Message);
                 throw;
             }
@@ -280,12 +269,18 @@ namespace Temperance.Services.BackTesting.Implementations
         private async Task<TradeSummary?> ClosePositionAsync(
             IPortfolioManager portfolioManager, ITransactionCostService transactionCostService,
             IPerformanceCalculator performanceCalculator, ITradeService tradesService,
-            ISingleAssetStrategy strategyInstance,
-            TradeSummary activeTrade, Position currentPosition, HistoricalPriceModel exitBar, List<HistoricalPriceModel> orderedData,
+            TradeSummary activeTrade, Position currentPosition, HistoricalPriceModel exitBar,
             string symbol, string interval, Guid runId, int rollingKellyLookbackTrades,
-            ConcurrentDictionary<string, double> symbolKellyHalfFractions, string exitReason)
+            ConcurrentDictionary<string, double> symbolKellyHalfFractions, string exitReason, Dictionary<string, double> currentIndicatorValues)
         {
-            double rawExitPrice = exitBar.ClosePrice;
+            double rawExitPrice;
+            if (exitReason.StartsWith("ATR Stop-Loss"))
+                rawExitPrice = currentPosition.StopLossPrice;
+            else if (exitReason.StartsWith("Profit Target"))
+                rawExitPrice = currentIndicatorValues["SMA"];
+            else 
+                rawExitPrice = exitBar.ClosePrice;
+
             PositionDirection exitDirection = currentPosition.Direction;
 
             double effectiveExitPrice = await transactionCostService.CalculateExitCost(rawExitPrice, exitDirection, symbol, interval, exitBar.Timestamp);
@@ -295,19 +290,11 @@ namespace Temperance.Services.BackTesting.Implementations
             double totalExitCost = commissionCost + slippageCost + spreadAndOtherCost;
 
             double grossPnl = (exitDirection == PositionDirection.Long)
-             ? (rawExitPrice - currentPosition.EntryPrice) * currentPosition.Quantity
-             : (currentPosition.EntryPrice - rawExitPrice) * currentPosition.Quantity;
+             ? (rawExitPrice - currentPosition.AverageEntryPrice) * currentPosition.Quantity
+             : (currentPosition.AverageEntryPrice - rawExitPrice) * currentPosition.Quantity;
 
             double totalTransactionCost = (activeTrade.TotalTransactionCost ?? 0) + totalExitCost;
             double netPnl = grossPnl - totalTransactionCost;
-
-            var tradeHistoricalData = orderedData.Where(d => d.Timestamp >= activeTrade.EntryDate && d.Timestamp <= exitBar.Timestamp).ToList();
-            double maxAdverseExcursion = 0, maxFavorableExcursion = 0;
-
-            double exitSpreadCost = await transactionCostService.GetSpreadCost(rawExitPrice, currentPosition.Quantity, symbol, interval, exitBar.Timestamp);
-            double profitLoss = (exitDirection == PositionDirection.Long)
-                ? (effectiveExitPrice - activeTrade.EntryPrice) * currentPosition.Quantity
-                : (activeTrade.EntryPrice - effectiveExitPrice) * currentPosition.Quantity;
 
             activeTrade.ExitDate = exitBar.Timestamp;
             activeTrade.ExitPrice = effectiveExitPrice;
@@ -318,8 +305,6 @@ namespace Temperance.Services.BackTesting.Implementations
             activeTrade.OtherTransactionCost = (activeTrade.OtherTransactionCost ?? 0) + spreadAndOtherCost;
             activeTrade.TotalTransactionCost = totalTransactionCost;
             activeTrade.HoldingPeriodMinutes = (int)(exitBar.Timestamp - activeTrade.EntryDate).TotalMinutes;
-            activeTrade.MaxAdverseExcursion = maxAdverseExcursion;
-            activeTrade.MaxFavorableExcursion = maxFavorableExcursion;
             activeTrade.ExitReason = exitReason;
 
             var closedTrade = await portfolioManager.ClosePosition(activeTrade);
@@ -327,11 +312,9 @@ namespace Temperance.Services.BackTesting.Implementations
             if (closedTrade != null)
             {
                 await tradesService.SaveOrUpdateBacktestTrade(closedTrade);
-
                 var recentTrades = portfolioManager.GetCompletedTradesHistory().Where(t => t.Symbol == symbol && t.Interval == interval).OrderByDescending(t => t.ExitDate).Take(rollingKellyLookbackTrades).ToList();
                 var kellyMetrics = performanceCalculator.CalculateKellyMetrics(recentTrades);
-                symbolKellyHalfFractions[symbol + "_" + interval] = kellyMetrics.KellyHalfFraction;
-                _logger.LogInformation("RunId: {RunId} - Position CLOSED for {Symbol}. PnL: {PnL:C}", runId, symbol, closedTrade.ProfitLoss);
+                symbolKellyHalfFractions[$"{symbol}_{interval}"] = kellyMetrics.KellyHalfFraction;
             }
             return closedTrade;
         }
