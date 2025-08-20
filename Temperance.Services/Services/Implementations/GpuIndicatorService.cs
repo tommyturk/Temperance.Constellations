@@ -27,14 +27,34 @@ namespace Temperance.Services.Services.Implementations
             using var highBuffer = _accelerator.Allocate1D(high);
             using var lowBuffer = _accelerator.Allocate1D(low);
             using var closeBuffer = _accelerator.Allocate1D(close);
-            using var outputBuffer = _accelerator.Allocate1D<double>(high.Length);
+            using var trueRangeBuffer = _accelerator.Allocate1D<double>(high.Length);
 
-            var loadedKernel = _accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<double>, ArrayView<double>, ArrayView<double>, ArrayView<double>, int>(AtrKernel);
-
-            loadedKernel(high.Length, highBuffer.View, lowBuffer.View, closeBuffer.View, outputBuffer.View, period);
-
+            var loadedKernel = _accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<double>, ArrayView<double>, ArrayView<double>, ArrayView<double>>(TrueRangeKernel);
+            loadedKernel(high.Length, highBuffer.View, lowBuffer.View, closeBuffer.View, trueRangeBuffer.View);
             _accelerator.Synchronize();
-            return outputBuffer.GetAsArray1D();
+
+            // --- Step 2: Transfer the results back to the CPU ---
+            var trueRanges = trueRangeBuffer.GetAsArray1D();
+
+            // --- Step 3: Perform Wilder's smoothing serially on the CPU ---
+            var atr = new double[high.Length];
+            if (high.Length == 0) return atr;
+
+            // Calculate the initial ATR value as a simple average of the first 'period' true ranges.
+            double initialAtr = 0;
+            for (int i = 1; i < period; i++)
+            {
+                initialAtr += trueRanges[i];
+            }
+            atr[period - 1] = initialAtr / period;
+
+            // Apply Wilder's smoothing for the rest of the series.
+            for (int i = period; i < high.Length; i++)
+            {
+                atr[i] = ((atr[i - 1] * (period - 1)) + trueRanges[i]) / period;
+            }
+
+            return atr;
         }
 
         public double[] CalculateSma(double[] prices, int period)
@@ -69,36 +89,23 @@ namespace Temperance.Services.Services.Implementations
             return Array.ConvertAll(resultAsDouble, d => (double)d);
         }
 
-        private static void AtrKernel(Index1D index, ArrayView<double> high, ArrayView<double> low, ArrayView<double> close, ArrayView<double> output, int period)
+        private static void TrueRangeKernel(Index1D index,
+                                    ArrayView<double> high,
+                                    ArrayView<double> low,
+                                    ArrayView<double> close,
+                                    ArrayView<double> output)
         {
-            if(index == 0)
+            if (index == 0)
             {
-                output[index] = 0;
+                output[index] = 0; 
                 return;
             }
 
             double highLow = high[index] - low[index];
             double highPrevClose = XMath.Abs(high[index] - close[index - 1]);
             double lowPrevClose = XMath.Abs(low[index] - close[index - 1]);
-            double trueRange = XMath.Max(highLow, XMath.Max(highPrevClose, lowPrevClose));
 
-            if(index < period)
-            {
-                double sumTr = 0;
-                for(int i = 1; i <= index; i++)
-                {
-                    double hl = high[i] - low[i];
-                    double hpc = XMath.Abs(high[i] - close[i - 1]);
-                    double lpc = XMath.Abs(low[i] - close[i - 1]);
-                    sumTr += XMath.Max(hl, XMath.Max(hpc, lpc));
-                }
-                output[index] = sumTr / index;
-            }
-            else
-            {
-                double prevAtr = output[index - 1];
-                output[index] = ((prevAtr * (period - 1)) + trueRange) / period;
-            }
+            output[index] = XMath.Max(highLow, XMath.Max(highPrevClose, lowPrevClose));
         }
 
         private static void StdDevKernel(Index1D index, ArrayView<double> prices, ArrayView<double> output, int period)

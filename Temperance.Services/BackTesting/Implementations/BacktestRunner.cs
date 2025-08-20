@@ -154,7 +154,7 @@ namespace Temperance.Services.BackTesting.Implementations
                         var atrPeriod = ParameterHelper.GetParameterOrDefault(config.StrategyParameters, "AtrPeriod", 14);
 
                         var atr = _gpuIndicatorService.CalculateAtr(highPrices, lowPrices, closePrices, atrPeriod);
-
+                        Console.WriteLine("atr: ", atr);
                         var upperBand = movingAverage.Zip(standardDeviation, (m, s) => m + (2 * s)).ToArray();
                         var lowerBand = movingAverage.Zip(standardDeviation, (m, s) => m - (2 * s)).ToArray();
                         var indicators = new Dictionary<string, double[]>
