@@ -78,8 +78,8 @@ namespace Temperance.Services.Services.Implementations
                 Symbol = symbol,
                 Direction = direction,
                 Quantity = quantity,
-                EntryPrice = entryPrice,
-                EntryDate = entryDate,
+                AverageEntryPrice = entryPrice, // Use AverageEntryPrice
+                InitialEntryDate = entryDate,   // Use InitialEntryDate
                 TotalEntryCost = totalEntryCost
             };
 

@@ -217,7 +217,7 @@ namespace Temperance.Services.BackTesting.Implementations
                                             TotalTransactionCost = totalEntryCost,
                                             EntryReason = strategyInstance.GetEntryReason(in currentBar, dataWindow, currentIndicatorValues)
                                         };
-                                        currentPosition = portfolioManager.GetOpenPositions().FirstOrDefault(p => p.Symbol == symbol);
+                                        currentPosition = portfolioManager.GetOpenPositions().FirstOrDefault(p => p.Symbol == symbol && p.EntryDate == currentBar.Timestamp);
 
                                         if (currentPosition != null)
                                         {
