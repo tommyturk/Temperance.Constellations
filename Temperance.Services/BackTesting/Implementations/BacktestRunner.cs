@@ -271,33 +271,35 @@ namespace Temperance.Services.BackTesting.Implementations
             IPerformanceCalculator performanceCalculator, ITradeService tradesService,
             TradeSummary activeTrade, Position currentPosition, HistoricalPriceModel exitBar,
             string symbol, string interval, Guid runId, int rollingKellyLookbackTrades,
-            ConcurrentDictionary<string, double> symbolKellyHalfFractions, string exitReason, Dictionary<string, double> currentIndicatorValues)
+            ConcurrentDictionary<string, double> symbolKellyHalfFractions, string exitReason,
+            Dictionary<string, double> currentIndicatorValues)
         {
             double rawExitPrice;
+
             if (exitReason.StartsWith("ATR Stop-Loss"))
                 rawExitPrice = currentPosition.StopLossPrice;
             else if (exitReason.StartsWith("Profit Target"))
                 rawExitPrice = currentIndicatorValues["SMA"];
-            else 
+            else
                 rawExitPrice = exitBar.ClosePrice;
 
             PositionDirection exitDirection = currentPosition.Direction;
-
             double effectiveExitPrice = await transactionCostService.CalculateExitCost(rawExitPrice, exitDirection, symbol, interval, exitBar.Timestamp);
+
             double commissionCost = await transactionCostService.CalculateCommissionCost(rawExitPrice, currentPosition.Quantity, symbol, interval, exitBar.Timestamp);
             double slippageCost = await transactionCostService.CalculateSlippageCost(rawExitPrice, currentPosition.Quantity, exitDirection, symbol, interval, exitBar.Timestamp);
             double spreadAndOtherCost = await transactionCostService.GetSpreadCost(rawExitPrice, currentPosition.Quantity, symbol, interval, exitBar.Timestamp);
             double totalExitCost = commissionCost + slippageCost + spreadAndOtherCost;
 
             double grossPnl = (exitDirection == PositionDirection.Long)
-             ? (rawExitPrice - currentPosition.AverageEntryPrice) * currentPosition.Quantity
-             : (currentPosition.AverageEntryPrice - rawExitPrice) * currentPosition.Quantity;
+                 ? (rawExitPrice - activeTrade.EntryPrice) * currentPosition.Quantity
+                 : (activeTrade.EntryPrice - rawExitPrice) * currentPosition.Quantity;
 
             double totalTransactionCost = (activeTrade.TotalTransactionCost ?? 0) + totalExitCost;
             double netPnl = grossPnl - totalTransactionCost;
 
             activeTrade.ExitDate = exitBar.Timestamp;
-            activeTrade.ExitPrice = effectiveExitPrice;
+            activeTrade.ExitPrice = effectiveExitPrice; 
             activeTrade.GrossProfitLoss = grossPnl;
             activeTrade.ProfitLoss = netPnl;
             activeTrade.CommissionCost = (activeTrade.CommissionCost ?? 0) + commissionCost;
@@ -312,7 +314,9 @@ namespace Temperance.Services.BackTesting.Implementations
             if (closedTrade != null)
             {
                 await tradesService.SaveOrUpdateBacktestTrade(closedTrade);
-                var recentTrades = portfolioManager.GetCompletedTradesHistory().Where(t => t.Symbol == symbol && t.Interval == interval).OrderByDescending(t => t.ExitDate).Take(rollingKellyLookbackTrades).ToList();
+                var recentTrades = portfolioManager.GetCompletedTradesHistory()
+                    .Where(t => t.Symbol == symbol && t.Interval == interval)
+                    .OrderByDescending(t => t.ExitDate).Take(rollingKellyLookbackTrades).ToList();
                 var kellyMetrics = performanceCalculator.CalculateKellyMetrics(recentTrades);
                 symbolKellyHalfFractions[$"{symbol}_{interval}"] = kellyMetrics.KellyHalfFraction;
             }
