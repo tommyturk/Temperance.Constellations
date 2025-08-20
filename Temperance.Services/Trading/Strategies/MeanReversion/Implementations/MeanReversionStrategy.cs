@@ -147,9 +147,16 @@ namespace Temperance.Services.Trading.Strategies.MeanReversion.Implementation
             if (signal == SignalDecision.Hold) return 0;
 
             double atrValue = currentIndicatorValues.TryGetValue("ATR", out var atr) ? atr : 0;
-            if (atrValue <= 0)
+
+            const double MIN_VOLATILITY_AS_PRICE_PCT = 0.001;
+            double minimumRiskFromPrice = currentBar.ClosePrice * MIN_VOLATILITY_AS_PRICE_PCT;
+
+            double effectiveAtr = Math.Max(atrValue, minimumRiskFromPrice);
+
+            if (effectiveAtr <= 0) 
             {
-                _logger.LogWarning("ATR value is zero or negative for {Symbol} at {Timestamp}. Cannot calculate position size.", currentBar.Symbol, currentBar.Timestamp);
+                _logger.LogError("Effective ATR is zero or negative even after applying floor for {Symbol} at {Timestamp}. Price: {Price}",
+                    currentBar.Symbol, currentBar.Timestamp, currentBar.ClosePrice);
                 return 0;
             }
 
@@ -158,9 +165,9 @@ namespace Temperance.Services.Trading.Strategies.MeanReversion.Implementation
             double marketHealthMultiplier = marketHealthScore switch
             {
                 MarketHealthScore.StronglyBullish => 1.2,
-                MarketHealthScore.Bullish => 1.0, 
+                MarketHealthScore.Bullish => 1.0,
                 MarketHealthScore.Neutral => 0.75,
-                _ => 0.0 
+                _ => 0.0
             };
 
             if (marketHealthMultiplier <= 0) return 0;
@@ -179,24 +186,23 @@ namespace Temperance.Services.Trading.Strategies.MeanReversion.Implementation
             }
 
             double adjustedRiskPercentage = BASE_PORTFOLIO_RISK_PER_TRADE * marketHealthMultiplier * rsiScalingFactor;
-
-            double effectiveKellyFraction = Math.Max(0.005, kellyHalfFraction); 
+            double effectiveKellyFraction = Math.Max(0.005, kellyHalfFraction);
             adjustedRiskPercentage = Math.Min(adjustedRiskPercentage, effectiveKellyFraction);
-
             double finalDollarRisk = currentTotalEquity * adjustedRiskPercentage;
 
-            double riskPerShare = _atrMultiplier * atrValue;
+            double riskPerShare = _atrMultiplier * effectiveAtr; 
             if (riskPerShare <= 0) return 0;
 
             int quantity = (int)Math.Floor(finalDollarRisk / riskPerShare);
             if (quantity <= 0) return 0;
 
             double allocationAmount = quantity * currentBar.ClosePrice;
-
             allocationAmount = Math.Min(allocationAmount, maxTradeAllocationInitialCapital);
 
             if (currentPyramidEntries == 1)
+            {
                 return allocationAmount * _initialEntryScale;
+            }
             else
             {
                 int divisor = _maxPyramidEntries - 1 > 0 ? _maxPyramidEntries - 1 : 1;
