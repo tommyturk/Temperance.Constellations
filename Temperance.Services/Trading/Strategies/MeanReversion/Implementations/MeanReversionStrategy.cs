@@ -21,6 +21,8 @@ namespace Temperance.Services.Trading.Strategies.MeanReversion.Implementation
         private int _maxPyramidEntries;
         private double _initialEntryScale;
         private double _stopLossPercentage;
+        private int _atrPeriod;
+        private double _atrMultiplier;
 
         private readonly ITransactionCostService _transactionCostService;
         private readonly ILogger<MeanReversionStrategy> _logger;
@@ -51,7 +53,8 @@ namespace Temperance.Services.Trading.Strategies.MeanReversion.Implementation
             _rsiOversoldThreshold = ParameterHelper.GetParameterOrDefault(parameters, "RSIOversold", 30);
             _rsiOverboughtThreshold = ParameterHelper.GetParameterOrDefault(parameters, "RSIOverbought", 70);
             _minimumAverageDailyVolume = ParameterHelper.GetParameterOrDefault(parameters, "MinimumAverageDailyVolume", 750000); // Ensure 750000m is decimal literal
-
+            _atrPeriod = ParameterHelper.GetParameterOrDefault(parameters, "AtrPeriod", 14);
+            _atrMultiplier = ParameterHelper.GetParameterOrDefault(parameters, "AtrMultiplier", 2.5);
             _stopLossPercentage = ParameterHelper.GetParameterOrDefault(parameters, "StopLossPercentage", 0.03);
             _maxPyramidEntries = ParameterHelper.GetParameterOrDefault(parameters, "MaxPyramidEntries", 1);
             _initialEntryScale = ParameterHelper.GetParameterOrDefault(parameters, "InitialEntryScale", 1.0);
@@ -83,11 +86,21 @@ namespace Temperance.Services.Trading.Strategies.MeanReversion.Implementation
 
         public bool ShouldExitPosition(Position position, in HistoricalPriceModel currentBar, IReadOnlyList<HistoricalPriceModel> historicalDataWindow, Dictionary<string, double> currentIndicatorValues)
         {
-            if (position.Direction == PositionDirection.Long)
-                if (currentBar.LowPrice <= position.AverageEntryPrice * (1.0 - _stopLossPercentage)) return true;
-            else
-                if (currentBar.HighPrice >= position.AverageEntryPrice * (1.0 + _stopLossPercentage)) return true;
-
+            double atrValue = currentIndicatorValues.TryGetValue("ATR", out var atr) ? atr : 0;
+            if(atrValue > 0)
+            {
+                double stopLossPrice;
+                if(position.Direction == PositionDirection.Long)
+                {
+                    stopLossPrice = position.AverageEntryPrice - (_atrMultiplier * atrValue);
+                    if (currentBar.LowPrice <= stopLossPrice) return true;
+                }
+                else
+                {
+                    stopLossPrice = position.AverageEntryPrice + (_atrMultiplier * atrValue);
+                    if (currentBar.HighPrice >= stopLossPrice) return true;
+                }
+            }
             var exitSignal = GenerateSignal(in currentBar, position, historicalDataWindow, currentIndicatorValues, MarketHealthScore.Neutral);
             if (position.Direction == PositionDirection.Long && exitSignal == SignalDecision.Sell) return true;
             if (position.Direction == PositionDirection.Short && exitSignal == SignalDecision.Buy) return true;
@@ -126,19 +139,28 @@ namespace Temperance.Services.Trading.Strategies.MeanReversion.Implementation
             return activeTrade;
         }
 
-        public double GetAllocationAmount(in HistoricalPriceModel currentBar, IReadOnlyList<HistoricalPriceModel> historicalDataWindow, 
-            Dictionary<string, double> currentIndicatorValues, double maxTradeAllocationInitialCapital, double currentTotalEquity, 
+        public double GetAllocationAmount(in HistoricalPriceModel currentBar, IReadOnlyList<HistoricalPriceModel> historicalDataWindow,
+            Dictionary<string, double> currentIndicatorValues, double maxTradeAllocationInitialCapital, double currentTotalEquity,
             double kellyHalfFraction, int currentPyramidEntries, MarketHealthScore marketHealthScore)
         {
             var signal = GenerateSignal(in currentBar, null, historicalDataWindow, currentIndicatorValues, marketHealthScore);
             if (signal == SignalDecision.Hold) return 0;
 
+            double atrValue = currentIndicatorValues.TryGetValue("ATR", out var atr) ? atr : 0;
+            if (atrValue <= 0)
+            {
+                _logger.LogWarning("ATR value is zero or negative for {Symbol} at {Timestamp}. Cannot calculate position size.", currentBar.Symbol, currentBar.Timestamp);
+                return 0;
+            }
+
+            const double BASE_PORTFOLIO_RISK_PER_TRADE = 0.01;
+
             double marketHealthMultiplier = marketHealthScore switch
             {
                 MarketHealthScore.StronglyBullish => 1.2,
-                MarketHealthScore.Bullish => 1.0,
+                MarketHealthScore.Bullish => 1.0, 
                 MarketHealthScore.Neutral => 0.75,
-                _ => 0.0
+                _ => 0.0 
             };
 
             if (marketHealthMultiplier <= 0) return 0;
@@ -156,17 +178,30 @@ namespace Temperance.Services.Trading.Strategies.MeanReversion.Implementation
                 rsiScalingFactor = 0.5 + (0.5 * Math.Min(1.0, dist / (100.0 - _rsiOverboughtThreshold)));
             }
 
-            const double baselineRiskPercentage = 0.02;
-            double totalAllocation = (currentTotalEquity * baselineRiskPercentage) * rsiScalingFactor * marketHealthMultiplier;
-            double effectiveKellyFraction = Math.Max(0.005, kellyHalfFraction);
-            totalAllocation = Math.Min(totalAllocation, currentTotalEquity * effectiveKellyFraction);
-            totalAllocation = Math.Min(totalAllocation, maxTradeAllocationInitialCapital);
+            double adjustedRiskPercentage = BASE_PORTFOLIO_RISK_PER_TRADE * marketHealthMultiplier * rsiScalingFactor;
 
-            if (totalAllocation <= 0) return 0;
+            double effectiveKellyFraction = Math.Max(0.005, kellyHalfFraction); 
+            adjustedRiskPercentage = Math.Min(adjustedRiskPercentage, effectiveKellyFraction);
 
-            return currentPyramidEntries == 1
-                ? totalAllocation * _initialEntryScale
-                : totalAllocation * (1.0 - _initialEntryScale / (_maxPyramidEntries - 1 > 0 ? _maxPyramidEntries - 1 : 1));
+            double finalDollarRisk = currentTotalEquity * adjustedRiskPercentage;
+
+            double riskPerShare = _atrMultiplier * atrValue;
+            if (riskPerShare <= 0) return 0;
+
+            int quantity = (int)Math.Floor(finalDollarRisk / riskPerShare);
+            if (quantity <= 0) return 0;
+
+            double allocationAmount = quantity * currentBar.ClosePrice;
+
+            allocationAmount = Math.Min(allocationAmount, maxTradeAllocationInitialCapital);
+
+            if (currentPyramidEntries == 1)
+                return allocationAmount * _initialEntryScale;
+            else
+            {
+                int divisor = _maxPyramidEntries - 1 > 0 ? _maxPyramidEntries - 1 : 1;
+                return allocationAmount * (1.0 - _initialEntryScale) / divisor;
+            }
         }
 
         //protected double CalculateStopLoss(Position position)

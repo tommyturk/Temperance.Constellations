@@ -1,4 +1,5 @@
 ﻿using ILGPU;
+using ILGPU.Algorithms;
 using ILGPU.Runtime;
 using ILGPU.Runtime.Cuda;
 using Microsoft.Extensions.Logging;
@@ -16,6 +17,24 @@ namespace Temperance.Services.Services.Implementations
             //_accelerator = _context.GetPreferredDevice(preferCPU: false).CreateAccelerator(_context);
             _accelerator = accelerator;
             _logger = logger;
+        }
+
+        public double[] CalculateAtr(double[] high, double[] low, double[] close, int period)
+        {
+            if (_accelerator == null) throw new InvalidOperationException("GPU Accelerator not found");
+            if (high.Length < period) return new double[high.Length];
+
+            using var highBuffer = _accelerator.Allocate1D(high);
+            using var lowBuffer = _accelerator.Allocate1D(low);
+            using var closeBuffer = _accelerator.Allocate1D(close);
+            using var outputBuffer = _accelerator.Allocate1D<double>(high.Length);
+
+            var loadedKernel = _accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<double>, ArrayView<double>, ArrayView<double>, ArrayView<double>, int>(AtrKernel);
+
+            loadedKernel(high.Length, highBuffer.View, lowBuffer.View, closeBuffer.View, outputBuffer.View, period);
+
+            _accelerator.Synchronize();
+            return outputBuffer.GetAsArray1D();
         }
 
         public double[] CalculateSma(double[] prices, int period)
@@ -48,6 +67,38 @@ namespace Temperance.Services.Services.Implementations
             _accelerator.Synchronize();
             var resultAsDouble = outputBuffer.GetAsArray1D();
             return Array.ConvertAll(resultAsDouble, d => (double)d);
+        }
+
+        private static void AtrKernel(Index1D index, ArrayView<double> high, ArrayView<double> low, ArrayView<double> close, ArrayView<double> output, int period)
+        {
+            if(index == 0)
+            {
+                output[index] = 0;
+                return;
+            }
+
+            double highLow = high[index] - low[index];
+            double highPrevClose = XMath.Abs(high[index] - close[index - 1]);
+            double lowPrevClose = XMath.Abs(low[index] - close[index - 1]);
+            double trueRange = XMath.Max(highLow, XMath.Max(highPrevClose, lowPrevClose));
+
+            if(index < period)
+            {
+                double sumTr = 0;
+                for(int i = 1; i <= index; i++)
+                {
+                    double hl = high[i] - low[i];
+                    double hpc = XMath.Abs(high[i] - close[i - 1]);
+                    double lpc = XMath.Abs(low[i] - close[i - 1]);
+                    sumTr += XMath.Max(hl, XMath.Max(hpc, lpc));
+                }
+                output[index] = sumTr / index;
+            }
+            else
+            {
+                double prevAtr = output[index - 1];
+                output[index] = ((prevAtr * (period - 1)) + trueRange) / period;
+            }
         }
 
         private static void StdDevKernel(Index1D index, ArrayView<double> prices, ArrayView<double> output, int period)

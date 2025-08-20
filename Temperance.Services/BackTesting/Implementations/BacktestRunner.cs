@@ -15,6 +15,7 @@ using Temperance.Services.Factories.Interfaces;
 using Temperance.Services.Services.Interfaces;
 using Temperance.Services.Trading.Strategies;
 using Temperance.Services.Trading.Strategies.Momentum;
+using Temperance.Utilities.Helpers;
 using TradingApp.src.Core.Services.Interfaces;
 namespace Temperance.Services.BackTesting.Implementations
 {
@@ -143,15 +144,22 @@ namespace Temperance.Services.BackTesting.Implementations
 
                         _logger.LogInformation($"RunId: {runId} - Processing {symbol} [{interval}]");
 
+                        var highPrices = orderedData.Select(p => p.HighPrice).ToArray();
+                        var lowPrices = orderedData.Select(p => p.LowPrice).ToArray();
                         var closePrices = orderedData.Select(p => p.ClosePrice).ToArray();
                         var movingAverage = _gpuIndicatorService.CalculateSma(closePrices, strategyMinimumLookback);
                         var standardDeviation = _gpuIndicatorService.CalculateStdDev(closePrices, strategyMinimumLookback);
                         var rsi = strategyInstance.CalculateRSI(closePrices, strategyMinimumLookback);
+
+                        var atrPeriod = ParameterHelper.GetParameterOrDefault(config.StrategyParameters, "AtrPeriod", 14);
+
+                        var atr = _gpuIndicatorService.CalculateAtr(highPrices, lowPrices, closePrices, atrPeriod);
+
                         var upperBand = movingAverage.Zip(standardDeviation, (m, s) => m + (2 * s)).ToArray();
                         var lowerBand = movingAverage.Zip(standardDeviation, (m, s) => m - (2 * s)).ToArray();
                         var indicators = new Dictionary<string, double[]>
                         {
-                            { "RSI", rsi }, { "UpperBand", upperBand }, { "LowerBand", lowerBand }
+                            { "RSI", rsi }, { "UpperBand", upperBand }, { "LowerBand", lowerBand }, { "ATR" , atr }
                         };
 
                         var timestampIndexMap = orderedData.Select((data, index) => new { data.Timestamp, index }).ToDictionary(x => x.Timestamp, x => x.index);
