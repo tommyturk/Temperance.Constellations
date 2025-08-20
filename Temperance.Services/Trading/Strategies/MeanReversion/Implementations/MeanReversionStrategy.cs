@@ -23,6 +23,7 @@ namespace Temperance.Services.Trading.Strategies.MeanReversion.Implementation
         private double _stopLossPercentage;
         private int _atrPeriod;
         private double _atrMultiplier;
+        private int _maxHoldingBars;
 
         private readonly ITransactionCostService _transactionCostService;
         private readonly ILogger<MeanReversionStrategy> _logger;
@@ -42,7 +43,10 @@ namespace Temperance.Services.Trading.Strategies.MeanReversion.Implementation
             { "RSIPeriod", 14 },
             { "RSIOversold", 30m },
             { "RSIOverbought", 70m },
-            { "MinimumAverageDailyVolume", 750000m }
+            { "MinimumAverageDailyVolume", 1500000 },
+            { "AtrPeriod", 14 },
+            { "AtrMultiplier", 2.5 },
+            { "MaxHoldingBars", 10 }
         };
 
         public void Initialize(double initialCapital, Dictionary<string, object> parameters)
@@ -55,6 +59,8 @@ namespace Temperance.Services.Trading.Strategies.MeanReversion.Implementation
             _minimumAverageDailyVolume = ParameterHelper.GetParameterOrDefault(parameters, "MinimumAverageDailyVolume", 750000); // Ensure 750000m is decimal literal
             _atrPeriod = ParameterHelper.GetParameterOrDefault(parameters, "AtrPeriod", 14);
             _atrMultiplier = ParameterHelper.GetParameterOrDefault(parameters, "AtrMultiplier", 2.5);
+            _maxHoldingBars = ParameterHelper.GetParameterOrDefault(parameters, "MaxHoldingBars", 10); 
+
             _stopLossPercentage = ParameterHelper.GetParameterOrDefault(parameters, "StopLossPercentage", 0.03);
             _maxPyramidEntries = ParameterHelper.GetParameterOrDefault(parameters, "MaxPyramidEntries", 1);
             _initialEntryScale = ParameterHelper.GetParameterOrDefault(parameters, "InitialEntryScale", 1.0);
@@ -84,7 +90,8 @@ namespace Temperance.Services.Trading.Strategies.MeanReversion.Implementation
             return SignalDecision.Hold;
         }
 
-        public bool ShouldExitPosition(Position position, in HistoricalPriceModel currentBar, IReadOnlyList<HistoricalPriceModel> historicalDataWindow, Dictionary<string, double> currentIndicatorValues)
+        public bool ShouldExitPosition(Position position, in HistoricalPriceModel currentBar, IReadOnlyList<HistoricalPriceModel> historicalDataWindow,
+            Dictionary<string, double> currentIndicatorValues)
         {
             double atrValue = currentIndicatorValues.TryGetValue("ATR", out var atr) ? atr : 0;
             if(atrValue > 0)
