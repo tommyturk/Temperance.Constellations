@@ -277,29 +277,40 @@ namespace Temperance.Services.BackTesting.Implementations
             double rawExitPrice;
 
             if (exitReason.StartsWith("ATR Stop-Loss"))
+            {
                 rawExitPrice = currentPosition.StopLossPrice;
+            }
             else if (exitReason.StartsWith("Profit Target"))
+            {
                 rawExitPrice = currentIndicatorValues["SMA"];
-            else
+            }
+            else // For all other cases (Time Stop, MOC, End of Backtest, Signal Reversal)
+            {
                 rawExitPrice = exitBar.ClosePrice;
+            }
 
             PositionDirection exitDirection = currentPosition.Direction;
             double effectiveExitPrice = await transactionCostService.CalculateExitCost(rawExitPrice, exitDirection, symbol, interval, exitBar.Timestamp);
 
+            // Calculate costs based on the raw exit price
             double commissionCost = await transactionCostService.CalculateCommissionCost(rawExitPrice, currentPosition.Quantity, symbol, interval, exitBar.Timestamp);
             double slippageCost = await transactionCostService.CalculateSlippageCost(rawExitPrice, currentPosition.Quantity, exitDirection, symbol, interval, exitBar.Timestamp);
             double spreadAndOtherCost = await transactionCostService.GetSpreadCost(rawExitPrice, currentPosition.Quantity, symbol, interval, exitBar.Timestamp);
             double totalExitCost = commissionCost + slippageCost + spreadAndOtherCost;
 
+            // --- BUG FIX IS HERE ---
+            // The Gross P/L calculation MUST use the EntryPrice from the 'activeTrade' record,
+            // which holds the correct price for this specific trade instance.
             double grossPnl = (exitDirection == PositionDirection.Long)
-                 ? (rawExitPrice - activeTrade.EntryPrice) * currentPosition.Quantity
-                 : (activeTrade.EntryPrice - rawExitPrice) * currentPosition.Quantity;
+             ? (rawExitPrice - activeTrade.EntryPrice) * currentPosition.Quantity
+             : (activeTrade.EntryPrice - rawExitPrice) * currentPosition.Quantity;
 
             double totalTransactionCost = (activeTrade.TotalTransactionCost ?? 0) + totalExitCost;
             double netPnl = grossPnl - totalTransactionCost;
 
+            // Update the trade summary with all correct values
             activeTrade.ExitDate = exitBar.Timestamp;
-            activeTrade.ExitPrice = effectiveExitPrice; 
+            activeTrade.ExitPrice = effectiveExitPrice; // The price after costs
             activeTrade.GrossProfitLoss = grossPnl;
             activeTrade.ProfitLoss = netPnl;
             activeTrade.CommissionCost = (activeTrade.CommissionCost ?? 0) + commissionCost;
