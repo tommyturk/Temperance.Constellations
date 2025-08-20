@@ -198,18 +198,18 @@ namespace Temperance.Services.BackTesting.Implementations
                                     var direction = (signal == SignalDecision.Buy) ? PositionDirection.Long : PositionDirection.Short;
                                     double effectiveEntryPrice = await transactionCostService.CalculateEntryCost(rawEntryPrice, signal, symbol, interval, currentBar.Timestamp);
                                     double totalEntryCost = await transactionCostService.GetSpreadCost(rawEntryPrice, quantity, symbol, interval, currentBar.Timestamp);
-                                    double totalCashOutlay = (quantity * effectiveEntryPrice) + totalEntryCost;
+                                    double totalCashOutlay = (quantity * rawEntryPrice) + totalEntryCost;
 
                                     if (await portfolioManager.CanOpenPosition(totalCashOutlay))
                                     {
-                                        await portfolioManager.OpenPosition(symbol, interval, direction, quantity, effectiveEntryPrice, currentBar.Timestamp, totalEntryCost);
+                                        await portfolioManager.OpenPosition(symbol, interval, direction, quantity, rawEntryPrice, currentBar.Timestamp, totalEntryCost);
                                         activeTrade = new TradeSummary
                                         {
                                             Id = Guid.NewGuid(),
                                             RunId = runId,
                                             StrategyName = strategyInstance.Name,
                                             EntryDate = currentBar.Timestamp,
-                                            EntryPrice = effectiveEntryPrice,
+                                            EntryPrice = rawEntryPrice,
                                             Direction = direction.ToString(),
                                             Quantity = quantity,
                                             Symbol = symbol,
@@ -298,12 +298,9 @@ namespace Temperance.Services.BackTesting.Implementations
             double spreadAndOtherCost = await transactionCostService.GetSpreadCost(rawExitPrice, currentPosition.Quantity, symbol, interval, exitBar.Timestamp);
             double totalExitCost = commissionCost + slippageCost + spreadAndOtherCost;
 
-            // --- BUG FIX IS HERE ---
-            // The Gross P/L calculation MUST use the EntryPrice from the 'activeTrade' record,
-            // which holds the correct price for this specific trade instance.
             double grossPnl = (exitDirection == PositionDirection.Long)
-             ? (rawExitPrice - activeTrade.EntryPrice) * currentPosition.Quantity
-             : (activeTrade.EntryPrice - rawExitPrice) * currentPosition.Quantity;
+                ? (rawExitPrice - currentPosition.AverageEntryPrice) * currentPosition.Quantity
+                : (currentPosition.AverageEntryPrice - rawExitPrice) * currentPosition.Quantity;
 
             double totalTransactionCost = (activeTrade.TotalTransactionCost ?? 0) + totalExitCost;
             double netPnl = grossPnl - totalTransactionCost;
