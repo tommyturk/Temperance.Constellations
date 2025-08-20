@@ -145,15 +145,22 @@ namespace Temperance.Services.BackTesting.Implementations
                         _logger.LogInformation($"RunId: {runId} - Processing {symbol} [{interval}]");
 
                         var highPrices = orderedData.Select(p => p.HighPrice).ToArray();
+                        _logger.LogInformation($"HighPrices: {highPrices.Count()}");
+
                         var lowPrices = orderedData.Select(p => p.LowPrice).ToArray();
+                        _logger.LogInformation($"lowPrices: {lowPrices.Count()}");
+
                         var closePrices = orderedData.Select(p => p.ClosePrice).ToArray();
+                        _logger.LogInformation($"closePrices: {closePrices.Count()}");
+
                         var movingAverage = _gpuIndicatorService.CalculateSma(closePrices, strategyMinimumLookback);
                         var standardDeviation = _gpuIndicatorService.CalculateStdDev(closePrices, strategyMinimumLookback);
                         var rsi = strategyInstance.CalculateRSI(closePrices, strategyMinimumLookback);
 
                         var atrPeriod = ParameterHelper.GetParameterOrDefault(config.StrategyParameters, "AtrPeriod", 14);
-
+                        _logger.LogInformation($"ATR Period: {atrPeriod}");
                         var atr = _gpuIndicatorService.CalculateAtr(highPrices, lowPrices, closePrices, atrPeriod);
+
                         Console.WriteLine("atr: ", atr);
                         var upperBand = movingAverage.Zip(standardDeviation, (m, s) => m + (2 * s)).ToArray();
                         var lowerBand = movingAverage.Zip(standardDeviation, (m, s) => m - (2 * s)).ToArray();
