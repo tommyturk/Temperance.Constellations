@@ -22,7 +22,7 @@ namespace Temperance.Services.Services.Implementations
         public double[] CalculateAtr(double[] high, double[] low, double[] close, int period)
         {
             if (_accelerator == null) throw new InvalidOperationException("GPU Accelerator not found");
-            if (high.Length < period) return new double[high.Length];
+            if (high.Length <= period) return new double[high.Length];
 
             using var highBuffer = _accelerator.Allocate1D(high);
             using var lowBuffer = _accelerator.Allocate1D(low);
@@ -33,28 +33,40 @@ namespace Temperance.Services.Services.Implementations
             loadedKernel(high.Length, highBuffer.View, lowBuffer.View, closeBuffer.View, trueRangeBuffer.View);
             _accelerator.Synchronize();
 
-            // --- Step 2: Transfer the results back to the CPU ---
             var trueRanges = trueRangeBuffer.GetAsArray1D();
 
-            // --- Step 3: Perform Wilder's smoothing serially on the CPU ---
             var atr = new double[high.Length];
-            if (high.Length == 0) return atr;
 
-            // Calculate the initial ATR value as a simple average of the first 'period' true ranges.
-            double initialAtr = 0;
-            for (int i = 1; i < period; i++)
+            double initialAtrSum = 0.0;
+            for (int i = 1; i <= period; i++)
             {
-                initialAtr += trueRanges[i];
+                initialAtrSum += trueRanges[i];
             }
-            atr[period - 1] = initialAtr / period;
+            atr[period] = initialAtrSum / period;
 
-            // Apply Wilder's smoothing for the rest of the series.
-            for (int i = period; i < high.Length; i++)
+            for (int i = period + 1; i < high.Length; i++)
             {
                 atr[i] = ((atr[i - 1] * (period - 1)) + trueRanges[i]) / period;
             }
 
             return atr;
+        }
+
+        private static void TrueRangeKernel(Index1D index,
+                                    ArrayView<double> high,
+                                    ArrayView<double> low,
+                                    ArrayView<double> close,
+                                    ArrayView<double> output)
+        {
+            if (index == 0)
+            {
+                output[index] = 0;
+                return;
+            }
+            double highLow = high[index] - low[index];
+            double highPrevClose = XMath.Abs(high[index] - close[index - 1]);
+            double lowPrevClose = XMath.Abs(low[index] - close[index - 1]);
+            output[index] = XMath.Max(highLow, XMath.Max(highPrevClose, lowPrevClose));
         }
 
         public double[] CalculateSma(double[] prices, int period)
@@ -89,24 +101,7 @@ namespace Temperance.Services.Services.Implementations
             return Array.ConvertAll(resultAsDouble, d => (double)d);
         }
 
-        private static void TrueRangeKernel(Index1D index,
-                                    ArrayView<double> high,
-                                    ArrayView<double> low,
-                                    ArrayView<double> close,
-                                    ArrayView<double> output)
-        {
-            if (index == 0)
-            {
-                output[index] = 0; 
-                return;
-            }
-
-            double highLow = high[index] - low[index];
-            double highPrevClose = XMath.Abs(high[index] - close[index - 1]);
-            double lowPrevClose = XMath.Abs(low[index] - close[index - 1]);
-
-            output[index] = XMath.Max(highLow, XMath.Max(highPrevClose, lowPrevClose));
-        }
+        
 
         private static void StdDevKernel(Index1D index, ArrayView<double> prices, ArrayView<double> output, int period)
         {
