@@ -2,6 +2,8 @@
 {
     public class BacktestConfiguration
     {
+        public Guid RunId { get; set; }
+        public int? OptimizationResultId { get; set; }
         public string StrategyName { get; set; } = string.Empty;
         public Dictionary<string, object> StrategyParameters { get; set; } = new();
         public List<string> Symbols { get; set; } = new();

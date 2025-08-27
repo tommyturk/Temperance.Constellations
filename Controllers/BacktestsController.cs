@@ -32,14 +32,17 @@ namespace Temperance.Constellations.Controllers
         [ProducesResponseType(StatusCodes.Status400BadRequest)]
         public async Task<IActionResult> StartBackTest([FromBody] BacktestConfiguration configuration)
         {
-            var runId = Guid.NewGuid();
-            await _tradeService.InitializeBacktestRunAsync(configuration, runId);
-            string configJson = System.Text.Json.JsonSerializer.Serialize(configuration);
+            if (configuration.RunId == Guid.Empty)
+                return BadRequest("A valid RunId must be provided for the backtest.");
+
+            await _tradeService.InitializeBacktestRunAsync(configuration, configuration.RunId);
+
             var jobId = _backgroundJobClient.Enqueue<IBacktestRunner>(runner =>
-                                runner.RunBacktest(configJson, runId));
-            _logger.LogInformation("Enqueued backtest RunId: {RunId}, Hangfire JobId: {JobId}", runId, jobId);
-            return Accepted(new { BacktestRunId = runId, JobId = jobId });
-            
+                            runner.RunBacktest(configuration, configuration.RunId));
+
+            _logger.LogInformation("Enqueued backtest RunId: {RunId}, Hangfire JobId: {JobId}", configuration.RunId, jobId);
+
+            return Accepted(new { BacktestRunId = configuration.RunId, JobId = jobId });
         }
 
         [HttpPost("start-pairs")]

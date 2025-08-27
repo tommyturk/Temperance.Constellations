@@ -34,6 +34,7 @@ namespace Temperance.Services.BackTesting.Implementations
         private readonly IServiceProvider _serviceProvider;
         private readonly IQualityFilterService _qualityFilterService;
         private readonly IMarketHealthService _marketHealthService;
+        private readonly IConductorClient _conductorClient;
         private readonly ILogger<BacktestRunner> _logger;
 
         public BacktestRunner(
@@ -49,6 +50,7 @@ namespace Temperance.Services.BackTesting.Implementations
             IServiceProvider serviceProvider,
             IQualityFilterService qualityFilterService,
             IMarketHealthService marketHealthService,
+            IConductorClient conductorClient,
             ILogger<BacktestRunner> logger)
         {
             _liquidityService = liquidityService;
@@ -66,13 +68,12 @@ namespace Temperance.Services.BackTesting.Implementations
         }
 
         [AutomaticRetry(Attempts = 1)]
-        public async Task RunBacktest(string configJson, Guid runId)
+        public async Task RunBacktest(BacktestConfiguration config, Guid runId)
         {
-            var config = JsonSerializer.Deserialize<BacktestConfiguration>(configJson);
             if (config == null)
             {
                 await _tradesService.UpdateBacktestRunStatusAsync(runId, "Failed", "Configuration error.");
-                throw new ArgumentException("Could not deserialize configuration.", nameof(configJson));
+                throw new ArgumentException("Could not deserialize configuration.", nameof(config));
             }
 
             await _tradesService.UpdateBacktestRunStatusAsync(runId, "Running");
@@ -257,6 +258,21 @@ namespace Temperance.Services.BackTesting.Implementations
                 await _performanceCalculator.CalculatePerformanceMetrics(result, config.InitialCapital);
                 await _tradesService.UpdateBacktestPerformanceMetrics(runId, result, config.InitialCapital);
                 await _tradesService.UpdateBacktestRunStatusAsync(runId, "Completed");
+
+                var completionPayload = new BacktestCompletionPayload
+                {
+                    RunId = runId,
+                    StrategyName = config.StrategyName,
+                    Symbol = config.Symbols.FirstOrDefault(),
+                    Interval = config.Intervals.FirstOrDefault(),
+                    LastBacktestEndDate = config.EndDate,
+                    TotalReturn = result.TotalReturn,
+                    SharpeRatio = result.SharpeRatio,
+                    MaxDrawdown = result.MaxDrawdown,
+                    TotalTrades = result.TotalTrades
+                };
+
+                await _conductorClient.NotifyBacktestCompleteAsync(completionPayload);
             }
             catch (Exception ex)
             {
