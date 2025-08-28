@@ -272,6 +272,7 @@ namespace Temperance.Services.BackTesting.Implementations
                     TotalTrades = result.TotalTrades
                 };
 
+                _logger.LogInformation("Notifying backtest complete...");
                 await _conductorClient.NotifyBacktestCompleteAsync(completionPayload);
             }
             catch (Exception ex)

@@ -1,4 +1,6 @@
-﻿namespace Temperance.Services.Services.Interfaces
+﻿using Temperance.Data.Models.Backtest;
+
+namespace Temperance.Services.Services.Interfaces
 {
     public interface IConductorClient
     {

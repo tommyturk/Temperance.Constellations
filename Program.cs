@@ -55,6 +55,8 @@ builder.Services.AddControllers()
 builder.Services.AddSingleton(sp => sp.GetRequiredService<IOptions<ConductorSettings>>().Value);
 
 builder.Services.AddHttpClient<IAlphaVantageService, AlphaVantageService>();
+builder.Services.AddHttpClient<IConductorClient, ConductorClient>();
+
 builder.Services.AddTransient<IHangfireTestService, HangfireTestService>();
 builder.Services.AddTransient<IEarningsService, EarningsService>();
 builder.Services.AddTransient<IStrategyFactory, StrategyFactory>();
@@ -73,6 +75,8 @@ builder.Services.AddTransient<ITradeService, TradesService>();
 builder.Services.AddTransient<IQualityFilterService, QualityFilterService>();
 builder.Services.AddTransient<IMarketHealthService, MarketHealthService>();
 builder.Services.AddTransient<IEconomicDataService, EconomicDataService>();
+builder.Services.AddTransient<IHangfireTestService, HangfireTestService>();
+builder.Services.AddTransient<IEarningsService, EarningsService>();
 
 builder.Services.AddTransient<ISecuritiesOverviewRepository>(provider =>
 {

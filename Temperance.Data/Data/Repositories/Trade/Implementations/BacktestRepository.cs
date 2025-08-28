@@ -27,7 +27,9 @@ namespace Temperance.Data.Data.Repositories.Trade.Implementations
                     TotalReturn = @TotalReturn,
                     MaxDrawdown = @MaxDrawdown,
                     WinRate = @WinRate,
-                    ErrorMessage = @ErrorMessage
+                    ErrorMessage = @ErrorMessage,
+                    OptimizationResultId = @OptimizationResultId,
+                    SharpeRatio = @SharpeRatio
                 WHERE RunId = @RunId;";
 
             try
@@ -41,7 +43,9 @@ namespace Temperance.Data.Data.Repositories.Trade.Implementations
                     result.TotalReturn,
                     result.MaxDrawdown,
                     result.WinRate,
-                    result.ErrorMessage
+                    result.ErrorMessage,
+                    result.OptimizationResultId,
+                    result.SharpeRatio
                 };
                 int affectedRows = await connection.ExecuteAsync(query, parameters);
                 _logger.LogInformation("Updated performance metrics for backtest run {RunId}.", runId);

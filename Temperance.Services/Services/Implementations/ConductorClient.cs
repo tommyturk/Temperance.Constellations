@@ -6,10 +6,12 @@ using System.Linq;
 using System.Net.Http.Json;
 using System.Text;
 using System.Threading.Tasks;
+using Temperance.Data.Models.Backtest;
+using Temperance.Services.Services.Interfaces;
 
 namespace Temperance.Services.Services.Implementations
 {
-    public class ConductorClient
+    public class ConductorClient : IConductorClient
     {
         private readonly HttpClient _httpClient;
         private readonly ILogger<ConductorClient> _logger;
@@ -18,8 +20,8 @@ namespace Temperance.Services.Services.Implementations
         {
             _httpClient = httpClient;
             _logger = logger;
-            _httpClient.BaseAddress = new Uri(configuration["ConductorApi:BaseUrl"]
-                ?? "http://conductor:8080/");
+            _httpClient.BaseAddress = new Uri(configuration["ConductorSettings:BaseUrl"]
+            ?? "http://conductor-api:8002/");
         }
 
         public async Task NotifyBacktestCompleteAsync(BacktestCompletionPayload payload)

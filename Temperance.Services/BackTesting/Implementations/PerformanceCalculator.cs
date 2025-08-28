@@ -140,20 +140,63 @@ namespace Temperance.Services.BackTesting.Implementations
 
             result.PayoffRatio = averageLoss != 0 ? averageWin / averageLoss : (averageWin > 0 ? double.MaxValue : 0);
 
-            double kellyFraction = 0;
-            if(result.PayoffRatio > 0 && result.WinRate > 0 && result.WinRate < 1)
-            {
-                double lossProbability = 1 - result.WinRate.Value;
-                double numerator = (result.PayoffRatio * result.WinRate.Value) - lossProbability;
+            result.SharpeRatio = CalculateSharpeRatio(equityCurve, 0.03);
 
-                if (numerator > 0)
-                    kellyFraction = numerator / result.PayoffRatio;
+            var kellyMetrics = CalculateKellyMetrics(orderedTrades);
+            result.KellyFraction = kellyMetrics.KellyFraction;
+            result.KellyHalfFraction = kellyMetrics.KellyHalfFraction;
+        }
+
+        private double CalculateSharpeRatio(List<KeyValuePair<DateTime, double>> equityCurve, double riskFreeRate = 0.0)
+        {
+            if (equityCurve == null || equityCurve.Count < 2)
+            {
+                return 0.0;
             }
 
-            result.KellyFraction = kellyFraction;
-            result.KellyHalfFraction = kellyFraction / 2;
+            // 1. Calculate periodic (daily) returns from the equity curve
+            var returns = new List<double>();
+            for (int i = 1; i < equityCurve.Count; i++)
+            {
+                double previousEquity = equityCurve[i - 1].Value;
+                double currentEquity = equityCurve[i].Value;
+                if (previousEquity != 0)
+                {
+                    returns.Add((currentEquity - previousEquity) / previousEquity);
+                }
+            }
 
-            return;
+            if (returns.Count < 2)
+            {
+                return 0.0;
+            }
+
+            // 2. Calculate the average and standard deviation of returns
+            double averageReturn = returns.Average();
+            double stdDev = MathNet.Numerics.Statistics.Statistics.StandardDeviation(returns);
+
+            if (stdDev == 0)
+            {
+                // If there's no volatility, the Sharpe Ratio is undefined or can be considered zero
+                // if the excess return is also zero, or infinite if it's positive. We return 0 for simplicity.
+                return 0.0;
+            }
+
+            // 3. Determine the annualization factor
+            // This is a robust way to handle different timeframes (intraday, daily, etc.)
+            TimeSpan totalTimeSpan = equityCurve.Last().Key - equityCurve.First().Key;
+            int tradingDays = (int)Math.Max(1, totalTimeSpan.TotalDays); // Avoid division by zero
+            double periodsPerYear = (returns.Count / (double)tradingDays) * 252; // Assume 252 trading days/year
+
+            // 4. Calculate and Annualize the Sharpe Ratio
+            double excessReturn = averageReturn - (riskFreeRate / periodsPerYear); // Adjust risk-free rate to the period
+            double sharpeRatio = excessReturn / stdDev;
+            double annualizedSharpeRatio = sharpeRatio * Math.Sqrt(periodsPerYear);
+
+            _logger.LogDebug("Sharpe Calculation: Avg Return={AvgRet:P4}, StdDev={StdDev:P4}, Periods/Year={Periods:N2}, Annualized Sharpe={Sharpe:N2}",
+                averageReturn, stdDev, periodsPerYear, annualizedSharpeRatio);
+
+            return annualizedSharpeRatio;
         }
     }
 }

@@ -1,23 +1,27 @@
-version: "3.8"
-
+# The 'version' attribute is obsolete and has been removed.
 services:
   temperance-constellations-api:
     image: temperance-constellations:latest
     container_name: constellations-api
+    build:
+      context: .
+      dockerfile: Dockerfile
     ports:
-     - "8003:8003"
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
+      - "8003:8003"
+    networks:
+      - temperance_network # This tells the service to USE the network
     environment:
       ASPNETCORE_URLS: "http://+:8003"
       ASPNETCORE_ENVIRONMENT: "Development"
-      ConnectionStrings__DefaultConnection: "Server=host.docker.internal\\TRADINGBOTSERVER,1433;Database=TradingBotDb;User ID=developer;Password=K3n5alr1532025!!;Encrypt=False;TrustServerCertificate=True;"
-      ConnectionStrings__HistoricalPricesConnection: "Server=host.docker.internal\\TRADINGBOTSERVER,1433;Database=Historical;User ID=developer;Password=K3n5alr1532025!!;Encrypt=False;TrustServerCertificate=True;"
+      ConnectionStrings__DefaultConnection: "Server=host.docker.internal;Database=TradingBotDb;User ID=developer;Password=K3n5alr1532025!!;Encrypt=False;TrustServerCertificate=True;"
+      ConnectionStrings__HistoricalPricesConnection: "Server=host.docker.internal;Database=Historical;User ID=developer;Password=K3n5alr1532025!!;Encrypt=False;TrustServerCertificate=True;"
       AlphaVantageSettings__BaseUrl: "https://www.alphavantage.co/query"
       AlphaVantageSettings__ApiKey: "Q63WJB6QXCD0USO7"
       ConductorSettings__BaseUrl: "http://conductor-api:8002"
-      ConnectionStrings__HangfireConnection: "Server=host.docker.internal\\TRADINGBOTSERVER,1433;Database=TradingBotDb;User ID=developer;Password=K3n5alr1532025!!;Encrypt=False;TrustServerCertificate=True;"
+      ConnectionStrings__HangfireConnection: "Server=host.docker.internal;Database=TradingBotDb;User ID=developer;Password=K3n5alr1532025!!;Encrypt=False;TrustServerCertificate=True;"
     restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     deploy:
       resources:
         reservations:
@@ -25,8 +29,9 @@ services:
             - driver: nvidia
               count: all
               capabilities: [gpu]
-    runtime: nvidia
+
+# CORRECTED: This 'networks' block is now a top-level element.
+# This tells Docker Compose HOW to find the network.
 networks:
-  default:
-    external:
-      name: temperance_network
+  temperance_network:
+    external: true

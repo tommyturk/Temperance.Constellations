@@ -6,7 +6,7 @@ namespace Temperance.Data.Models.Backtest
     public class BacktestResult
     {
         public Guid RunId { get; set; }
-
+        public int OptimizationResultId { get; set; }
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] // Don't return config unless requested
         public BacktestConfiguration? Configuration { get; set; }
 
@@ -27,6 +27,7 @@ namespace Temperance.Data.Models.Backtest
         public double PayoffRatio { get; set; }
         public double KellyFraction { get; set; }
         public double KellyHalfFraction { get; set; }
+        public double SharpeRatio { get; set; }
 
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] // Avoid large payload unless requested
         public List<KeyValuePair<DateTime, double>>? EquityCurve { get; set; }
