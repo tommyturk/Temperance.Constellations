@@ -35,6 +35,8 @@ namespace Temperance.Constellations.Controllers
             if (configuration.RunId == Guid.Empty)
                 return BadRequest("A valid RunId must be provided for the backtest.");
 
+            _logger.LogInformation("This are the properties of the backtest configuration: {@Configuration}", configuration);
+
             await _tradeService.InitializeBacktestRunAsync(configuration, configuration.RunId);
 
             var jobId = _backgroundJobClient.Enqueue<IBacktestRunner>(runner =>
