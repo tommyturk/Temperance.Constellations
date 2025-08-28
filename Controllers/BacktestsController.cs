@@ -1,11 +1,12 @@
 ﻿using Hangfire;
 using Microsoft.AspNetCore.Mvc;
-using TradingApp.src.Core.Services.Interfaces;
+using System.Text.Json;
 using Temperance.Data.Models.Backtest;
+using Temperance.Data.Models.Strategy;
 using Temperance.Services.BackTesting.Interfaces;
 using Temperance.Services.Factories.Interfaces;
-using Temperance.Data.Models.Strategy;
 using Temperance.Services.Services.Interfaces;
+using TradingApp.src.Core.Services.Interfaces;
 
 namespace Temperance.Constellations.Controllers
 {
@@ -35,7 +36,14 @@ namespace Temperance.Constellations.Controllers
             if (configuration.RunId == Guid.Empty)
                 return BadRequest("A valid RunId must be provided for the backtest.");
 
-            _logger.LogInformation("This are the properties of the backtest configuration: {@Configuration}", configuration);
+            _logger.LogInformation("OptimizationResultId: {OptimizationResultId}", configuration.OptimizationResultId);
+
+            var configurationJson = JsonSerializer.Serialize(
+                configuration,
+                new JsonSerializerOptions { WriteIndented = true } 
+            );
+
+            _logger.LogInformation("Backtest configuration details: {ConfigurationJson}", configurationJson);
 
             await _tradeService.InitializeBacktestRunAsync(configuration, configuration.RunId);
 

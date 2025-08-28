@@ -6,7 +6,8 @@ namespace Temperance.Data.Models.Backtest
     public class BacktestResult
     {
         public Guid RunId { get; set; }
-        public int OptimizationResultId { get; set; }
+        public int? OptimizationResultId { get; set; }
+
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] // Don't return config unless requested
         public BacktestConfiguration? Configuration { get; set; }
 

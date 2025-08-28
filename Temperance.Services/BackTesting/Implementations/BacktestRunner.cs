@@ -64,6 +64,7 @@ namespace Temperance.Services.BackTesting.Implementations
             _serviceProvider = serviceProvider;
             _qualityFilterService = qualityFilterService;
             _marketHealthService = marketHealthService;
+            _conductorClient = conductorClient;
             _logger = logger;
         }
 
@@ -254,6 +255,7 @@ namespace Temperance.Services.BackTesting.Implementations
 
                 result.Trades.AddRange(allTrades);
                 result.TotalTrades = result.Trades.Count;
+                result.OptimizationResultId = config.OptimizationResultId;
                 _logger.LogInformation("RunId: {RunId} - Backtest completed. Total trades: {TradeCount}", runId, result.TotalTrades);
                 await _performanceCalculator.CalculatePerformanceMetrics(result, config.InitialCapital);
                 await _tradesService.UpdateBacktestPerformanceMetrics(runId, result, config.InitialCapital);
