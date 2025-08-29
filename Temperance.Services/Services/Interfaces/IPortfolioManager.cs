@@ -5,6 +5,8 @@ namespace Temperance.Services.Services.Interfaces
     public interface IPortfolioManager
     {
         Task Initialize(double initialCapital);
+        void HydrateState(double cash, IEnumerable<Position> openPositions); 
+
         double GetAvailableCapital();
         double GetTotalEquity();
         double GetAllocatedCapital();

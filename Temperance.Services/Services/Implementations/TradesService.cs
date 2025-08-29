@@ -52,6 +52,11 @@ namespace TradingApp.src.Core.Services.Implementations
             await _tradeRepository.InitializeBacktestRunAsync(runId, config);
         }
 
+        public Task<(double Cash, List<Position> OpenPositions)?> GetLatestPortfolioStateAsync(Guid sessionId)
+        {
+            return _tradeRepository.GetLatestPortfolioStateAsync(sessionId);
+        }
+
         public async Task InitializePairBacktestRunAsync(PairsBacktestConfiguration config, Guid runId)
         {
             string strategyParametersJson = JsonSerializer.Serialize(config.StrategyParameters);

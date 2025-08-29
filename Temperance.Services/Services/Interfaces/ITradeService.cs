@@ -25,5 +25,7 @@ namespace TradingApp.src.Core.Services.Interfaces
         Task UpdateBacktestPerformanceMetrics(Guid runId, BacktestResult metrics, double initialCapital);
 
         Task SaveOrUpdateBacktestTrade(TradeSummary trade);
+
+        Task<(double Cash, List<Position> OpenPositions)?> GetLatestPortfolioStateAsync(Guid sessionId);
     }
 }

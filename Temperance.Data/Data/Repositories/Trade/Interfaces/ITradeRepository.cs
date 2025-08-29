@@ -22,5 +22,7 @@ namespace Temperance.Data.Data.Repositories.Trade.Interfaces
         // Optional: Task<string?> GetBacktestRunStatusOnlyAsync(Guid runId); if needed
 
         Task SaveOrUpdateBacktestTradeAsync(TradeSummary trade);
+        Task SavePortfolioStateAsync(Guid runId, DateTime asOfDate, double cash, IEnumerable<Position> openPositions);
+        Task<(double Cash, List<Position> OpenPositions)?> GetLatestPortfolioStateAsync(Guid sessionId);
     }
 }

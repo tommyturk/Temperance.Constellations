@@ -80,6 +80,12 @@ namespace Temperance.Services.BackTesting.Implementations
             await _tradesService.UpdateBacktestRunStatusAsync(runId, "Running");
             var result = new BacktestResult();
 
+            var initialPortfolioState = await _tradesService.GetLatestPortfolioStateAsync(config.SessionId.Value);
+            if (initialPortfolioState.HasValue)
+                _portfolioManager.HydrateState(initialPortfolioState.Value.Cash, initialPortfolioState.Value.OpenPositions);
+            else
+                await _portfolioManager.Initialize(config.InitialCapital);
+
             try
             {
                 var marketHealthCache = new ConcurrentDictionary<DateTime, MarketHealthScore>();
@@ -103,14 +109,11 @@ namespace Temperance.Services.BackTesting.Implementations
                     var strategyInstance = _strategyFactory.CreateStrategy<ISingleAssetStrategy>(config.StrategyName, config.InitialCapital, config.StrategyParameters);
                     if (strategyInstance == null) return;
 
-                    var portfolioManager = scope.ServiceProvider.GetRequiredService<IPortfolioManager>();
                     var historicalPriceService = scope.ServiceProvider.GetRequiredService<IHistoricalPriceService>();
                     var transactionCostService = scope.ServiceProvider.GetRequiredService<ITransactionCostService>();
                     var liquidityService = scope.ServiceProvider.GetRequiredService<ILiquidityService>();
                     var performanceCalculator = scope.ServiceProvider.GetRequiredService<IPerformanceCalculator>();
                     var tradesService = scope.ServiceProvider.GetRequiredService<ITradeService>();
-
-                    await portfolioManager.Initialize(config.InitialCapital);
 
                     try
                     {
@@ -176,7 +179,7 @@ namespace Temperance.Services.BackTesting.Implementations
 
                                 if (exitReason != "Hold")
                                 {
-                                    var closedTrade = await ClosePositionAsync(portfolioManager, transactionCostService, performanceCalculator, tradesService, activeTrade, currentPosition, currentBar, symbol, interval, runId, 50, symbolKellyHalfFractions, exitReason, currentIndicatorValues);
+                                    var closedTrade = await ClosePositionAsync(_portfolioManager, transactionCostService, performanceCalculator, tradesService, activeTrade, currentPosition, currentBar, symbol, interval, runId, 50, symbolKellyHalfFractions, exitReason, currentIndicatorValues);
                                     if (closedTrade != null) { allTrades.Add(closedTrade); }
                                     currentPosition = null;
                                     activeTrade = null;
@@ -190,7 +193,7 @@ namespace Temperance.Services.BackTesting.Implementations
                                 long minimumAdv = strategyInstance.GetMinimumAverageDailyVolume();
                                 if (!liquidityService.IsSymbolLiquidAtTime(symbol, interval, minimumAdv, currentBar.Timestamp, 20, orderedData)) continue;
 
-                                double allocationAmount = strategyInstance.GetAllocationAmount(in currentBar, dataWindow, currentIndicatorValues, config.InitialCapital * 0.02, portfolioManager.GetTotalEquity(), currentSymbolKellyHalfFraction, 1, currentMarketHealth);
+                                double allocationAmount = strategyInstance.GetAllocationAmount(in currentBar, dataWindow, currentIndicatorValues, config.InitialCapital * 0.02, _portfolioManager.GetTotalEquity(), currentSymbolKellyHalfFraction, 1, currentMarketHealth);
                                 if (allocationAmount > 0)
                                 {
                                     double rawEntryPrice = currentBar.ClosePrice;
@@ -202,9 +205,9 @@ namespace Temperance.Services.BackTesting.Implementations
                                     double totalEntryCost = await transactionCostService.GetSpreadCost(rawEntryPrice, quantity, symbol, interval, currentBar.Timestamp);
                                     double totalCashOutlay = (quantity * rawEntryPrice) + totalEntryCost;
 
-                                    if (await portfolioManager.CanOpenPosition(totalCashOutlay))
+                                    if (await _portfolioManager.CanOpenPosition(totalCashOutlay))
                                     {
-                                        await portfolioManager.OpenPosition(symbol, interval, direction, quantity, rawEntryPrice, currentBar.Timestamp, totalEntryCost);
+                                        await _portfolioManager.OpenPosition(symbol, interval, direction, quantity, rawEntryPrice, currentBar.Timestamp, totalEntryCost);
                                         activeTrade = new TradeSummary
                                         {
                                             Id = Guid.NewGuid(),
@@ -219,7 +222,7 @@ namespace Temperance.Services.BackTesting.Implementations
                                             TotalTransactionCost = totalEntryCost,
                                             EntryReason = strategyInstance.GetEntryReason(in currentBar, dataWindow, currentIndicatorValues)
                                         };
-                                        currentPosition = portfolioManager.GetOpenPositions().FirstOrDefault(p => p.Symbol == symbol && p.InitialEntryDate == currentBar.Timestamp);
+                                        currentPosition = _portfolioManager.GetOpenPositions().FirstOrDefault(p => p.Symbol == symbol && p.InitialEntryDate == currentBar.Timestamp);
 
                                         if (currentPosition != null)
                                         {
@@ -243,7 +246,7 @@ namespace Temperance.Services.BackTesting.Implementations
                                 { "RSI", indicators["RSI"][lastBarIndex] }, { "ATR", indicators["ATR"][lastBarIndex] },
                                 { "SMA", indicators["SMA"][lastBarIndex] }
                             };
-                            var closedTrade = await ClosePositionAsync(portfolioManager, transactionCostService, _performanceCalculator, _tradesService, activeTrade, currentPosition, lastBar, symbol, interval, runId, 50, symbolKellyHalfFractions, "End of Backtest", lastIndicators);
+                            var closedTrade = await ClosePositionAsync(_portfolioManager, transactionCostService, _performanceCalculator, _tradesService, activeTrade, currentPosition, lastBar, symbol, interval, runId, 50, symbolKellyHalfFractions, "End of Backtest", lastIndicators);
                             if (closedTrade != null) { allTrades.Add(closedTrade); }
                         }
                     }
@@ -334,12 +337,12 @@ namespace Temperance.Services.BackTesting.Implementations
 
             activeTrade.EntryPrice = currentPosition.AverageEntryPrice;
 
-            var closedTrade = await portfolioManager.ClosePosition(activeTrade);
+            var closedTrade = await _portfolioManager.ClosePosition(activeTrade);
 
             if (closedTrade != null)
             {
                 await tradesService.SaveOrUpdateBacktestTrade(closedTrade);
-                var recentTrades = portfolioManager.GetCompletedTradesHistory()
+                var recentTrades = _portfolioManager.GetCompletedTradesHistory()
                     .Where(t => t.Symbol == symbol && t.Interval == interval)
                     .OrderByDescending(t => t.ExitDate).Take(rollingKellyLookbackTrades).ToList();
                 var kellyMetrics = performanceCalculator.CalculateKellyMetrics(recentTrades);

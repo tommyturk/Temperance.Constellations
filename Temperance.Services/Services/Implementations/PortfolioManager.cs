@@ -42,9 +42,18 @@ namespace Temperance.Services.Services.Implementations
             }
         }
 
-        public double GetTotalEquity()
+        public double GetTotalEquity(Dictionary<string, double> latestPrices)
         {
-            double openPositionValue = _openPositions.Values.Sum(p => p.EntryPrice * p.Quantity);
+            double openPositionValue = 0;
+            lock (_cashLock) 
+            {
+                foreach (var position in _openPositions.Values)
+                    if (latestPrices.TryGetValue(position.Symbol, out double currentPrice))
+                        openPositionValue += currentPrice * position.Quantity;
+                    else
+                        openPositionValue += position.AverageEntryPrice * position.Quantity;
+            }
+
             return GetAvailableCapital() + openPositionValue;
         }
 
@@ -323,6 +332,21 @@ namespace Temperance.Services.Services.Implementations
             _completedTradesHistory.Add(summary);
 
             return Task.FromResult<TradeSummary?>(summary);
+        }
+
+        public void HydrateState(double cash, IEnumerable<Position> openPositions)
+        {
+            lock (_cashLock)
+            {
+                _currentCash = cash;
+            }
+            _openPositions.Clear();
+            foreach (var position in openPositions)
+            {
+                _openPositions.TryAdd(position.Symbol, position);
+            }
+            _completedTradesHistory.Clear(); 
+            _logger.LogInformation("PortfolioManager state hydrated with {Cash:C} cash and {PositionCount} open positions.", cash, openPositions.Count());
         }
     }
 }

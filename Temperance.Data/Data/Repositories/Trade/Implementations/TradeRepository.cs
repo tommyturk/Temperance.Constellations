@@ -334,5 +334,55 @@ namespace Temperance.Data.Data.Repositories.Trade.Implementations
                 throw;
             }
         }
+
+        public async Task SavePortfolioStateAsync(Guid runId, DateTime asOfDate, double cash, IEnumerable<Position> openPositions)
+        {
+            const string sql = @"
+                INSERT INTO [Constellations].[PortfolioState] (RunId, AsOfDate, Cash, OpenPositionsJson)
+                VALUES (@RunId, @AsOfDate, @Cash, @OpenPositionsJson);";
+            try
+            {
+                using var connection = CreateConnection();
+                await connection.ExecuteAsync(sql, new
+                {
+                    RunId = runId,
+                    AsOfDate = asOfDate,
+                    Cash = cash,
+                    OpenPositionsJson = JsonSerializer.Serialize(openPositions)
+                });
+                _logger.LogInformation("Saved portfolio state for RunId {RunId}", runId);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to save portfolio state for RunId {RunId}", runId);
+                throw;
+            }
+        }
+
+        public async Task<(double Cash, List<Position> OpenPositions)?> GetLatestPortfolioStateAsync(Guid sessionId)
+        {
+            const string sql = @"
+                SELECT TOP 1 ps.Cash, ps.OpenPositionsJson
+                FROM [Constellations].[PortfolioState] ps
+                JOIN [Constellations].[BacktestRuns] br ON ps.RunId = br.RunId
+                WHERE br.SessionId = @SessionId
+                ORDER BY ps.AsOfDate DESC;";
+            try
+            {
+                using var connection = CreateConnection();
+                var result = await connection.QuerySingleOrDefaultAsync(sql, new { SessionId = sessionId });
+
+                if (result == null || result.OpenPositionsJson == null)
+                    return null; 
+
+                var openPositions = JsonSerializer.Deserialize<List<Position>>(result.OpenPositionsJson) ?? new List<Position>();
+                return ((double)result.Cash, openPositions);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to get latest portfolio state for SessionId {SessionId}", sessionId);
+                return null;
+            }
+        }
     }
 }
