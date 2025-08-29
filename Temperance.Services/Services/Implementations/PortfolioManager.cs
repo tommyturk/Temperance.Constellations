@@ -42,10 +42,16 @@ namespace Temperance.Services.Services.Implementations
             }
         }
 
+        public double GetTotalEquity()
+        {
+            double openPositionValue = _openPositions.Values.Sum(p => p.AverageEntryPrice * p.Quantity);
+            return GetAvailableCapital() + openPositionValue;
+        }
+
         public double GetTotalEquity(Dictionary<string, double> latestPrices)
         {
             double openPositionValue = 0;
-            lock (_cashLock) 
+            lock (_cashLock)
             {
                 foreach (var position in _openPositions.Values)
                     if (latestPrices.TryGetValue(position.Symbol, out double currentPrice))
@@ -215,7 +221,7 @@ namespace Temperance.Services.Services.Implementations
 
         public async Task<TradeSummary?> PartiallyClosePosition(string symbol, int quantityToClose, double exitPrice, DateTime exitDate, double transactionCost)
         {
-            if(!_openPositions.TryGetValue(symbol, out var position))
+            if (!_openPositions.TryGetValue(symbol, out var position))
             {
                 _logger.LogInformation("Attempted to partially close non-existent position for {Symbol}", symbol);
                 return null;
@@ -230,7 +236,7 @@ namespace Temperance.Services.Services.Implementations
             _logger.LogInformation("Partially closing {Qty} shares of {Symbol} at {Price}", quantityToClose, symbol, exitPrice);
 
             double proceeds = (quantityToClose * exitPrice) - transactionCost;
-            
+
             lock (_cashLock) _currentCash += proceeds;
 
             double profitLoss = 0;
@@ -320,7 +326,7 @@ namespace Temperance.Services.Services.Implementations
 
             var summary = new TradeSummary
             {
-                Symbol = $"{activeTrade.SymbolA}/{activeTrade.SymbolB}", 
+                Symbol = $"{activeTrade.SymbolA}/{activeTrade.SymbolB}",
                 Direction = activeTrade.Direction.ToString(),
                 EntryDate = activeTrade.EntryDate,
                 ExitDate = exitTimestamp,
@@ -345,7 +351,7 @@ namespace Temperance.Services.Services.Implementations
             {
                 _openPositions.TryAdd(position.Symbol, position);
             }
-            _completedTradesHistory.Clear(); 
+            _completedTradesHistory.Clear();
             _logger.LogInformation("PortfolioManager state hydrated with {Cash:C} cash and {PositionCount} open positions.", cash, openPositions.Count());
         }
     }

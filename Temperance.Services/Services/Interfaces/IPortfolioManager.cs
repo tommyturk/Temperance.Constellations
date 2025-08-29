@@ -6,6 +6,7 @@ namespace Temperance.Services.Services.Interfaces
     {
         Task Initialize(double initialCapital);
         void HydrateState(double cash, IEnumerable<Position> openPositions);
+        double GetTotalEquity();
         double GetTotalEquity(Dictionary<string, double> latestPrices);
         double GetAvailableCapital();
         double GetAllocatedCapital();
