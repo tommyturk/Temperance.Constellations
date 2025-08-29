@@ -111,14 +111,17 @@ namespace Temperance.Data.Data.Repositories.Trade.Implementations
         public async Task InitializeBacktestRunAsync(Guid runId, BacktestConfiguration config)
         {
             const string sql = @"
-                INSERT INTO  [TradingBotDb].[Constellations].[BacktestRuns] (RunId, StrategyName, ParametersJson, SymbolsJson, IntervalsJson, StartDate, EndDate, InitialCapital, Status, StartTime)
-                VALUES (@RunId, @StrategyName, @ParametersJson, @SymbolsJson, @IntervalsJson, @StartDate, @EndDate, @InitialCapital, 'Queued', @StartTime);";
+            INSERT INTO [TradingBotDb].[Constellations].[BacktestRuns] 
+                (RunId, SessionId, StrategyName, ParametersJson, SymbolsJson, IntervalsJson, StartDate, EndDate, InitialCapital, Status, StartTime)
+            VALUES 
+                (@RunId, @SessionId, @StrategyName, @ParametersJson, @SymbolsJson, @IntervalsJson, @StartDate, @EndDate, @InitialCapital, 'Queued', @StartTime);";
             try
             {
                 using var connection = CreateConnection();
                 await connection.ExecuteAsync(sql, new
                 {
                     RunId = runId,
+                    config.SessionId,
                     config.StrategyName,
                     ParametersJson = JsonSerializer.Serialize(config.StrategyParameters),
                     SymbolsJson = JsonSerializer.Serialize(config.Symbols),
@@ -128,7 +131,7 @@ namespace Temperance.Data.Data.Repositories.Trade.Implementations
                     config.InitialCapital,
                     StartTime = DateTime.UtcNow
                 });
-                _logger.LogInformation("Initialized backtest run {RunId} in database.", runId);
+                _logger.LogInformation("Initialized backtest run {RunId} for Session {SessionId} in database.", runId, config.SessionId);
             }
             catch (Exception ex)
             {

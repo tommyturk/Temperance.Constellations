@@ -261,9 +261,13 @@ namespace Temperance.Services.BackTesting.Implementations
                 await _tradesService.UpdateBacktestPerformanceMetrics(runId, result, config.InitialCapital);
                 await _tradesService.UpdateBacktestRunStatusAsync(runId, "Completed");
 
+                double finalEquity = _portfolioManager.GetTotalEquity();
+
                 var completionPayload = new BacktestCompletionPayload
                 {
                     RunId = runId,
+                    SessionId = config.SessionId, 
+                    FinalEquity = finalEquity,
                     StrategyName = config.StrategyName,
                     Symbol = config.Symbols.FirstOrDefault(),
                     Interval = config.Intervals.FirstOrDefault(),

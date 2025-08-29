@@ -2,7 +2,9 @@
 {
     public class BacktestCompletionPayload
     {
-        public Guid RunId { get; set; } 
+        public Guid RunId { get; set; }
+        public Guid? SessionId { get; set; }
+        public double FinalEquity { get; set; }
         public string StrategyName { get; set; }
         public string Symbol { get; set; }
         public string Interval { get; set; }
