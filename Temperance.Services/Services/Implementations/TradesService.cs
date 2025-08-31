@@ -195,5 +195,15 @@ namespace TradingApp.src.Core.Services.Implementations
         {
             return _tradeRepository.UpdateSessionCapitalAsync(sessionId, newCapital);
         }
+
+        public Task<IEnumerable<BacktestRun>> GetBacktestRunsForSessionAsync(Guid sessionId, DateTime startDate, DateTime endDate)
+        {
+            return _tradeRepository.GetBacktestRunsForSessionAsync(sessionId, startDate, endDate);
+        }
+
+        public Task SaveSleevesAsync(IEnumerable<WalkForwardSleeve> sleeves)
+        {
+            return _tradeRepository.SaveSleevesAsync(sleeves);
+        }
     }
 }

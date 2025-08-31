@@ -52,16 +52,18 @@ namespace Temperance.Services.BackTesting.Implementations
 
             // 2. Get the Point-in-Time universe of symbols to optimize
             // We pass null for symbols to get the entire universe based on the repository's rules (e.g., market cap > 5B)
-            var pitUniverse = await _securitiesOverviewService.StreamSecuritiesForBacktest(null, new List<string> { "60min" })
-                                                              .Select(s => s.Symbol)
-                                                              .ToListAsync();
+            var pitUniverseSymbols = new List<string>();
+            await foreach (var security in _securitiesOverviewService.StreamSecuritiesForBacktest(null, new List<string> { "60min" }))
+            {
+                pitUniverseSymbols.Add(security.Symbol);
+            }
 
-            if (!pitUniverse.Any())
+            if (!pitUniverseSymbols.Any())
             {
                 _logger.LogError("Session {SessionId}: Could not retrieve any symbols for the Point-in-Time universe. Aborting cycle.", sessionId);
                 return;
             }
-            _logger.LogInformation("Session {SessionId}: Retrieved {SymbolCount} symbols for optimization.", sessionId, pitUniverse.Count);
+            _logger.LogInformation("Session {SessionId}: Retrieved {SymbolCount} symbols for optimization.", sessionId, pitUniverseSymbols.Count);
 
             // 3. Call Conductor to dispatch optimization jobs for the entire universe
             await _conductorService.DispatchOptimizationJobsAsync(
@@ -70,7 +72,7 @@ namespace Temperance.Services.BackTesting.Implementations
                 "60min", // Assuming a fixed interval for this walk-forward session
                 inSampleStartDate,
                 inSampleEndDate,
-                pitUniverse
+                pitUniverseSymbols
             );
             _logger.LogInformation("Session {SessionId}: Dispatched all optimization jobs via Conductor.", sessionId);
 

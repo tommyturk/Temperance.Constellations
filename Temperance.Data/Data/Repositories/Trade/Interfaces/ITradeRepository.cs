@@ -20,7 +20,8 @@ namespace Temperance.Data.Data.Repositories.Trade.Interfaces
         Task SaveOrUpdateBacktestTradeAsync(TradeSummary trade);
         Task SavePortfolioStateAsync(Guid runId, DateTime asOfDate, double cash, IEnumerable<Position> openPositions);
         Task<(double Cash, List<Position> OpenPositions)?> GetLatestPortfolioStateAsync(Guid sessionId);
-        
+
+        Task<IEnumerable<BacktestRun>> GetBacktestRunsForSessionAsync(Guid sessionId, DateTime startDate, DateTime endDate);
         Task SaveSleevesAsync(IEnumerable<WalkForwardSleeve> sleeves);
         Task<IEnumerable<WalkForwardSleeve>> GetSleevesForSessionAsync(Guid sessionId, DateTime tradingPeriodStartDate);
         Task<WalkForwardSession?> GetSessionAsync(Guid sessionId);

@@ -418,7 +418,7 @@ namespace Temperance.Data.Data.Repositories.Trade.Implementations
             ";
             try
             {
-                using var connection = CreateConnection(); // Assumes you have a CreateConnection() helper
+                using var connection = CreateConnection();
                 await connection.ExecuteAsync(sql, sleeves);
                 _logger.LogInformation("Successfully saved {SleeveCount} sleeves for SessionId {SessionId}", sleeves.Count(), sleeves.First().SessionId);
             }
@@ -427,6 +427,17 @@ namespace Temperance.Data.Data.Repositories.Trade.Implementations
                 _logger.LogError(ex, "Failed to save walk-forward sleeves for SessionId {SessionId}", sleeves.FirstOrDefault()?.SessionId);
                 throw;
             }
+        }
+
+        public async Task<IEnumerable<BacktestRun>> GetBacktestRunsForSessionAsync(Guid sessionId, DateTime startDate, DateTime endDate)
+        {
+            const string sql = @"
+                SELECT * FROM [Constellations].[BacktestRuns]
+                WHERE SessionId = @SessionId 
+                  AND StartDate >= @StartDate AND EndDate <= @EndDate
+                  AND Status = 'Completed';";
+            using var connection = CreateConnection();
+            return await connection.QueryAsync<BacktestRun>(sql, new { sessionId, startDate, endDate });
         }
     }
 }

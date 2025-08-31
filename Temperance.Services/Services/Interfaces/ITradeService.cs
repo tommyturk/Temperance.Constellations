@@ -24,5 +24,7 @@ namespace TradingApp.src.Core.Services.Interfaces
         Task<IEnumerable<WalkForwardSleeve>> GetSleevesForSessionAsync(Guid sessionId, DateTime tradingPeriodStartDate);
         Task<WalkForwardSession?> GetSessionAsync(Guid sessionId);
         Task UpdateSessionCapitalAsync(Guid sessionId, double newCapital);
+        Task<IEnumerable<BacktestRun>> GetBacktestRunsForSessionAsync(Guid sessionId, DateTime startDate, DateTime endDate);
+        Task SaveSleevesAsync(IEnumerable<WalkForwardSleeve> sleeves);
     }
 }
