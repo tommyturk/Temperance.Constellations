@@ -24,6 +24,26 @@ namespace Temperance.Services.Services.Implementations
             _logger = logger;
         }
 
+        public async Task DispatchOptimizationJobsAsync(Guid sessionId, string strategyName, string interval, DateTime inSampleStartDate, DateTime inSampleEndDate, List<string> symbols)
+        {
+            var url = $"{_conductorSettings.BaseUrl}/api/orchestration/dispatch-optimizations";
+            var payload = new
+            {
+                SessionId = sessionId,
+                StrategyName = strategyName,
+                Interval = interval,
+                InSampleStartDate = inSampleStartDate,
+                InSampleEndDate = inSampleEndDate,
+                Symbols = symbols
+            };
+
+            var jsonPayload = JsonConvert.SerializeObject(payload);
+            var content = new StringContent(jsonPayload, Encoding.UTF8, "application/json");
+
+            var response = await _httpClient.PostAsync(url, content);
+            response.EnsureSuccessStatusCode();
+        }
+
         public async Task<List<string>> GetSecurities()
         {
             var url = $"{_conductorSettings.BaseUrl}/api/securities";

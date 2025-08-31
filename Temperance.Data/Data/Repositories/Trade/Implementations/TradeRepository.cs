@@ -405,5 +405,28 @@ namespace Temperance.Data.Data.Repositories.Trade.Implementations
             using var connection = CreateConnection();
             await connection.ExecuteAsync(sql, new { SessionId = sessionId, NewCapital = newCapital });
         }
+
+        public async Task SaveSleevesAsync(IEnumerable<WalkForwardSleeve> sleeves)
+        {
+            if (!sleeves.Any()) return;
+
+            const string sql = @"
+                INSERT INTO [Constellations].[WalkForwardSleeves]
+                (SessionId, TradingPeriodStartDate, Symbol, Interval, StrategyName, OptimizationResultId, InSampleSharpeRatio, InSampleMaxDrawdown, OptimizedParametersJson)
+                VALUES
+                (@SessionId, @TradingPeriodStartDate, @Symbol, @Interval, @StrategyName, @OptimizationResultId, @InSampleSharpeRatio, @InSampleMaxDrawdown, @OptimizedParametersJson);
+            ";
+            try
+            {
+                using var connection = CreateConnection(); // Assumes you have a CreateConnection() helper
+                await connection.ExecuteAsync(sql, sleeves);
+                _logger.LogInformation("Successfully saved {SleeveCount} sleeves for SessionId {SessionId}", sleeves.Count(), sleeves.First().SessionId);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to save walk-forward sleeves for SessionId {SessionId}", sleeves.FirstOrDefault()?.SessionId);
+                throw;
+            }
+        }
     }
 }
