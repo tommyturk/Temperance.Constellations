@@ -22,6 +22,7 @@ namespace Temperance.Services.BackTesting.Implementations
 {
     public class BacktestRunner : IBacktestRunner
     {
+        private readonly IBackgroundJobClient _backgroundJobClient;
         private readonly IHistoricalPriceService _historicalPriceService;
         private readonly ILiquidityService _liquidityService;
         private readonly ITransactionCostService _transactionCostService;
@@ -39,6 +40,7 @@ namespace Temperance.Services.BackTesting.Implementations
         private readonly ILogger<BacktestRunner> _logger;
 
         public BacktestRunner(
+            IBackgroundJobClient backgroundJobClient,
             ILiquidityService liquidityService,
             ITransactionCostService transactionCostService,
             IGpuIndicatorService gpuIndicatorService,
@@ -54,6 +56,7 @@ namespace Temperance.Services.BackTesting.Implementations
             IConductorClient conductorClient,
             ILogger<BacktestRunner> logger)
         {
+            _backgroundJobClient = backgroundJobClient;
             _liquidityService = liquidityService;
             _transactionCostService = transactionCostService;
             _gpuIndicatorService = gpuIndicatorService;
@@ -134,6 +137,39 @@ namespace Temperance.Services.BackTesting.Implementations
             _backgroundJobClient.Enqueue<MasterWalkForwardOrchestrator>(
                 job => job.ExecuteCycle(sessionId, oosEndDate.AddDays(1))
             );
+        }
+
+        private async Task ProcessSleeveForTimestamp(WalkForwardSleeve sleeve, HistoricalPriceModel currentBar, List<HistoricalPriceModel> historicalData)
+        {
+            // This is where the single-asset logic from your old RunBacktest method goes.
+            // It operates on a single sleeve at a single point in time.
+
+            // 1. Create a strategy instance with the sleeve's parameters
+            var parameters = JsonSerializer.Deserialize<Dictionary<string, object>>(sleeve.OptimizedParametersJson) ?? new();
+            var strategy = _strategyFactory.CreateStrategy<ISingleAssetStrategy>(
+                sleeve.StrategyName,
+                _portfolioManager.GetTotalEquity(),
+                parameters
+            );
+
+            if (strategy == null) return;
+
+            // 2. Check for exit signals on existing positions for this sleeve
+            var position = _portfolioManager.GetOpenPositions().FirstOrDefault(p => p.Symbol == sleeve.Symbol);
+            if (position != null)
+            {
+                // ... Your logic to check if the position should be exited ...
+                // If so, call _portfolioManager.ClosePosition(...)
+            }
+
+            // 3. Check for entry signals if no position is open for this sleeve
+            if (position == null)
+            {
+                // ... Your logic to generate a signal ...
+                // ... Your logic for sizing the trade ...
+                // ... Your logic to check liquidity and capital via _portfolioManager.CanOpenPosition(...) ...
+                // If all checks pass, call _portfolioManager.OpenPosition(...)
+            }
         }
 
         [AutomaticRetry(Attempts = 1)]
