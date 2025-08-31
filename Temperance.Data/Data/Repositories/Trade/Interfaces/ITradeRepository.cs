@@ -5,24 +5,25 @@ namespace Temperance.Data.Data.Repositories.Trade.Interfaces
 {
     public interface ITradeRepository
     {
-        // --- Existing Methods for Live/Simulated Trading ---
         Task<int> SaveTradeAsync(Models.Trading.Trade trade);
         Task<int> ExecuteOrderAsync(Models.Trading.Order order);
         Task<int> UpdatePositionAsync(Models.Trading.Position position);
         Task<int> LogStrategyAsync(StrategyLog log);
-        Task CheckTradeExitsAsync(); // Keep if used elsewhere, but likely not by backtester
-
-        // --- New Methods for Backtesting Persistence ---
+        Task CheckTradeExitsAsync(); 
         Task InitializeBacktestRunAsync(Guid runId, BacktestConfiguration config);
         Task UpdateBacktestRunStatusAsync(Guid runId, string status, DateTime timestamp, string? errorMessage = null);
         Task SaveBacktestTradesAsync(Guid runId, IEnumerable<TradeSummary> trades);
-        Task UpdateBacktestRunTotalsAsync(Guid runId, BacktestResult result); // Replaces Finalize concept
-        Task<BacktestRun?> GetBacktestRunAsync(Guid runId); // Fetch run summary data
-        Task<IEnumerable<TradeSummary>> GetBacktestTradesAsync(Guid runId); // Fetch trades for a run
-        // Optional: Task<string?> GetBacktestRunStatusOnlyAsync(Guid runId); if needed
+        Task UpdateBacktestRunTotalsAsync(Guid runId, BacktestResult result); 
+        Task<BacktestRun?> GetBacktestRunAsync(Guid runId); 
+        Task<IEnumerable<TradeSummary>> GetBacktestTradesAsync(Guid runId); 
 
         Task SaveOrUpdateBacktestTradeAsync(TradeSummary trade);
         Task SavePortfolioStateAsync(Guid runId, DateTime asOfDate, double cash, IEnumerable<Position> openPositions);
         Task<(double Cash, List<Position> OpenPositions)?> GetLatestPortfolioStateAsync(Guid sessionId);
+        
+        Task SaveSleevesAsync(IEnumerable<WalkForwardSleeve> sleeves);
+        Task<IEnumerable<WalkForwardSleeve>> GetSleevesForSessionAsync(Guid sessionId, DateTime tradingPeriodStartDate);
+        Task<WalkForwardSession?> GetSessionAsync(Guid sessionId);
+        Task UpdateSessionCapitalAsync(Guid sessionId, double newCapital);
     }
 }

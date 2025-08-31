@@ -180,5 +180,20 @@ namespace TradingApp.src.Core.Services.Implementations
         {
             throw new NotImplementedException();
         }
+
+        public Task<IEnumerable<WalkForwardSleeve>> GetSleevesForSessionAsync(Guid sessionId, DateTime tradingPeriodStartDate)
+        {
+            return _tradeRepository.GetSleevesForSessionAsync(sessionId, tradingPeriodStartDate);
+        }
+
+        public Task<WalkForwardSession?> GetSessionAsync(Guid sessionId)
+        {
+            return _tradeRepository.GetSessionAsync(sessionId);
+        }
+
+        public Task UpdateSessionCapitalAsync(Guid sessionId, double newCapital)
+        {
+            return _tradeRepository.UpdateSessionCapitalAsync(sessionId, newCapital);
+        }
     }
 }

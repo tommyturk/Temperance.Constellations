@@ -384,5 +384,26 @@ namespace Temperance.Data.Data.Repositories.Trade.Implementations
                 return null;
             }
         }
+
+        public async Task<IEnumerable<WalkForwardSleeve>> GetSleevesForSessionAsync(Guid sessionId, DateTime tradingPeriodStartDate)
+        {
+            const string sql = "SELECT * FROM [Constellations].[WalkForwardSleeves] WHERE SessionId = @SessionId AND TradingPeriodStartDate = @TradingPeriodStartDate AND IsActive = 1;";
+            using var connection = CreateConnection();
+            return await connection.QueryAsync<WalkForwardSleeve>(sql, new { SessionId = sessionId, TradingPeriodStartDate = tradingPeriodStartDate });
+        }
+
+        public async Task<WalkForwardSession?> GetSessionAsync(Guid sessionId)
+        {
+            const string sql = "SELECT * FROM [Constellations].[WalkForwardSessions] WHERE SessionId = @SessionId;";
+            using var connection = CreateConnection();
+            return await connection.QuerySingleOrDefaultAsync<WalkForwardSession>(sql, new { SessionId = sessionId });
+        }
+
+        public async Task UpdateSessionCapitalAsync(Guid sessionId, double newCapital)
+        {
+            const string sql = "UPDATE [Constellations].[WalkForwardSessions] SET CurrentCapital = @NewCapital WHERE SessionId = @SessionId;";
+            using var connection = CreateConnection();
+            await connection.ExecuteAsync(sql, new { SessionId = sessionId, NewCapital = newCapital });
+        }
     }
 }

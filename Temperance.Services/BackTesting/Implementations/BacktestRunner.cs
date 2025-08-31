@@ -16,6 +16,7 @@ using Temperance.Services.Services.Interfaces;
 using Temperance.Services.Trading.Strategies;
 using Temperance.Services.Trading.Strategies.Momentum;
 using Temperance.Utilities.Helpers;
+using TradingApp.src.Core.Services.Implementations;
 using TradingApp.src.Core.Services.Interfaces;
 namespace Temperance.Services.BackTesting.Implementations
 {
@@ -66,6 +67,73 @@ namespace Temperance.Services.BackTesting.Implementations
             _marketHealthService = marketHealthService;
             _conductorClient = conductorClient;
             _logger = logger;
+        }
+
+        public async Task RunPortfolioBacktest(Guid sessionId, DateTime oosStartDate, DateTime oosEndDate)
+        {
+            // 1. Get the sleeves (approved strategies) for this specific trading period
+            var sleeves = await _tradesService.GetSleevesForSessionAsync(sessionId, oosStartDate);
+            if (!sleeves.Any())
+            {
+                _logger.LogWarning("RunId: {RunId} - No sleeves were selected or found for the trading period starting {StartDate}. Ending this cycle.", sessionId, oosStartDate);
+                return;
+            }
+            var allSymbols = sleeves.Select(s => s.Symbol).Distinct().ToList();
+
+            // 2. Load all necessary historical data into memory for the OOS period
+            var marketDataCache = new Dictionary<string, List<HistoricalPriceModel>>();
+            foreach (var symbol in allSymbols)
+            {
+                // Assuming a default/primary interval for the portfolio run. This should be configurable.
+                marketDataCache[symbol] = await _historicalPriceService.GetHistoricalPrices(symbol, "60min", oosStartDate, oosEndDate);
+            }
+
+            // 3. Create a unified timeline of all unique timestamps
+            var timeline = marketDataCache.Values
+                .SelectMany(list => list.Select(bar => bar.Timestamp))
+                .Distinct()
+                .OrderBy(t => t)
+                .ToList();
+
+            // 4. Initialize the central PortfolioManager with the latest capital
+            var session = await _tradesService.GetSessionAsync(sessionId); // Corrected method name
+            if (session == null)
+            {
+                _logger.LogError("Could not find WalkForwardSession with SessionId {SessionId}. Aborting portfolio backtest.", sessionId);
+                return;
+            }
+            await _portfolioManager.Initialize(session.CurrentCapital);
+
+            // 5. TIME-DRIVEN LOOP
+            foreach (var timestamp in timeline)
+            {
+                // A. (Optional but good practice) Update mark-to-market values
+                // var currentPrices = GetCurrentPricesForTimestamp(marketDataCache, timestamp);
+                // _portfolioManager.UpdateMarkToMarket(currentPrices);
+
+                // B. Loop through each strategy sleeve to generate signals
+                foreach (var sleeve in sleeves)
+                {
+                    var currentBar = marketDataCache[sleeve.Symbol]?.FirstOrDefault(b => b.Timestamp == timestamp);
+                    if (currentBar == null) continue;
+
+                    // This logic is now extracted from the old RunBacktest and adapted
+                    // You would place your signal generation, position management, and closing logic here,
+                    // but now it interacts with the *single, shared* _portfolioManager instance.
+                    // For brevity, the detailed trading logic is represented by this call:
+                    await ProcessSleeveForTimestamp(sleeve, currentBar, marketDataCache[sleeve.Symbol]);
+                }
+            }
+
+            // 6. Finalize, update capital, and trigger the next cycle
+            double finalEquity = _portfolioManager.GetTotalEquity();
+            await _tradesService.UpdateSessionCapitalAsync(sessionId, finalEquity);
+
+            // This re-queues the master orchestrator for the next time slice.
+            // The master orchestrator would then call Conductor, which calls Ludus, etc.
+            _backgroundJobClient.Enqueue<MasterWalkForwardOrchestrator>(
+                job => job.ExecuteCycle(sessionId, oosEndDate.AddDays(1))
+            );
         }
 
         [AutomaticRetry(Attempts = 1)]
