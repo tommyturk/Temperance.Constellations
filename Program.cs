@@ -75,9 +75,8 @@ builder.Services.AddTransient<ITradeService, TradesService>();
 builder.Services.AddTransient<IQualityFilterService, QualityFilterService>();
 builder.Services.AddTransient<IMarketHealthService, MarketHealthService>();
 builder.Services.AddTransient<IEconomicDataService, EconomicDataService>();
-builder.Services.AddTransient<IHangfireTestService, HangfireTestService>();
-builder.Services.AddTransient<IEarningsService, EarningsService>();
-
+builder.Services.AddTransient<MasterWalkForwardOrchestrator>();
+builder.Services.AddTransient<FilterAndSelectSleevesJob>();
 builder.Services.AddTransient<ISecuritiesOverviewRepository>(provider =>
 {
     var connectionStrings = provider.GetRequiredService<IOptions<ConnectionStrings>>().Value;
