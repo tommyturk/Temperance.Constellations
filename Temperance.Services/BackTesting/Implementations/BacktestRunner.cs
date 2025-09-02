@@ -563,65 +563,6 @@ namespace Temperance.Services.BackTesting.Implementations
         //                        else
         //                            profitLossBeforeCosts = (currentPosition.EntryPrice - effectiveExitPrice) * currentPosition.Quantity;
 
-        //                        double totalTradeTransactionCost = activeTrade.TransactionCost + exitSpreadCost;
-        //                        double netProfitLoss = profitLossBeforeCosts - totalTradeTransactionCost;
-
-        //                        await portfolioManager.ClosePosition(strategyInstance.Name, symbol, interval, exitPositionDirection, currentPosition.Quantity, effectiveExitPrice, lastBar.Timestamp, totalTradeTransactionCost, netProfitLoss);
-
-        //                        var recentTradesForKelly = portfolioManager.GetCompletedTradesHistory()
-        //                                                                    .Where(t => t.Symbol == symbol && t.Interval == interval)
-        //                                                                    .OrderByDescending(t => t.ExitDate)
-        //                                                                    .Take(rollingKellyLookbackTrades)
-        //                                                                    .ToList();
-
-        //                        KellyMetrics kellyMetrics = performanceCalculator.CalculateKellyMetrics(recentTradesForKelly);
-        //                        currentSymbolKellyHalfFraction = kellyMetrics.KellyHalfFraction;
-        //                        symbolKellyHalfFractions[symbol + "_" + interval] = currentSymbolKellyHalfFraction;
-
-        //                        _logger.LogDebug("RunId: {RunId} - Symbol {Symbol} [{Interval}] - Kelly/2 updated to {KellyHalf:P2} (WinRate: {WinRate:P2}, Payoff: {Payoff:N2}) after final trade closure. (Trades: {TradeCount})",
-        //                            runId, symbol, interval, currentSymbolKellyHalfFraction, kellyMetrics.WinRate, kellyMetrics.PayoffRatio, kellyMetrics.TotalTrades);
-
-        //                        var finalClosedTrade = portfolioManager.GetCompletedTradesHistory()
-        //                                                                .LastOrDefault(t => t.Symbol == symbol && t.EntryDate == activeTrade.EntryDate && t.ExitDate == lastBar.Timestamp);
-        //                        if (finalClosedTrade != null)
-        //                        {
-        //                            allTrades.Add(finalClosedTrade);
-        //                            await tradesService.SaveBacktestResults(runId, new BacktestResult { Trades = new List<TradeSummary> { finalClosedTrade } }, symbol, interval);
-        //                            _logger.LogInformation($"RunId: {runId}, Symbol: {symbol}, Interval: {interval}, Final Position Closed at end of backtest. Timestamp: {lastBar.Timestamp}. Net PnL: {netProfitLoss:C}", runId, symbol, interval, lastBar.Timestamp, netProfitLoss);
-        //                        }
-        //                        else
-        //                        {
-        //                            _logger.LogWarning("RunId: {RunId} - Could not find final closed trade for {Symbol} [{Interval}] in PortfolioManager history to save at end of backtest. This may indicate a data discrepancy.", runId, symbol, interval);
-        //                        }
-        //                    }
-        //                }
-        //                var tradesForThisSymbol = portfolioManager.GetCompletedTradesHistory();
-        //                foreach (var trade in tradesForThisSymbol)
-        //                    allTrades.Add(trade);
-        //            }
-        //            catch (Exception ex)
-        //            {
-        //                _logger.LogError(ex, "Unhandled exception in parallel loop for {Symbol} [{Interval}]. RunId: {RunId}", symbol, interval, runId);
-        //            }
-        //        });
-
-        //        result.Trades.AddRange(allTrades);
-        //        result.TotalTrades = result.Trades.Count;
-        //        _logger.LogInformation("RunId: {RunId} - Backtest completed. Total trades generated: {TradeCount}", runId, result.TotalTrades);
-
-        //        await _performanceCalculator.CalculatePerformanceMetrics(result, config.InitialCapital);
-        //        await _tradesService.UpdateBacktestPerformanceMetrics(runId, result, config.InitialCapital);
-        //        await _tradesService.UpdateBacktestRunStatusAsync(runId, "Completed");
-        //    }
-        //    catch (Exception ex)
-        //    {
-        //        _logger.LogError(ex, "RunId: {RunId} - Error during backtest execution", runId);
-        //        await _tradesService.UpdateBacktestRunStatusAsync(runId, "Failed", ex.Message);
-        //        throw;
-        //    }
-        //    await Task.CompletedTask;
-        //}
-
         [AutomaticRetry(Attempts = 1)]
         public async Task RunDualMomentumBacktest(string configJson, Guid runId)
         {
