@@ -24,7 +24,8 @@ namespace Temperance.Services.Services.Implementations
             _logger = logger;
         }
 
-        public async Task DispatchOptimizationJobsAsync(Guid sessionId, string strategyName, string interval, DateTime inSampleStartDate, DateTime inSampleEndDate, List<string> symbols)
+        public async Task DispatchOptimizationJobsAsync(Guid sessionId, string strategyName, string interval, 
+            DateTime inSampleStartDate, DateTime inSampleEndDate, List<string> symbols, string optimizationMode)
         {
             var url = $"{_conductorSettings.BaseUrl}/api/orchestration/dispatch-optimizations";
             var payload = new
@@ -34,7 +35,8 @@ namespace Temperance.Services.Services.Implementations
                 Interval = interval,
                 InSampleStartDate = inSampleStartDate,
                 InSampleEndDate = inSampleEndDate,
-                Symbols = symbols
+                Symbols = symbols,
+                Model = optimizationMode,
             };
 
             var jsonPayload = JsonConvert.SerializeObject(payload);

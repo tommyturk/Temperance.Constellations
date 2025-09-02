@@ -27,6 +27,7 @@ namespace Temperance.Services.Services.Interfaces
             );
         Task<string> GetGenericResponse(string symbolsPrompt);
 
-        Task DispatchOptimizationJobsAsync(Guid sessionId, string strategyName, string interval, DateTime inSampleStartDate, DateTime inSampleEndDate, List<string> symbols);
+        Task DispatchOptimizationJobsAsync(Guid sessionId, string strategyName, string interval, 
+            DateTime inSampleStartDate, DateTime inSampleEndDate, List<string> symbols, string optimizationMode);
     }
 }

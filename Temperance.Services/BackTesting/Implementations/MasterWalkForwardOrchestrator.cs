@@ -48,6 +48,8 @@ namespace Temperance.Services.BackTesting.Implementations
             var inSampleEndDate = currentTradingPeriodStart.AddDays(-1);
             var inSampleStartDate = inSampleEndDate.AddYears(-InSampleYears).AddDays(1);
 
+            string optimizationMode = (currentTradingPeriodStart == session.StartDate) ? "train" : "fine-tune";
+
             _logger.LogInformation("Session {SessionId}: In-Sample Period set from {InSampleStart} to {InSampleEnd}", sessionId, inSampleStartDate, inSampleEndDate);
 
             // 2. Get the Point-in-Time universe of symbols to optimize
@@ -72,7 +74,8 @@ namespace Temperance.Services.BackTesting.Implementations
                 "60min", // Assuming a fixed interval for this walk-forward session
                 inSampleStartDate,
                 inSampleEndDate,
-                pitUniverseSymbols
+                pitUniverseSymbols,
+                optimizationMode
             );
             _logger.LogInformation("Session {SessionId}: Dispatched all optimization jobs via Conductor.", sessionId);
 
