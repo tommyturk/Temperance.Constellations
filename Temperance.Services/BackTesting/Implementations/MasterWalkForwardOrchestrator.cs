@@ -45,7 +45,7 @@ namespace Temperance.Services.BackTesting.Implementations
             }
 
             // 1. Define the next in-sample/out-of-sample windows
-            var inSampleEndDate = currentTradingPeriodStart.AddDays(-1);
+            var inSampleEndDate = currentTradingPeriodStart.AddDays(-OutOfSampleYears);
             var inSampleStartDate = inSampleEndDate.AddYears(-InSampleYears).AddDays(1);
 
             string optimizationMode = (currentTradingPeriodStart == session.StartDate) ? "train" : "fine-tune";

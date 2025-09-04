@@ -1,14 +1,10 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-
-namespace Temperance.Data.Models.Backtest
+﻿namespace Temperance.Data.Models.Backtest
 {
     public class BacktestRun
     {
         public Guid RunId { get; set; }
+        public Guid SessionId { get; set; }
+        public int OptimizationResultId { get; set; }
         public string StrategyName { get; set; } = string.Empty;
         public string ParametersJson { get; set; } = string.Empty;
         public string SymbolsJson { get; set; } = string.Empty;
@@ -25,5 +21,6 @@ namespace Temperance.Data.Models.Backtest
         public double? WinRate { get; set; }
         public int? TotalTrades { get; set; } // Nullable if calculation deferred
         public string? ErrorMessage { get; set; }
+        public double? SharpeRatio { get; set; }
     }
 }

@@ -1,5 +1,7 @@
 ﻿using Hangfire;
 using Microsoft.Extensions.Logging;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using Temperance.Data.Models.Backtest;
 using Temperance.Services.BackTesting.Interfaces;
 using TradingApp.src.Core.Services.Interfaces;
@@ -56,10 +58,10 @@ namespace Temperance.Services.BackTesting.Implementations
             {
                 SessionId = sessionId,
                 TradingPeriodStartDate = tradingPeriodStartDate,
-                Symbol = run.Symbols.First(), // Assumes one symbol per run
-                Interval = run.Intervals.First(), // Assumes one interval
+                Symbol =  JsonSerializer.Deserialize<List<string>>(run.SymbolsJson).First(), // Assumes one symbol per run
+                Interval = JsonSerializer.Deserialize<List<string>>(run.IntervalsJson).First(), // Assumes one interval
                 StrategyName = run.StrategyName,
-                OptimizationResultId = run.OptimizationResultId ?? 0,
+                OptimizationResultId = run.OptimizationResultId,
                 InSampleSharpeRatio = run.SharpeRatio,
                 InSampleMaxDrawdown = run.MaxDrawdown,
                 OptimizedParametersJson = run.ParametersJson
