@@ -30,12 +30,10 @@ namespace Temperance.Services.BackTesting.Implementations
         {
             _logger.LogInformation("Starting sleeve filtering for SessionId {SessionId} and trading period {TradingPeriod}", sessionId, tradingPeriodStartDate.ToShortDateString());
 
-            // 1. Get all the in-sample verification backtest results for this session
-            // This requires a new method in your repository to fetch runs based on session and date range
             var verificationRuns = await _tradeService.GetBacktestRunsForSessionAsync(sessionId, inSampleStartDate, inSampleEndDate);
 
-            // 2. Apply filtering rules
             var qualifiedRuns = verificationRuns
+                .AsParallel()
                 .Where(r => r.SharpeRatio >= MinInSampleSharpeRatio &&
                             r.MaxDrawdown <= MaxInSampleDrawdown &&
                             r.TotalTrades >= MinInSampleTrades)
@@ -46,20 +44,18 @@ namespace Temperance.Services.BackTesting.Implementations
             if (!qualifiedRuns.Any())
             {
                 _logger.LogWarning("Session {SessionId}: No strategies passed the filter. Skipping this trading period.", sessionId);
-                // Even if no trades happen, we must advance the cycle
                 _backgroundJobClient.Enqueue<MasterWalkForwardOrchestrator>(
                    job => job.ExecuteCycle(sessionId, tradingPeriodStartDate.AddYears(1))
                );
                 return;
             }
 
-            // 3. Create sleeve objects from the qualified runs
             var sleeves = qualifiedRuns.Select(run => new WalkForwardSleeve
             {
                 SessionId = sessionId,
                 TradingPeriodStartDate = tradingPeriodStartDate,
-                Symbol =  JsonSerializer.Deserialize<List<string>>(run.SymbolsJson).First(), // Assumes one symbol per run
-                Interval = JsonSerializer.Deserialize<List<string>>(run.IntervalsJson).First(), // Assumes one interval
+                Symbol =  JsonSerializer.Deserialize<List<string>>(run.SymbolsJson).First(),
+                Interval = JsonSerializer.Deserialize<List<string>>(run.IntervalsJson).First(),
                 StrategyName = run.StrategyName,
                 OptimizationResultId = run.OptimizationResultId,
                 InSampleSharpeRatio = run.SharpeRatio,
