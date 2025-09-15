@@ -4,14 +4,14 @@ namespace Temperance.Services.Services.Interfaces
 {
     public interface IPortfolioManager
     {
-        Task Initialize(double initialCapital);
+        Task Initialize(Guid SessionId, double initialCapital);
         void HydrateState(double cash, IEnumerable<Position> openPositions);
         double GetTotalEquity();
         double GetTotalEquity(Dictionary<string, double> latestPrices);
         double GetAvailableCapital();
         double GetAllocatedCapital();
         IReadOnlyList<Position> GetOpenPositions();
-
+        void UpdateHoldings(Dictionary<string, double> currentPrices);
         IReadOnlyList<TradeSummary> GetCompletedTradesHistory();
 
         Task<bool> CanOpenPosition(double allocationAmount);

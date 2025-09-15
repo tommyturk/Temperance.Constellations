@@ -1,4 +1,6 @@
-﻿namespace Temperance.Services.Services.Interfaces
+﻿using Temperance.Data.Models.Backtest;
+
+namespace Temperance.Services.Services.Interfaces
 {
     public interface IQualityFilterService
     {
@@ -6,5 +8,7 @@
             string symbol,
             SecuritiesOverview overviewData,
             Dictionary<string, double> sectorAveragePERatios);
+
+        List<string> SelectBestPerformers(IEnumerable<WalkForwardSleeve> allSleeves, int topN);
     }
 }

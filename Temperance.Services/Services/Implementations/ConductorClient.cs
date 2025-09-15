@@ -2,6 +2,7 @@
 using Microsoft.Extensions.Logging;
 using System;
 using System.Collections.Generic;
+using System.ComponentModel.DataAnnotations;
 using System.Linq;
 using System.Net.Http.Json;
 using System.Text;
@@ -22,6 +23,12 @@ namespace Temperance.Services.Services.Implementations
             _logger = logger;
             _httpClient.BaseAddress = new Uri(configuration["ConductorSettings:BaseUrl"]
             ?? "http://conductor-api:8002/");
+        }
+
+        public async Task DispatchOptimizationBatchAsync(OptimizationBatchRequest request)
+        {
+            var response = await _httpClient.PostAsJsonAsync("/api/orchestration/dispatch-batch", request);
+            response.EnsureSuccessStatusCode();
         }
 
         public async Task NotifyBacktestCompleteAsync(BacktestCompletionPayload payload)

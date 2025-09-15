@@ -14,5 +14,9 @@
         public int BarsHeld { get; set; } = 0;
         public double EntryPrice { get; set; }
         public DateTime EntryDate { get; set; }
+        public double AveragePrice { get; set; }
+        public double CurrentMarketValue { get; set; }
+        public double CostBasis => Quantity * AveragePrice;
+        public double UnrealizedPnL => CurrentMarketValue - CostBasis;
     }
 }

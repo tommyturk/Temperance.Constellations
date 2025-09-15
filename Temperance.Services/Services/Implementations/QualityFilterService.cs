@@ -1,4 +1,5 @@
 ﻿using Microsoft.Extensions.Logging;
+using Temperance.Data.Models.Backtest;
 using Temperance.Services.Services.Interfaces;
 
 namespace Temperance.Services.Services.Implementations
@@ -48,6 +49,15 @@ namespace Temperance.Services.Services.Implementations
                 return Task.FromResult((false, $"Fails Size: Market Cap ${overviewData.MarketCapitalization:N0} <= ${MinMarketCap:N0}."));
 
             return Task.FromResult((true, "Passes all quality filters."));
+        }
+
+        public List<string> SelectBestPerformers(IEnumerable<WalkForwardSleeve> allSleeves, int topN)
+        {
+            return allSleeves
+                .OrderByDescending(s => s.InSampleSharpeRatio)
+                .Take(topN)
+                .Select(s => s.Symbol)
+                .ToList();
         }
     }
 }

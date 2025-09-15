@@ -1,8 +1,13 @@
 ﻿using ILGPU;
 using ILGPU.Algorithms;
+using ILGPU.Algorithms.HistogramOperations;
+using ILGPU.Algorithms.MatrixOperations;
 using ILGPU.Runtime;
 using ILGPU.Runtime.Cuda;
 using Microsoft.Extensions.Logging;
+using System.Runtime.InteropServices;
+using System.Text;
+using Temperance.Data.Models.HistoricalPriceData;
 using Temperance.Services.Services.Interfaces;
 namespace Temperance.Services.Services.Implementations
 {
@@ -17,6 +22,26 @@ namespace Temperance.Services.Services.Implementations
             //_accelerator = _context.GetPreferredDevice(preferCPU: false).CreateAccelerator(_context);
             _accelerator = accelerator;
             _logger = logger;
+        }
+
+        public async Task<Dictionary<string, double[]>> CalculateIndicatorsAsync(IReadOnlyList<HistoricalPriceModel> historicalWindow, 
+            int strategyMinimumLookback, int atrPeriod, double stdDevMultiplier, double[] rsi)
+        {
+            var highPrices = historicalWindow.Select(p => p.HighPrice).ToArray();
+            var lowPrices = historicalWindow.Select(p => p.LowPrice).ToArray();
+            var closePrices = historicalWindow.Select(p => p.ClosePrice).ToArray();
+
+            var movingAverage = CalculateSma(closePrices, strategyMinimumLookback);
+            var standardDeviation = CalculateStdDev(closePrices, strategyMinimumLookback);
+            var atr = CalculateAtr(highPrices, lowPrices, closePrices, atrPeriod);
+            var upperBand = movingAverage.Zip(standardDeviation, (m, s) => m + (stdDevMultiplier * s)).ToArray();  
+            var lowerBand = movingAverage.Zip(standardDeviation, (m, s) => m - (stdDevMultiplier * s)).ToArray();
+
+            return new Dictionary<string, double[]>
+            {
+                { "SMA", movingAverage }, { "ATR", atr }, { "UpperBand", upperBand }, { "LowerBand", lowerBand },
+                { "RSI", rsi }
+            };
         }
 
         public double[] CalculateAtr(double[] high, double[] low, double[] close, int period)

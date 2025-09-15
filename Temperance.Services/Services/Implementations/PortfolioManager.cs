@@ -14,6 +14,7 @@ namespace Temperance.Services.Services.Implementations
         private readonly ConcurrentDictionary<string, Position> _openPositions;
         private readonly ConcurrentBag<TradeSummary> _completedTradesHistory;
         private double _allocatedCapital;
+        private Guid _sessionId;
 
         public PortfolioManager(ILogger<PortfolioManager> logger)
         {
@@ -22,11 +23,12 @@ namespace Temperance.Services.Services.Implementations
             _completedTradesHistory = new ConcurrentBag<TradeSummary>();
         }
 
-        public Task Initialize(double initialCapital)
+        public Task Initialize(Guid sessionId, double initialCapital)
         {
             lock (_cashLock)
             {
                 _currentCash = initialCapital;
+                _sessionId = sessionId;
             }
             _openPositions.Clear();
             _completedTradesHistory.Clear();
@@ -74,6 +76,13 @@ namespace Temperance.Services.Services.Implementations
             return Task.FromResult(GetAvailableCapital() >= allocationAmount);
         }
 
+        public void UpdateHoldings(Dictionary<string, double> currentPrices)
+        {
+            foreach(var position in _openPositions.Values)
+                if (currentPrices.TryGetValue(position.Symbol, out var currentPrice) && currentPrice > 0)
+                    position.CurrentMarketValue = position.Quantity * currentPrice;
+        }
+
         public Task OpenPosition(string symbol, string interval, PositionDirection direction, int quantity, double entryPrice, DateTime entryDate, double totalEntryCost)
         {
             double totalCashOutlay = (quantity * entryPrice) + totalEntryCost;
@@ -93,8 +102,8 @@ namespace Temperance.Services.Services.Implementations
                 Symbol = symbol,
                 Direction = direction,
                 Quantity = quantity,
-                AverageEntryPrice = entryPrice, // Use AverageEntryPrice
-                InitialEntryDate = entryDate,   // Use InitialEntryDate
+                AverageEntryPrice = entryPrice, 
+                InitialEntryDate = entryDate, 
                 TotalEntryCost = totalEntryCost
             };
 

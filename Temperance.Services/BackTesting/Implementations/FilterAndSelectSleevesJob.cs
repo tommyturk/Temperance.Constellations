@@ -25,53 +25,55 @@ namespace Temperance.Services.BackTesting.Implementations
             _logger = logger;
         }
 
-        [AutomaticRetry(Attempts = 2)]
-        public async Task Execute(Guid sessionId, DateTime tradingPeriodStartDate, DateTime inSampleStartDate, DateTime inSampleEndDate)
+        public async Task SelectInitialSleeve(Guid sessionId, DateTime inSampleEndDate)
         {
-            _logger.LogInformation("Starting sleeve filtering for SessionId {SessionId} and trading period {TradingPeriod}", sessionId, tradingPeriodStartDate.ToShortDateString());
+            _logger.LogInformation("PHASE 2: Selecting initial sleeve for SessionId: {SessionId}", sessionId);
+            var inSampleStartDate = inSampleEndDate.AddYears(-2).AddDays(1); // Assuming 2-year training
+            var tradingPeriodStartDate = inSampleEndDate.AddDays(1);
 
+            // 1. GET RUNS (Your existing logic)
             var verificationRuns = await _tradeService.GetBacktestRunsForSessionAsync(sessionId, inSampleStartDate, inSampleEndDate);
 
+            // 2. FILTER RUNS (Your existing logic)
             var qualifiedRuns = verificationRuns
-                .AsParallel()
                 .Where(r => r.SharpeRatio >= MinInSampleSharpeRatio &&
                             r.MaxDrawdown <= MaxInSampleDrawdown &&
                             r.TotalTrades >= MinInSampleTrades)
                 .ToList();
 
-            _logger.LogInformation("Session {SessionId}: Found {QualifiedCount} qualified strategies out of {TotalCount} optimized.", sessionId, qualifiedRuns.Count, verificationRuns.Count());
-
+            _logger.LogInformation("Found {QualifiedCount} qualified strategies for SessionId {SessionId}.", qualifiedRuns.Count, sessionId);
             if (!qualifiedRuns.Any())
             {
-                _logger.LogWarning("Session {SessionId}: No strategies passed the filter. Skipping this trading period.", sessionId);
-                _backgroundJobClient.Enqueue<MasterWalkForwardOrchestrator>(
-                   job => job.ExecuteCycle(sessionId, tradingPeriodStartDate.AddYears(1))
-               );
+                _logger.LogWarning("No strategies passed the filter for SessionId {SessionId}. Skipping this cycle.", sessionId);
+                // Here you would decide how to advance the state machine - perhaps by starting the next major training cycle.
                 return;
             }
 
+            // 3. CREATE SLEEVES (Your existing logic)
             var sleeves = qualifiedRuns.Select(run => new WalkForwardSleeve
             {
                 SessionId = sessionId,
                 TradingPeriodStartDate = tradingPeriodStartDate,
-                Symbol =  JsonSerializer.Deserialize<List<string>>(run.SymbolsJson).First(),
+                Symbol = JsonSerializer.Deserialize<List<string>>(run.SymbolsJson).First(),
                 Interval = JsonSerializer.Deserialize<List<string>>(run.IntervalsJson).First(),
                 StrategyName = run.StrategyName,
                 OptimizationResultId = run.OptimizationResultId,
                 InSampleSharpeRatio = run.SharpeRatio,
                 InSampleMaxDrawdown = run.MaxDrawdown,
-                OptimizedParametersJson = run.ParametersJson
+                OptimizedParametersJson = run.ParametersJson,
+                IsActive = true // These are the selected ones, so they are active by default.
             }).ToList();
 
-            // 4. Save the selected sleeves to the database
+            // 4. SAVE SLEEVES (Your existing logic)
             await _tradeService.SaveSleevesAsync(sleeves);
 
-            // 5. Enqueue the final portfolio backtest job for the out-of-sample period
-            var outOfSampleEndDate = tradingPeriodStartDate.AddYears(1).AddDays(-1);
-            _backgroundJobClient.Enqueue<IBacktestRunner>(
-                runner => runner.RunPortfolioBacktest(sessionId, tradingPeriodStartDate, outOfSampleEndDate)
+            // 5. ENQUEUE THE NEXT ORCHESTRATOR (The key change)
+            var firstOosDate = tradingPeriodStartDate;
+            _backgroundJobClient.Enqueue<IPortfolioBacktestRunner>(
+                runner => runner.ExecuteBacktest(sessionId, firstOosDate)
             );
-            _logger.LogInformation("Session {SessionId}: Enqueued portfolio backtest with {SleeveCount} sleeves.", sessionId, sleeves.Count);
+
+            _logger.LogInformation("PHASE 2 Complete. Enqueued portfolio backtest orchestrator for SessionId {SessionId} starting {Date}.", sessionId, firstOosDate);
         }
     }
 }
