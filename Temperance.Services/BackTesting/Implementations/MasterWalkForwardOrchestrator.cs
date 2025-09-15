@@ -69,7 +69,8 @@ namespace Temperance.Services.BackTesting.Implementations
                 Mode = Data.Models.Backtest.OptimizationMode.Train,
                 InSampleStartDate = inSampleStartDate,
                 InSampleEndDate = inSampleEndDate,
-                Symbols = symbols
+                Symbols = symbols,
+                Interval = "60min",
             };
 
             await _conductorClient.DispatchOptimizationBatchAsync(batchRequest);

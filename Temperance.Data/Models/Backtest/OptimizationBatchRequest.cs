@@ -8,5 +8,6 @@
         public DateTime InSampleStartDate { get; set; }
         public DateTime InSampleEndDate { get; set; }
         public List<string> Symbols { get; set; }
+        public string Interval { get; set; } = "60min";
     }
 }
