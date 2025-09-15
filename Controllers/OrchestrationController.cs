@@ -1,7 +1,5 @@
 ﻿using Hangfire;
 using Microsoft.AspNetCore.Mvc;
-using Temperance.Data.Models.Backtest;
-using Temperance.Services.BackTesting.Implementations;
 using Temperance.Services.BackTesting.Interfaces;
 
 namespace Temperance.Constellations.Controllers
@@ -21,12 +19,13 @@ namespace Temperance.Constellations.Controllers
             _backgroundJobClient = backgroundJobClient;
         }
 
+        /// <summary>
+        /// ENTRY POINT: Kicks off the entire 20-year walk-forward process.
+        /// </summary>
         [HttpPost("start")]
         public IActionResult StartWalkForwardOrchestration(
-            [FromQuery] Guid sessionId,
-            [FromQuery] string strategyName,
-            [FromQuery] DateTime startDate,
-            [FromQuery] DateTime endDate)
+            [FromQuery] Guid sessionId, [FromQuery] string strategyName,
+            [FromQuery] DateTime startDate, [FromQuery] DateTime endDate)
         {
             _logger.LogInformation("Received 'Start' signal from Conductor for SessionId: {SessionId}", sessionId);
             _backgroundJobClient.Enqueue<IMasterWalkForwardOrchestrator>(orchestrator =>
@@ -34,6 +33,9 @@ namespace Temperance.Constellations.Controllers
             return Ok("Initial training phase enqueued.");
         }
 
+        /// <summary>
+        /// STATE TRANSITION: Called by Conductor when the initial training batch is complete.
+        /// </summary>
         [HttpPost("select-sleeve")]
         public IActionResult TriggerSleeveSelection([FromQuery] Guid sessionId, [FromQuery] DateTime inSampleEndDate)
         {
@@ -43,39 +45,21 @@ namespace Temperance.Constellations.Controllers
             return Ok("Sleeve selection phase enqueued.");
         }
 
+        /// <summary>
+        /// STATE TRANSITION: Called by Conductor when a fine-tuning batch is complete.
+        /// </summary>
         [HttpPost("run-portfolio-backtest")]
         public IActionResult TriggerPortfolioBacktest([FromQuery] Guid sessionId, [FromQuery] DateTime oosDate)
         {
             _logger.LogInformation("Received 'Run Portfolio Backtest' signal from Conductor for SessionId: {SessionId}, OOS Date: {OOSDate}", sessionId, oosDate);
-            _backgroundJobClient.Enqueue<IPortfolioBacktestRunner>(runner =>
-                runner.ExecuteMonthlyBacktest(sessionId, oosDate));
+
+            // CORRECTED: Call the method on the orchestrator interface we designed.
+            _backgroundJobClient.Enqueue<IPortfolioBacktestOrchestrator>(orchestrator =>
+                orchestrator.ExecuteNextPeriod(sessionId, oosDate));
+
             return Ok("Portfolio backtest phase enqueued.");
         }
 
-        [HttpPost("start-walk-forward")]
-        [ProducesResponseType(StatusCodes.Status202Accepted)]
-        [ProducesResponseType(StatusCodes.Status400BadRequest)]
-        public IActionResult StartWalkForward([FromBody] StartWalkForwardRequest request)
-        {
-            if (request.SessionId == Guid.Empty)
-            {
-                return BadRequest("A valid SessionId must be provided.");
-            }
-
-            _logger.LogInformation(
-                "Received command from Conductor to start walk-forward orchestration for SessionId {SessionId}",
-                request.SessionId);
-
-            var jobId = _backgroundJobClient.Enqueue<MasterWalkForwardOrchestrator>(
-                orchestrator => orchestrator.ExecuteCycle(request.SessionId, request.StartDate)
-            );
-
-            _logger.LogInformation(
-                "Enqueued MasterWalkForwardOrchestrator for SessionId {SessionId}. Hangfire JobId: {JobId}",
-                request.SessionId,
-                jobId);
-
-            return Accepted(new { Message = "Walk-forward orchestration enqueued.", JobId = jobId });
-        }
+        // The old [HttpPost("start-walk-forward")] endpoint has been removed as it is now redundant.
     }
 }

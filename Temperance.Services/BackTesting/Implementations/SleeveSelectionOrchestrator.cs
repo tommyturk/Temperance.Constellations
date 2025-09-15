@@ -15,7 +15,7 @@ namespace Temperance.Services.BackTesting.Implementations
     {
         private readonly IWalkForwardRepository _walkForwardRepository;
         private readonly IQualityFilterService _qualityFilter;
-        private readonly IBackgroundJobClient _hangfireClient;
+        private readonly IBackgroundJobClient _backgroundJobClient;
         private readonly ILogger<SleeveSelectionOrchestrator> _logger;
 
         public SleeveSelectionOrchestrator(
@@ -26,7 +26,7 @@ namespace Temperance.Services.BackTesting.Implementations
         {
             _walkForwardRepository = walkForwardRepository;
             _qualityFilter = qualityFilter;
-            _hangfireClient = hangfireClient;
+            _backgroundJobClient = hangfireClient;
             _logger = logger;
         }
 
@@ -46,29 +46,22 @@ namespace Temperance.Services.BackTesting.Implementations
 
             // 4. Enqueue the very first monthly backtest job, starting Feb 1, 2002
             var firstOosDate = new DateTime(2002, 2, 1);
-            _hangfireClient.Enqueue<IPortfolioBacktestRunner>(runner =>
-                runner.SelectInitialSleeve(sessionId, firstOosDate));
-
+            _backgroundJobClient.Enqueue<IPortfolioBacktestRunner>(
+                runner => runner.ExecuteBacktest(sessionId, firstOosDate)
+            );
             _logger.LogInformation("PHASE 2 Complete. Enqueued first portfolio backtest for {Date:yyyy-MM-dd}.", firstOosDate);
         }
 
         public async Task ReselectAnnualSleeve(Guid sessionId, DateTime yearEnd)
         {
-            _logger.LogInformation("Annual Re-selection for SessionId: {SessionId} at end of year {Year}", sessionId, yearEnd.Year);
+            // This is where the annual re-selection logic will go.
+            _logger.LogInformation("ORCHESTRATOR (ReselectAnnualSleeve): Kicking off for year {Year}.", yearEnd.Year);
 
-            // 1. Get OOS performance for the last 12 months
-            var performance = await _walkForwardRepository.GetAnnualPerformanceAsync(sessionId, yearEnd);
-
-            // 2. Apply promotion/demotion logic
-            var newSleeveSymbols = _qualityFilter.ReselectBasedOnPerformance(performance);
-
-            // 3. Update active sleeves for the upcoming year
-            await _walkForwardRepository.UpdateActiveSleeveForNewYearAsync(sessionId, yearEnd.AddDays(1), newSleeveSymbols);
-
-            // 4. Enqueue the next backtest for January of the new year
+            // For now, we'll just continue the loop by enqueuing the next backtest
             var nextOosDate = yearEnd.AddDays(1);
-            _hangfireClient.Enqueue<IPortfolioBacktestRunner>(runner =>
-                runner.ExecuteMonthlyBacktest(sessionId, nextOosDate));
+            _backgroundJobClient.Enqueue<IPortfolioBacktestOrchestrator>(
+               orchestrator => orchestrator.ExecuteNextPeriod(sessionId, nextOosDate)
+           );
         }
     }
 }
