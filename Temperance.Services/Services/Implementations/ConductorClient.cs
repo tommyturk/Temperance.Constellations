@@ -27,7 +27,7 @@ namespace Temperance.Services.Services.Implementations
 
         public async Task DispatchOptimizationBatchAsync(OptimizationBatchRequest request)
         {
-            var response = await _httpClient.PostAsJsonAsync("/api/orchestration/dispatch-batch", request);
+            var response = await _httpClient.PostAsJsonAsync("/api/orchestration/dispatch-optimizations", request);
             response.EnsureSuccessStatusCode();
         }
 

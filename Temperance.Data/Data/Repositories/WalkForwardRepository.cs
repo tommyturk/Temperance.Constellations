@@ -4,6 +4,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Data.SqlClient;
 using Temperance.Conductor.Repository.Interfaces;
 using Temperance.Data.Models.Backtest;
+using Microsoft.AspNetCore.Connections;
 
 namespace Temperance.Data.Data.Repositories.WalkForward.Implementations
 {
@@ -12,9 +13,9 @@ namespace Temperance.Data.Data.Repositories.WalkForward.Implementations
         private readonly string _connectionString;
         private readonly ILogger<WalkForwardRepository> _logger;
 
-        public WalkForwardRepository(IConfiguration configuration, ILogger<WalkForwardRepository> logger)
+        public WalkForwardRepository(string connectionString, ILogger<WalkForwardRepository> logger)
         {
-            _connectionString = configuration.GetConnectionString("DefaultConnection");
+            _connectionString = connectionString;
             _logger = logger;
         }
 
