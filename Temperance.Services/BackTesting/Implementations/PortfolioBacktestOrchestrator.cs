@@ -58,7 +58,8 @@ namespace Temperance.Services.BackTesting.Orchestration.Implementations
                     EndDate = oosEndDate,
                     InitialCapital = session.CurrentCapital,
                     Symbols = activeSleeve.Select(s => s.Symbol).ToList(),
-                    StrategyName = session.StrategyName
+                    StrategyName = session.StrategyName,
+                    MaxParallelism = 16,
                 };
 
                 // --- Step 3: Delegate to the Engine ---

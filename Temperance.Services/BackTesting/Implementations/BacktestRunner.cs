@@ -281,7 +281,7 @@ namespace Temperance.Services.BackTesting.Implementations
                     SessionId = config.SessionId,
                     FinalEquity = finalEquity,
                     StrategyName = config.StrategyName,
-                    Symbol = config.Symbols.FirstOrDefault(),
+                    Symbols = config.Symbols,
                     Interval = config.Intervals.FirstOrDefault(),
                     LastBacktestEndDate = config.EndDate,
                     TotalReturn = result.TotalReturn,

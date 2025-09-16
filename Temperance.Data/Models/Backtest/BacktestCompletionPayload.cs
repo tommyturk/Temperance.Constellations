@@ -6,7 +6,7 @@
         public Guid? SessionId { get; set; }
         public double FinalEquity { get; set; }
         public string StrategyName { get; set; }
-        public string Symbol { get; set; }
+        public List<string> Symbols { get; set; }
         public string Interval { get; set; }
         public DateTime LastBacktestEndDate { get; set; }
         public double? TotalReturn { get; set; }
