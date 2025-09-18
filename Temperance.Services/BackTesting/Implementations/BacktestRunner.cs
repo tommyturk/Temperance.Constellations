@@ -113,9 +113,20 @@ namespace Temperance.Services.BackTesting.Implementations
                 {
                     var symbol = testCase.Symbol.Trim();
                     var interval = testCase.Interval.Trim();
+                    if (config.PortfolioParameters == null || !config.PortfolioParameters.TryGetValue(symbol, out var symbolSpecificParameters))
+                    {
+                        _logger.LogWarning("Parameters not found for symbol {Symbol} in SessionId {SessionId}. Skipping.", symbol, config.SessionId);
+                        return;
+                    }
 
                     await using var scope = _serviceProvider.CreateAsyncScope();
-                    var strategyInstance = _strategyFactory.CreateStrategy<ISingleAssetStrategy>(config.StrategyName, config.InitialCapital, config.StrategyParameters);
+
+                    var strategyInstance = _strategyFactory.CreateStrategy<ISingleAssetStrategy>(
+                        config.StrategyName,
+                        config.InitialCapital,
+                        symbolSpecificParameters
+                    ); 
+
                     if (strategyInstance == null) return;
 
                     var historicalPriceService = scope.ServiceProvider.GetRequiredService<IHistoricalPriceService>();
@@ -301,83 +312,6 @@ namespace Temperance.Services.BackTesting.Implementations
             }
         }
 
-        private async Task ProcessSleeveForTimestamp(WalkForwardSleeve sleeve, HistoricalPriceModel currentBar, List<HistoricalPriceModel> historicalWindow, IPortfolioManager portfolioManager, IServiceScope scope)
-        {
-            var liquidityService = scope.ServiceProvider.GetRequiredService<ILiquidityService>();
-            var transactionCostService = scope.ServiceProvider.GetRequiredService<ITransactionCostService>();
-
-            var parameters = JsonSerializer.Deserialize<Dictionary<string, object>>(sleeve.OptimizedParametersJson) ?? new();
-            var strategy = GetStrategyInstance(sleeve, portfolioManager.GetTotalEquity());
-            if (strategy == null) return;
-
-            var indicatorValues = GetIndicatorValuesForTimestamp(sleeve.Symbol, currentBar.Timestamp);
-            var position = portfolioManager.GetOpenPositions().FirstOrDefault(p => p.Symbol == sleeve.Symbol);
-
-            if (position != null) position.BarsHeld++;
-
-            if (position != null)
-            {
-                var exitReason = strategy.GetExitReason(position, in currentBar, historicalWindow, indicatorValues);
-                if (exitReason != "Hold")
-                {
-                    // Find the original trade summary to update it upon closing
-                    var activeTrade = portfolioManager.GetCompletedTradesHistory()
-                        .FirstOrDefault(t => t.Symbol == position.Symbol && !t.ExitDate.HasValue);
-
-                    if (activeTrade != null)
-                    {
-                        await ClosePositionAsync(portfolioManager, transactionCostService, _performanceCalculator, _tradesService,
-                            activeTrade, position, currentBar, sleeve.Symbol, sleeve.Interval, sleeve.SessionId,
-                            50, new ConcurrentDictionary<string, double>(), exitReason, indicatorValues);
-                    }
-                    return;
-                }
-            }
-
-            // --- ENTRY LOGIC ---
-            if (position == null)
-            {
-                var signal = strategy.GenerateSignal(in currentBar, null, historicalWindow, indicatorValues, MarketHealthScore.Neutral);
-                if (signal != SignalDecision.Hold)
-                {
-                    if (!liquidityService.IsSymbolLiquidAtTime(sleeve.Symbol, sleeve.Interval, strategy.GetMinimumAverageDailyVolume(), currentBar.Timestamp, 20, historicalWindow)) return;
-
-                    double allocationAmount = strategy.GetAllocationAmount(in currentBar, historicalWindow, indicatorValues, (portfolioManager.GetTotalEquity() * 0.02), portfolioManager.GetTotalEquity(), 0.01, 1, MarketHealthScore.Neutral);
-                    if (allocationAmount <= 0) return;
-
-                    int quantity = (int)Math.Floor(allocationAmount / currentBar.ClosePrice);
-                    if (quantity <= 0) return;
-
-                    var direction = (signal == SignalDecision.Buy) ? PositionDirection.Long : PositionDirection.Short;
-                    double totalEntryCost = await transactionCostService.GetSpreadCost(currentBar.ClosePrice, quantity, sleeve.Symbol, sleeve.Interval, currentBar.Timestamp);
-                    double totalCashOutlay = (quantity * currentBar.ClosePrice) + totalEntryCost;
-
-                    if (await portfolioManager.CanOpenPosition(totalCashOutlay))
-                    {
-                        await portfolioManager.OpenPosition(sleeve.Symbol, sleeve.Interval, direction, quantity, currentBar.ClosePrice, currentBar.Timestamp, totalEntryCost);
-
-                        var newTrade = new TradeSummary
-                        {
-                            Id = Guid.NewGuid(),
-                            RunId = sleeve.SessionId, // Use SessionId as the RunId for context
-                            StrategyName = strategy.Name,
-                            EntryDate = currentBar.Timestamp,
-                            EntryPrice = currentBar.ClosePrice,
-                            Direction = direction.ToString(),
-                            Quantity = quantity,
-                            Symbol = sleeve.Symbol,
-                            Interval = sleeve.Interval,
-                            TotalTransactionCost = totalEntryCost,
-                            EntryReason = strategy.GetEntryReason(in currentBar, historicalWindow, indicatorValues)
-                        };
-
-                        await _tradesService.SaveOrUpdateBacktestTrade(newTrade);
-                    }
-                }
-            }
-        }
-
-        // This is the helper method from your original RunBacktest, now part of this class
         private async Task<TradeSummary?> ClosePositionAsync(
             IPortfolioManager portfolioManager, ITransactionCostService transactionCostService,
             IPerformanceCalculator performanceCalculator, ITradeService tradesService,
@@ -434,7 +368,6 @@ namespace Temperance.Services.BackTesting.Implementations
             return closedTrade;
         }
 
-        // --- Caching and Helper Methods ---
         private ISingleAssetStrategy? GetStrategyInstance(WalkForwardSleeve sleeve, double currentEquity)
         {
             if (_strategyCache.TryGetValue(sleeve.Symbol, out var cachedStrategy))
@@ -477,50 +410,9 @@ namespace Temperance.Services.BackTesting.Implementations
             return values;
         }
 
-        private async Task<Dictionary<string, (Dictionary<DateTime, HistoricalPriceModel> Data, Dictionary<string, double[]> Indicators)>> PreloadAndCalculateIndicators(List<string> symbols, string interval, DateTime startDate, DateTime endDate, List<WalkForwardSleeve> sleeves)
-        {
-            var cache = new Dictionary<string, (Dictionary<DateTime, HistoricalPriceModel> Data, Dictionary<string, double[]> Indicators)>();
 
-            foreach (var symbol in symbols)
-            {
-                var sleeve = sleeves.First(s => s.Symbol == symbol);
-                var parameters = JsonSerializer.Deserialize<Dictionary<string, object>>(sleeve.OptimizedParametersJson);
-                var strategy = _strategyFactory.CreateStrategy<ISingleAssetStrategy>(sleeve.StrategyName, 100000, parameters); // Temp init
-
-                var data = await _historicalPriceService.GetHistoricalPrices(symbol, interval, startDate.AddDays(-strategy.GetRequiredLookbackPeriod()), endDate);
-                if (!data.Any()) continue;
-
-                var dataDict = data.ToDictionary(d => d.Timestamp, d => d);
-
-                // Pre-calculate indicators
-                var closePrices = data.Select(p => p.ClosePrice).ToArray();
-                var highPrices = data.Select(p => p.HighPrice).ToArray();
-                var lowPrices = data.Select(p => p.LowPrice).ToArray();
-                var timestamps = data.Select(p => (double)p.Timestamp.ToOADate()).ToArray(); // For lookup
-
-                var sma = _gpuIndicatorService.CalculateSma(closePrices, strategy.GetRequiredLookbackPeriod());
-                var stdDev = _gpuIndicatorService.CalculateStdDev(closePrices, strategy.GetRequiredLookbackPeriod());
-                var rsi = strategy.CalculateRSI(closePrices, strategy.GetRequiredLookbackPeriod()); // Assuming RSI period is same as lookback
-                var atr = _gpuIndicatorService.CalculateAtr(highPrices, lowPrices, closePrices, 14); // Assuming ATR period of 14
-
-                var indicators = new Dictionary<string, double[]>
-                {
-                    { "SMA", sma },
-                    { "StdDev", stdDev },
-                    { "RSI", rsi },
-                    { "ATR", atr },
-                    { "LowerBand", sma.Zip(stdDev, (m, s) => m - (strategy.GetStdDevMultiplier() * s)).ToArray() },
-                    { "UpperBand", sma.Zip(stdDev, (m, s) => m + (strategy.GetStdDevMultiplier() * s)).ToArray() },
-                    { "Timestamps", timestamps } // For index lookup
-                };
-
-                cache[symbol] = (dataDict, indicators);
-                _indicatorCache[symbol] = indicators;
-            }
-            return cache;
-        }
-
-        [AutomaticRetry(Attempts = 1)]
+        #region
+        //[AutomaticRetry(Attempts = 1)]
         //public async Task RunDualMomentumBacktest(string configJson, Guid runId)
         //{
         //    var config = JsonSerializer.Deserialize<DualMomentumBacktestConfiguration>(configJson);
@@ -748,21 +640,24 @@ namespace Temperance.Services.BackTesting.Implementations
         //    await _tradesService.UpdateBacktestRunStatusAsync(runId, "Completed");
         //}
 
-        private List<(HistoricalPriceModel, HistoricalPriceModel)> AlignData(
-            IEnumerable<HistoricalPriceModel> dataA,
-            IEnumerable<HistoricalPriceModel> dataB)
-        {
-            if (dataA == null || dataB == null)
-                return new List<(HistoricalPriceModel, HistoricalPriceModel)>();
 
-            var joinedQuery = dataA.Join(
-                dataB,
-                barA => barA.Timestamp,
-                barB => barB.Timestamp,
-                (barA, barB) => (barA, barB)
-            );
+        //private List<(HistoricalPriceModel, HistoricalPriceModel)> AlignData(
+        //    IEnumerable<HistoricalPriceModel> dataA,
+        //    IEnumerable<HistoricalPriceModel> dataB)
+        //{
+        //    if (dataA == null || dataB == null)
+        //        return new List<(HistoricalPriceModel, HistoricalPriceModel)>();
 
-            return joinedQuery.OrderBy(pair => pair.barA.Timestamp).ToList();
-        }
+        //    var joinedQuery = dataA.Join(
+        //        dataB,
+        //        barA => barA.Timestamp,
+        //        barB => barB.Timestamp,
+        //        (barA, barB) => (barA, barB)
+        //    );
+
+        //    return joinedQuery.OrderBy(pair => pair.barA.Timestamp).ToList();
+        //}
+
+        #endregion
     }
 }

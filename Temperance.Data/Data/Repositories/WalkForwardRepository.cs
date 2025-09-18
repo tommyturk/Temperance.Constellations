@@ -5,6 +5,7 @@ using Microsoft.Data.SqlClient;
 using Temperance.Conductor.Repository.Interfaces;
 using Temperance.Data.Models.Backtest;
 using Microsoft.AspNetCore.Connections;
+using System.Text.Json;
 
 namespace Temperance.Data.Data.Repositories.WalkForward.Implementations
 {
@@ -70,6 +71,48 @@ namespace Temperance.Data.Data.Repositories.WalkForward.Implementations
                 _logger.LogError(ex, "Failed to set active sleeve for SessionId {SessionId}", sessionId);
                 throw;
             }
+        }
+
+        public async Task<Dictionary<string, Dictionary<string, object>>> GetLatestParametersForSleeveAsync(Guid sessionId, IEnumerable<string> symbols)
+        {
+            // This SQL query uses a Common Table Expression (CTE) and the ROW_NUMBER() window function.
+            // It partitions the data by Symbol and orders it by creation date descending,
+            // ensuring we get only the single most recent optimization result for each symbol within the session.
+            const string sql = @"
+                WITH RankedResults AS (
+                    SELECT
+                        Symbol,
+                        OptimizedParametersJson,
+                        ROW_NUMBER() OVER(PARTITION BY Symbol ORDER BY CreatedAt DESC) as rn
+                    FROM
+                        Ludus.StrategyOptimizedParameters
+                    WHERE
+                        SessionId = @SessionId AND Symbol IN @Symbols
+                )
+                SELECT
+                    Symbol,
+                    OptimizedParametersJson
+                FROM
+                    RankedResults
+                WHERE
+                rn = 1;";
+
+            await using var connection = new SqlConnection(_connectionString);
+            var results = await connection.QueryAsync(sql, new { SessionId = sessionId, Symbols = symbols });
+
+            var parametersBySymbol = new Dictionary<string, Dictionary<string, object>>();
+            if (results == null) return parametersBySymbol;
+
+            foreach (var row in results)
+            {
+                if (!string.IsNullOrEmpty(row.OptimizedParametersJson))
+                {
+                    var parameters = JsonSerializer.Deserialize<Dictionary<string, object>>(row.OptimizedParametersJson);
+                    parametersBySymbol[row.Symbol] = parameters;
+                }
+            }
+
+            return parametersBySymbol;
         }
 
         public async Task<IEnumerable<WalkForwardSleeve>> GetActiveSleeveAsync(Guid sessionId, DateTime asOfDate)

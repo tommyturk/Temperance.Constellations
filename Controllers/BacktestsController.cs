@@ -55,6 +55,29 @@ namespace Temperance.Constellations.Controllers
             return Accepted(new { BacktestRunId = configuration.RunId, JobId = jobId });
         }
 
+        [HttpPost("SingleStartBackTest")]
+        [ProducesResponseType(StatusCodes.Status202Accepted)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        public async Task<IActionResult> SingleStartBackTest([FromBody] BacktestConfiguration configuration)
+        {
+            var configurationJson = JsonSerializer.Serialize(
+                configuration,
+                new JsonSerializerOptions { WriteIndented = true }
+            );
+
+            _logger.LogInformation("Backtest configuration details: {ConfigurationJson}", configurationJson);
+
+            await _tradeService.InitializeBacktestRunAsync(configuration, configuration.RunId);
+
+            var jobId = _backgroundJobClient.Enqueue<IBacktestRunner>(runner =>
+                            runner.RunBacktest(configuration, configuration.RunId));
+
+            _logger.LogInformation("Enqueued backtest RunId: {RunId}, Hangfire JobId: {JobId}", configuration.RunId, jobId);
+
+            return Accepted(new { BacktestRunId = configuration.RunId, JobId = jobId });
+        }
+
+
         //[HttpPost("start-pairs")]
         //[ProducesResponseType(StatusCodes.Status202Accepted)]
         //[ProducesResponseType(StatusCodes.Status400BadRequest)]

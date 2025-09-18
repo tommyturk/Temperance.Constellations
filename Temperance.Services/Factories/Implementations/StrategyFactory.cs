@@ -19,6 +19,7 @@ namespace Temperance.Services.Factories.Implementations
             _strategyRegistry.Add("MeanReversion_BB_RSI", typeof(MeanReversionStrategy));
             _strategyRegistry.Add("PairsTrading_Cointegration", typeof(PairsTradingStrategy));
             _strategyRegistry.Add("Dual_Momentum", typeof(DualMomentumStrategy));
+            _strategyRegistry.Add("Momentum_MACrossover", typeof(MovingAverageCrossoverStrategy));
         }
 
         public StrategyFactory(IServiceProvider serviceProvider, ILogger<StrategyFactory> logger)
