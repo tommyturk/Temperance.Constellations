@@ -28,6 +28,8 @@ namespace Temperance.Services.BackTesting.Orchestration.Implementations
 
         public async Task ExecuteNextPeriod(Guid sessionId, DateTime oosStartDate)
         {
+            _logger.LogInformation($"THIS IS THE OOSSTARTDATE: {oosStartDate} inside ExecuteNextPeriod.");
+
             var session = await _walkForwardRepository.GetSessionAsync(sessionId);
             if (oosStartDate >= session.EndDate)
             {
@@ -37,6 +39,8 @@ namespace Temperance.Services.BackTesting.Orchestration.Implementations
             }
 
             var oosEndDate = oosStartDate.AddYears(session.TradingWindowYears).AddDays(-1);
+            _logger.LogInformation($"THIS IS THE OOSENDDATE: {oosEndDate} inside ExecuteNextPeriod.");
+
             _logger.LogInformation("ORCHESTRATOR: Preparing 1-Month OOS Backtest for {Date:yyyy-MM}", oosStartDate);
 
             var activeSleeve = (await _walkForwardRepository.GetActiveSleeveAsync(sessionId, oosStartDate)).ToList();
@@ -66,7 +70,16 @@ namespace Temperance.Services.BackTesting.Orchestration.Implementations
                 await _backtestEngine.RunBacktest(config, config.RunId);
             }
 
-            _logger.LogInformation("ORCHESTRATOR: OOS Backtest for {Date:yyyy-MM} is complete. Awaiting next instruction from Conductor.", oosStartDate);
+            if (oosStartDate.Month == 12)
+            {
+                _hangfireClient.Enqueue<ISleeveSelectionOrchestrator>(o => o.ReselectAnnualSleeve(sessionId, oosEndDate));
+                _logger.LogInformation("ORCHESTRATOR: Enqueued annual re-selection job.");
+            }
+            else
+            {
+                _hangfireClient.Enqueue<IFineTuneOrchestrator>(o => o.ExecuteFineTune(sessionId, oosEndDate));
+                _logger.LogInformation("ORCHESTRATOR: Enqueued fine-tuning job.");
+            }
         }
     }
 }

@@ -1,5 +1,6 @@
 ﻿using Hangfire;
 using Microsoft.Extensions.Logging;
+using Temperance.Conductor.Repository.Interfaces;
 using Temperance.Data.Models.Backtest;
 using Temperance.Services.BackTesting.Interfaces;
 using Temperance.Services.Services.Interfaces;
@@ -15,6 +16,7 @@ namespace Temperance.Services.BackTesting.Implementations
         private readonly IConductorService _conductorService;
         private readonly ITradeService _tradeService;
         private readonly IConductorClient _conductorClient;
+        private readonly IWalkForwardRepository _walkForwardRepository;
 
         // --- Configuration Constants ---
         private const int InSampleYears = 2;
@@ -28,7 +30,8 @@ namespace Temperance.Services.BackTesting.Implementations
             ISecuritiesOverviewService securitiesOverviewService,
             IConductorService conductorService,
             ITradeService tradeService,
-            IConductorClient conductorClient)
+            IConductorClient conductorClient,
+            IWalkForwardRepository walkForwardRepository)
         {
             _backgroundJobClient = backgroundJobClient;
             _logger = logger;
@@ -36,16 +39,25 @@ namespace Temperance.Services.BackTesting.Implementations
             _conductorService = conductorService;
             _tradeService = tradeService;
             _conductorClient = conductorClient;
+            _walkForwardRepository = walkForwardRepository;
         }
 
         public async Task StartInitialTrainingPhase(Guid sessionId, string strategyName, DateTime startDate, DateTime endDate)
         {
             _logger.LogInformation("PHASE 1: Starting Initial Bulk Training for SessionId: {SessionId}", sessionId);
 
-            var inSampleStartDate = startDate;
-            var inSampleEndDate = endDate;
+            var session = await _walkForwardRepository.GetSessionAsync(sessionId);
+            if (session == null)
+            {
+                _logger.LogError("Could not find session {SessionId}. Aborting.", sessionId);
+                return;
+            }
 
-            // Get the universe of all securities active at the start of the period
+            var inSampleStartDate = session.StartDate;
+            var inSampleEndDate = session.StartDate
+                                        .AddYears(session.OptimizationWindowYears)
+                                        .AddDays(-1);
+
             var universe = new List<string>();
             await foreach (var security in _securitiesOverviewService.StreamSecuritiesForBacktest(null, new List<string> { "60min" }))
                 universe.Add(security.Symbol);
@@ -55,13 +67,11 @@ namespace Temperance.Services.BackTesting.Implementations
             if (!symbols.Any())
             {
                 _logger.LogError("No securities found for the initial training period. Aborting walk-forward session {SessionId}.", sessionId);
-                // Here you would also update the session status to "Failed" via the ConductorClient
                 return;
             }
 
             _logger.LogInformation("Found {SymbolCount} securities for initial training.", symbols.Count);
 
-            // Create the batch request to dispatch to Ludus via Conductor
             var batchRequest = new OptimizationBatchRequest
             {
                 SessionId = sessionId,
