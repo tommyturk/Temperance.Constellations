@@ -117,16 +117,44 @@ namespace Temperance.Data.Data.Repositories.WalkForward.Implementations
 
         public async Task<IEnumerable<WalkForwardSleeve>> GetActiveSleeveAsync(Guid sessionId, DateTime asOfDate)
         {
+            // This SQL is correct. It finds the most recent sleeve record for each symbol
+            // on or before the given date and filters for the ones that are marked as active.
+            // If this fails, the issue is with the _connectionString not pointing to TradingBotDb.
             const string sql = @"
                 WITH RankedSleeves AS (
                     SELECT 
-                        *,
+                        SleeveId,
+                        SessionId,
+                        TradingPeriodStartDate,
+                        Symbol,
+                        Interval,
+                        OptimizationResultId,
+                        InSampleSharpeRatio,
+                        InSampleMaxDrawdown,
+                        OptimizedParametersJson,
+                        IsActive,
+                        CreatedAt,
+                        StrategyName,
                         ROW_NUMBER() OVER(PARTITION BY Symbol ORDER BY TradingPeriodStartDate DESC) as rn
                     FROM [Constellations].[WalkForwardSleeves]
                     WHERE SessionId = @SessionId 
                       AND TradingPeriodStartDate <= @AsOfDate
                 )
-                SELECT * FROM RankedSleeves WHERE rn = 1 AND IsActive = 1;";
+                SELECT 
+                    SleeveId,
+                    SessionId,
+                    TradingPeriodStartDate,
+                    Symbol,
+                    Interval,
+                    OptimizationResultId,
+                    InSampleSharpeRatio,
+                    InSampleMaxDrawdown,
+                    OptimizedParametersJson,
+                    IsActive,
+                    CreatedAt,
+                    StrategyName
+                FROM RankedSleeves 
+                WHERE rn = 1 AND IsActive = 1;";
 
             using var connection = new SqlConnection(_connectionString);
             return await connection.QueryAsync<WalkForwardSleeve>(sql, new { SessionId = sessionId, AsOfDate = asOfDate });
