@@ -41,18 +41,20 @@ namespace Temperance.Data.Data.Repositories.WalkForward.Implementations
             return await connection.QueryAsync<WalkForwardSleeve>(sql, new { SessionId = sessionId, TradingPeriodStartDate = tradingPeriodStartDate });
         }
 
-            public async Task<IEnumerable<OptimizationJob>> GetCompletedJobsForSessionAsync(Guid sessionId)
-            {
-                // Make sure your OptimizationJobs table has a Symbol column!
-                const string sql = @"
-                    SELECT OJ.*, SOP.Symbol, SOP.ResultKey FROM [Conductor].[OptimizationJobs] AS OJ
-                        LEFT JOIN [Ludus].[StrategyOptimizedParameters] AS SOP 
-                        ON OJ.JobId = SOP.JobId
-                    WHERE OJ.SessionId = @SessionId AND OJ.Status LIKE '%Completed%';";
+        public async Task<IEnumerable<OptimizationJob>> GetCompletedJobsForSessionAsync(Guid sessionId)
+        {
+            const string sql = @"
+                SELECT OJ.*, SOP.Symbol, SOP.ResultKey 
+                FROM [Conductor].[OptimizationJobs] AS OJ
+                LEFT JOIN [Ludus].[StrategyOptimizedParameters] AS SOP
+                ON OJ.JobId = SOP.JobId
+                WHERE OJ.SessionId = @SessionId 
+                  AND OJ.Status LIKE '%Completed%'
+                  AND SOP.ResultKey IS NOT NULL;";
 
-                await using var connection = new SqlConnection(_connectionString);
-                return await connection.QueryAsync<OptimizationJob>(sql, new { SessionId = sessionId });
-            }
+            await using var connection = new SqlConnection(_connectionString);
+            return await connection.QueryAsync<OptimizationJob>(sql, new { SessionId = sessionId });
+        }
 
         public async Task<IEnumerable<StrategyOptimizedParameters>> GetResultsByKeysAsync(List<string> resultKeys)
         {
