@@ -44,18 +44,14 @@ namespace Temperance.Data.Data.Repositories.WalkForward.Implementations
         public async Task<IEnumerable<OptimizationJob>> GetCompletedJobsForSessionAsync(Guid sessionId)
         {
             const string sql = @"
-                SELECT OJ.*, SOP.Symbol, SOP.ResultKey 
-                FROM [Conductor].[OptimizationJobs] AS OJ
+                SELECT OJ.*, SOP.Symbol, SOP.ResultKey FROM [Conductor].[OptimizationJobs] AS OJ
                 LEFT JOIN [Ludus].[StrategyOptimizedParameters] AS SOP
                 ON OJ.JobId = SOP.JobId
-                WHERE OJ.SessionId = @SessionId 
-                  AND OJ.Status LIKE '%Completed%'
-                  AND SOP.ResultKey IS NOT NULL;";
+                WHERE OJ.SessionId = @SessionId AND OJ.Status LIKE '%Completed%';";
 
             await using var connection = new SqlConnection(_connectionString);
             return await connection.QueryAsync<OptimizationJob>(sql, new { SessionId = sessionId });
         }
-
         public async Task<IEnumerable<StrategyOptimizedParameters>> GetResultsByKeysAsync(List<string> resultKeys)
         {
             const string sql = @"

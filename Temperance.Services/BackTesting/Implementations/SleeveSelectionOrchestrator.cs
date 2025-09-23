@@ -39,20 +39,22 @@ namespace Temperance.Services.BackTesting.Implementations
         {
             _logger.LogInformation("PHASE 2: Selecting initial sleeve for SessionId: {SessionId}", sessionId);
 
-            // 1. Get all completed JOB records for this session.
             var completedJobs = await _walkForwardRepository.GetCompletedJobsForSessionAsync(sessionId);
-            if (!completedJobs.Any())
+
+            var validJobs = completedJobs.Where(job => !string.IsNullOrEmpty(job.ResultKey)).ToList();
+
+            if (!validJobs.Any())
             {
-                _logger.LogError("No completed jobs found for session {SessionId}. Cannot create sleeve.", sessionId);
+                _logger.LogError("No completed jobs with valid optimization results found for session {SessionId}. Cannot create sleeve.", sessionId);
                 return;
             }
 
-            // 2. Get session info and generate the ResultKeys for each job.
             var session = await _walkForwardRepository.GetSessionAsync(sessionId);
             var inSampleStartDate = session.StartDate;
-            var resultKeys = completedJobs.Select(job => job.ResultKey).ToList();
+            var resultKeys = validJobs.Select(job =>
+                _keyGenerator.GenerateOptimizationKey(session.StrategyName, job.Symbol, "60min", inSampleStartDate, inSampleEndDate)
+            ).ToList();
 
-            // 3. Fetch all optimization RESULTS in a single batch using the keys.
             var allOptimizationResults = await _walkForwardRepository.GetResultsByKeysAsync(resultKeys);
             var validResults = allOptimizationResults
                 .Where(result => result != null && result.Id != null)
