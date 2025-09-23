@@ -6,8 +6,10 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using Temperance.Conductor.Repository.Interfaces;
+using Temperance.Data.Models.Backtest;
 using Temperance.Services.BackTesting.Interfaces;
 using Temperance.Services.Services.Interfaces;
+using Temperance.Utilities.Helpers;
 
 namespace Temperance.Services.BackTesting.Implementations
 {
@@ -16,17 +18,20 @@ namespace Temperance.Services.BackTesting.Implementations
         private readonly IWalkForwardRepository _walkForwardRepository;
         private readonly IQualityFilterService _qualityFilter;
         private readonly IBackgroundJobClient _backgroundJobClient;
+        private readonly IOptimizationKeyGenerator _keyGenerator;
         private readonly ILogger<SleeveSelectionOrchestrator> _logger;
 
         public SleeveSelectionOrchestrator(
             IWalkForwardRepository walkForwardRepository,
             IQualityFilterService qualityFilter,
             IBackgroundJobClient hangfireClient,
+            IOptimizationKeyGenerator keyGenerator,
             ILogger<SleeveSelectionOrchestrator> logger)
         {
             _walkForwardRepository = walkForwardRepository;
             _qualityFilter = qualityFilter;
             _backgroundJobClient = hangfireClient;
+            _keyGenerator = keyGenerator;
             _logger = logger;
         }
 
@@ -34,18 +39,46 @@ namespace Temperance.Services.BackTesting.Implementations
         {
             _logger.LogInformation("PHASE 2: Selecting initial sleeve for SessionId: {SessionId}", sessionId);
 
-            // 1. Get all results from the initial training batch
-            var allSleeves = await _walkForwardRepository.GetSleevesByBatchAsync(sessionId, inSampleEndDate);
+            // 1. Get all completed JOB records for this session.
+            var completedJobs = await _walkForwardRepository.GetCompletedJobsForSessionAsync(sessionId);
+            if (!completedJobs.Any())
+            {
+                _logger.LogError("No completed jobs found for session {SessionId}. Cannot create sleeve.", sessionId);
+                return;
+            }
 
-            // 2. Apply filtering logic to find the best candidates
-            var selectedSymbols = _qualityFilter.SelectBestPerformers(allSleeves, 100); 
+            // 2. Get session info and generate the ResultKeys for each job.
+            var session = await _walkForwardRepository.GetSessionAsync(sessionId);
+            var inSampleStartDate = session.StartDate;
+            var resultKeys = completedJobs.Select(job => job.ResultKey).ToList();
 
-            // 3. Update the database to mark the selected sleeves as active
-            await _walkForwardRepository.SetActiveSleeveAsync(sessionId, inSampleEndDate, selectedSymbols);
-            _logger.LogInformation("Selected {Count} securities for the initial active sleeve.", selectedSymbols.Count);
+            // 3. Fetch all optimization RESULTS in a single batch using the keys.
+            var allOptimizationResults = await _walkForwardRepository.GetResultsByKeysAsync(resultKeys);
+            var validResults = allOptimizationResults
+                .Where(result => result != null && result.Id != null)
+                .ToList();
+            // 4. Create sleeve entries for ALL results found.
+            // The TradingPeriodStartDate is when this sleeve becomes active.
+            var tradingPeriodStartDate = inSampleEndDate.AddDays(1);
 
-            // 4. Enqueue the very first monthly backtest job, starting Feb 1, 2002
-            var firstOosDate = new DateTime(2002, 2, 1);
+            var newSleeveEntries = validResults.Select(result => new WalkForwardSleeve
+            {
+                SessionId = sessionId,
+                TradingPeriodStartDate = tradingPeriodStartDate,
+                Symbol = result.Symbol,
+                Interval = result.Interval,
+                StrategyName = result.StrategyName,
+                OptimizedParametersJson = result.OptimizedParametersJson,
+                OptimizationResultId = result.Id,
+                IsActive = true,
+                CreatedAt = DateTime.UtcNow
+            }).ToList();
+
+            await _walkForwardRepository.CreateSleeveBatchAsync(newSleeveEntries);
+            _logger.LogInformation("Created and saved {Count} securities for the initial sleeve.", newSleeveEntries.Count);
+
+            var firstOosDate = tradingPeriodStartDate;
+
             _backgroundJobClient.Enqueue<IPortfolioBacktestRunner>(
                 runner => runner.ExecuteBacktest(sessionId, firstOosDate)
             );

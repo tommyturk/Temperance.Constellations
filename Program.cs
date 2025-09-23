@@ -84,6 +84,7 @@ builder.Services.AddTransient<ISleeveSelectionOrchestrator, SleeveSelectionOrche
 builder.Services.AddTransient<IPortfolioBacktestOrchestrator, PortfolioBacktestOrchestrator>();
 builder.Services.AddTransient<IPortfolioBacktestRunner, PortfolioBacktestRunner>();
 builder.Services.AddTransient<IFineTuneOrchestrator, FineTuneOrchestrator>();
+builder.Services.AddTransient<IOptimizationKeyGenerator, OptimizationKeyGenerator>();
 builder.Services.AddTransient<ISecuritiesOverviewRepository>(provider =>
 {
     var connectionStrings = provider.GetRequiredService<IOptions<ConnectionStrings>>().Value;

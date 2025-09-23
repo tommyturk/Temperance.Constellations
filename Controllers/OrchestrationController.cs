@@ -59,7 +59,5 @@ namespace Temperance.Constellations.Controllers
 
             return Ok("Portfolio backtest phase enqueued.");
         }
-
-        // The old [HttpPost("start-walk-forward")] endpoint has been removed as it is now redundant.
     }
 }

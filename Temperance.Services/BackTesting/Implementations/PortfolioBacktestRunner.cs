@@ -1,5 +1,6 @@
 ﻿using Hangfire;
 using Microsoft.Extensions.Logging;
+using System.Text.Json;
 using Temperance.Conductor.Repository.Interfaces;
 using Temperance.Data.Models.Backtest;
 using Temperance.Services.BackTesting.Interfaces;
@@ -40,15 +41,17 @@ namespace Temperance.Services.BackTesting.Orchestration.Implementations
                 oosStartDate, sessionId);
 
             var activeSleeve = await _walkForwardRepoitory.GetActiveSleeveAsync(sessionId, oosStartDate);
-
+            _logger.LogInformation($"Active sleeve count: {activeSleeve.Count()}");
             var backtestConfig = new BacktestConfiguration
             {
                 RunId = Guid.NewGuid(), // A unique ID for this specific 1-month run
                 SessionId = session.SessionId,
                 StrategyName = session.StrategyName, // The overarching strategy
                 Symbols = activeSleeve.Select(s => s.Symbol).ToList(),
-                // We assume the engine knows to use the specific parameters for each symbol from the sleeve.
-                // If not, this part may need adjustment based on your engine's design.
+                PortfolioParameters = activeSleeve.ToDictionary(
+                    s => s.Symbol,
+                    s => JsonSerializer.Deserialize<Dictionary<string, object>>(s.OptimizedParametersJson)
+                ),
                 StartDate = oosStartDate,
                 EndDate = oosEndDate,
                 InitialCapital = session.CurrentCapital // Start with the capital from the end of last month

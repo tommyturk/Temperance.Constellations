@@ -1,11 +1,10 @@
 ﻿using Dapper;
-using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.Logging;
 using Microsoft.Data.SqlClient;
+using Microsoft.Extensions.Logging;
+using System.Data;
+using System.Text.Json;
 using Temperance.Conductor.Repository.Interfaces;
 using Temperance.Data.Models.Backtest;
-using Microsoft.AspNetCore.Connections;
-using System.Text.Json;
 
 namespace Temperance.Data.Data.Repositories.WalkForward.Implementations
 {
@@ -40,6 +39,42 @@ namespace Temperance.Data.Data.Repositories.WalkForward.Implementations
             const string sql = "SELECT * FROM [Constellations].[WalkForwardSleeves] WHERE SessionId = @SessionId AND TradingPeriodStartDate = @TradingPeriodStartDate;";
             using var connection = new SqlConnection(_connectionString);
             return await connection.QueryAsync<WalkForwardSleeve>(sql, new { SessionId = sessionId, TradingPeriodStartDate = tradingPeriodStartDate });
+        }
+
+            public async Task<IEnumerable<OptimizationJob>> GetCompletedJobsForSessionAsync(Guid sessionId)
+            {
+                // Make sure your OptimizationJobs table has a Symbol column!
+                const string sql = @"
+                    SELECT OJ.*, SOP.Symbol, SOP.ResultKey FROM [Conductor].[OptimizationJobs] AS OJ
+                        LEFT JOIN [Ludus].[StrategyOptimizedParameters] AS SOP 
+                        ON OJ.JobId = SOP.JobId
+                    WHERE OJ.SessionId = @SessionId AND OJ.Status LIKE '%Completed%';";
+
+                await using var connection = new SqlConnection(_connectionString);
+                return await connection.QueryAsync<OptimizationJob>(sql, new { SessionId = sessionId });
+            }
+
+        public async Task<IEnumerable<StrategyOptimizedParameters>> GetResultsByKeysAsync(List<string> resultKeys)
+        {
+            const string sql = @"
+                SELECT *
+                FROM [Ludus].[StrategyOptimizedParameters]
+                WHERE ResultKey IN @ResultKeys;";
+
+            await using var connection = new SqlConnection(_connectionString);
+            return await connection.QueryAsync<StrategyOptimizedParameters>(sql, new { ResultKeys = resultKeys });
+        }
+
+        public async Task CreateSleeveBatchAsync(List<WalkForwardSleeve> sleeves)
+        {
+            const string sql = @"
+                INSERT INTO [Constellations].[WalkForwardSleeves]
+                    (SessionId, TradingPeriodStartDate, Symbol, Interval, StrategyName, OptimizedParametersJson, OptimizationResultId, IsActive, CreatedAt)
+                VALUES
+                    (@SessionId, @TradingPeriodStartDate, @Symbol, @Interval, @StrategyName, @OptimizedParametersJson, @OptimizationResultId, @IsActive, @CreatedAt);";
+
+            await using var connection = new SqlConnection(_connectionString);
+            await connection.ExecuteAsync(sql, sleeves);
         }
 
         public async Task SetActiveSleeveAsync(Guid sessionId, DateTime tradingPeriodStartDate, IEnumerable<string> symbols)
