@@ -1,13 +1,20 @@
-﻿namespace Temperance.Utilities.Helpers
+﻿using System.Security.Cryptography;
+using System.Text;
+
+namespace Temperance.Utilities.Helpers
 {
     public class OptimizationKeyGenerator : IOptimizationKeyGenerator
     {
         public string GenerateOptimizationKey(string strategyName, string symbol, string interval, DateTime startDate, DateTime endDate)
         {
-            var keyString = $"{strategyName}|{symbol}|{interval}|{startDate:O}|{endDate:O}";
-            using var sha256 = System.Security.Cryptography.SHA256.Create();
-            var bytes = sha256.ComputeHash(System.Text.Encoding.UTF8.GetBytes(keyString));
-            return Convert.ToBase64String(bytes);
+            string keyString = $"{strategyName}_{symbol}_{interval}_{startDate:yyyy-MM-dd}_{endDate:yyyy-MM-dd}";
+
+            using (SHA256 sha256 = SHA256.Create())
+            {
+                byte[] bytes = Encoding.UTF8.GetBytes(keyString);
+                byte[] hashBytes = sha256.ComputeHash(bytes);
+                return Convert.ToBase64String(hashBytes);
+            }
         }
     }
 }

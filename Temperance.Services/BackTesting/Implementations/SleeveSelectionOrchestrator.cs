@@ -51,9 +51,7 @@ namespace Temperance.Services.BackTesting.Implementations
 
             var session = await _walkForwardRepository.GetSessionAsync(sessionId);
             var inSampleStartDate = session.StartDate;
-            var resultKeys = validJobs.Select(job =>
-                _keyGenerator.GenerateOptimizationKey(session.StrategyName, job.Symbol, "60min", inSampleStartDate, inSampleEndDate)
-            ).ToList();
+            var resultKeys = validJobs.Select(job => job.ResultKey).ToList();
 
             var allOptimizationResults = await _walkForwardRepository.GetResultsByKeysAsync(resultKeys);
             var validResults = allOptimizationResults
