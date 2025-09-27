@@ -6,6 +6,9 @@ namespace Temperance.Services.BackTesting.Interfaces
 {
     public interface IBacktestRunner
     {
+        [Hangfire.JobDisplayName("Run Portfolio Backtest {0}")]
+        Task<BacktestResult> RunPortfolioBacktest(BacktestConfiguration config, Guid runId);
+
         [Hangfire.JobDisplayName("Run Backtest {0}")]
         Task RunBacktest(BacktestConfiguration config, Guid runId);
 

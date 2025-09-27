@@ -57,7 +57,7 @@ namespace Temperance.Services.BackTesting.Orchestration.Implementations
                 InitialCapital = session.CurrentCapital // Start with the capital from the end of last month
             };
 
-            await _backtestRunner.RunBacktest(backtestConfig, backtestConfig.RunId);
+            await _backtestRunner.RunPortfolioBacktest(backtestConfig, backtestConfig.RunId);
 
             if (oosStartDate.Month == 12)
             {
