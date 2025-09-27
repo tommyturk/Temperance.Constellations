@@ -115,6 +115,14 @@ namespace Temperance.Services.Services.Implementations
             return Task.CompletedTask;
         }
 
+        public Position? GetOpenPosition(string symbol, string interval)
+        {
+            var openPositions = GetOpenPositions();
+            if (openPositions.Count == 0)
+                return null;
+            return openPositions.Where(x => x.Symbol == symbol && x.Interval == interval).FirstOrDefault();
+        }
+
         public Task AddToPosition(string symbol, int quantityToAdd, double entryPrice, double transactionCost)
         {
             if (!_openPositions.TryGetValue(symbol, out var existingPosition))
@@ -194,7 +202,8 @@ namespace Temperance.Services.Services.Implementations
             }
         }
 
-        public Task<TradeSummary?> ClosePosition(string strategyName, string symbol, string interval, PositionDirection direction, int quantity, double exitPrice, DateTime exitDate, double transactionCost, double profitLoss)
+        public Task<TradeSummary?> ClosePosition(string strategyName, string symbol, string interval, PositionDirection direction, 
+            int quantity, double exitPrice, DateTime exitDate, double transactionCost, double profitLoss)
         {
             if (_openPositions.TryRemove(symbol, out var closedPosition))
             {

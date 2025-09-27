@@ -147,6 +147,20 @@ namespace Temperance.Services.BackTesting.Implementations
             result.KellyHalfFraction = kellyMetrics.KellyHalfFraction;
         }
 
+        public double CalculateProfitLoss(TradeSummary trade)
+        {
+            if (!trade.ExitPrice.HasValue || !trade.ExitDate.HasValue)
+                return 0;
+
+            double pnl;
+            if (trade.Direction == PositionDirection.Long.ToString())
+                pnl = (trade.ExitPrice.Value - trade.EntryPrice) * trade.Quantity;
+            else 
+                pnl = (trade.EntryPrice - trade.ExitPrice.Value) * trade.Quantity;
+
+            return pnl - (trade.TotalTransactionCost ?? 0);
+        }
+
         private double CalculateSharpeRatio(List<KeyValuePair<DateTime, double>> equityCurve, double riskFreeRate = 0.0)
         {
             if (equityCurve == null || equityCurve.Count < 2)

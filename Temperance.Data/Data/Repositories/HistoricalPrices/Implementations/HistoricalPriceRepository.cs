@@ -4,6 +4,7 @@ using System.Data;
 using Temperance.Data.Data.Repositories.Securities.Interfaces;
 using Temperance.Data.Models.HistoricalPriceData;
 using Temperance.Utilities.Helpers;
+using TradingApp.src.Core.Models;
 using TradingApp.src.Data.Repositories.HistoricalPrices.Interfaces;
 
 namespace TradingApp.src.Data.Repositories.HistoricalPrices.Implementations
@@ -118,16 +119,14 @@ namespace TradingApp.src.Data.Repositories.HistoricalPrices.Implementations
 
         public async Task<List<HistoricalPriceModel>> GetHistoricalPrices(string symbol, string interval)
         {
-            await using var connection = CreateConnection();
             var tableName = _sqlHelper.SanitizeTableName(symbol, interval);
-
-            try
+            string sql = $@"
+                SELECT [open] AS Open, [high] AS High, [low] AS Low, [close] AS Close, [volume] AS Volume, [timestamp] AS Timestamp
+                FROM {tableName}
+                ORDER BY [timestamp] ASC;";
+            await using (var connection = new SqlConnection(_historicalPriceConnectionString))
             {
-                return (await connection.QueryAsync<HistoricalPriceModel>($"SELECT * FROM {tableName} ORDER BY Timestamp")).ToList();
-            }
-            catch (SqlException ex) when (ex.Number == 208)
-            {
-                return new List<HistoricalPriceModel>();
+                return (await connection.QueryAsync<HistoricalPriceModel>(sql)).ToList();
             }
         }
 

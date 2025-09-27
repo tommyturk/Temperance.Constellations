@@ -12,6 +12,7 @@
         public double EntryPrice { get; set; }
         public double? ExitPrice { get; set; }
         public double? ProfitLoss { get; set; }
+        public double? ReturnPercentage { get; set; }
         public string Direction { get; set; } = string.Empty;
         public int Quantity { get; set; }
         public DateTime HoldingPeriod { get; set; }

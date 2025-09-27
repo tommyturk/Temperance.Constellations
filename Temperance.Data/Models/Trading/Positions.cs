@@ -3,6 +3,7 @@
     public class Position
     {
         public string Symbol { get; set; } = string.Empty;
+        public string Interval { get; set; } = string.Empty;
         public double AverageEntryPrice { get; set; }
         public DateTime InitialEntryDate { get; set; }
         public int Quantity { get; set; }

@@ -7,6 +7,7 @@ using System.Text.Json;
 using Temperance.Conductor.Repository.Interfaces;
 using Temperance.Data.Data.Repositories.Trade.Interfaces;
 using Temperance.Data.Models.Backtest;
+using Temperance.Data.Models.HistoricalData;
 using Temperance.Data.Models.HistoricalPriceData;
 using Temperance.Data.Models.MarketHealth;
 using Temperance.Data.Models.Performance;
@@ -77,6 +78,480 @@ namespace Temperance.Services.BackTesting.Implementations
             _logger = logger;
         }
 
+        private record StrategySleeve(
+            string Symbol,
+            string Interval,
+            ISingleAssetStrategy Strategy,
+            List<HistoricalPriceModel> PriceData,
+            Dictionary<string, double[]> Indicators,
+            Dictionary<DateTime, int> TimestampIndexMap,
+            HashSet<DateTime> MocExitTimestamps
+        )
+        {
+            public Position? CurrentPosition { get; set; }
+            public TradeSummary? ActiveTrade { get; set; }
+        }
+
+        [AutomaticRetry(Attempts = 1)]
+        public async Task<BacktestResult> RunPortfolioBacktest(BacktestConfiguration config, Guid runId)
+        {
+            _logger.LogInformation("Starting portfolio backtest [RunId: {RunId}] for session [SessionId: {SessionId}]", runId, config.SessionId);
+
+            if (config == null)
+            {
+                await _tradesService.UpdateBacktestRunStatusAsync(runId, "Failed", "Configuration error.");
+                throw new ArgumentException("Could not deserialize configuration.", nameof(config));
+            }
+
+            await _tradesService.UpdateBacktestRunStatusAsync(runId, "Initializing");
+            var result = new BacktestResult();
+            var allTrades = new ConcurrentBag<TradeSummary>();
+
+            var initialPortfolioState = await _tradesService.GetLatestPortfolioStateAsync(config.SessionId.Value);
+            
+            if (initialPortfolioState.HasValue)
+                _portfolioManager.HydrateState(initialPortfolioState.Value.Cash, initialPortfolioState.Value.OpenPositions);
+            else
+                await _portfolioManager.Initialize(config.SessionId.Value, config.InitialCapital);
+            
+            try
+            {
+                await _tradesService.UpdateBacktestRunStatusAsync(runId, "Loading Data");
+
+                var marketHealthCache = new ConcurrentDictionary<DateTime, MarketHealthScore>();
+                for (var day = config.StartDate.Date; day <= config.EndDate.Date; day = day.AddDays(1))
+                    marketHealthCache.TryAdd(day, await _marketHealthService.GetCurrentMarketHealth(day));
+                
+                var sleeves = new List<StrategySleeve>();
+                var testCaseStream = _securitiesOverviewService.StreamSecuritiesForBacktest(config.Symbols, config.Intervals);
+                await foreach (var testCase in testCaseStream)
+                {
+                    var sleeve = await PrepareStrategySleeveAsync(testCase, config, runId);
+                    if (sleeve != null)
+                    {
+                        sleeves.Add(sleeve);
+                    }
+                }
+                if (!sleeves.Any())
+                {
+                    _logger.LogWarning("No valid strategy sleeves could be prepared for RunId: {RunId}. Aborting.", runId);
+                    await _tradesService.UpdateBacktestRunStatusAsync(runId, "Failed", "No data for any symbols.");
+                    return result;
+                }
+
+                var masterTimeline = sleeves
+                    .SelectMany(s => s.PriceData.Select(p => p.Timestamp))
+                    .Distinct()
+                    .OrderBy(t => t)
+                    .ToList();
+
+                _logger.LogInformation("[RunId: {RunId}] Master timeline created with {Count} unique timestamps.", runId, masterTimeline.Count);
+                await _tradesService.UpdateBacktestRunStatusAsync(runId, "Running");
+
+                foreach (var timestamp in masterTimeline)
+                {
+                    if (timestamp > config.EndDate) break;
+
+                    foreach (var sleeve in sleeves.Where(s => s.CurrentPosition != null))
+                    {
+                        if (sleeve.TimestampIndexMap.TryGetValue(timestamp, out var globalIndex))
+                        {
+                            var currentBar = sleeve.PriceData[globalIndex];
+                            var dataWindow = sleeve.PriceData.Take(globalIndex + 1).ToList();
+                            var indicators = GetIndicatorsForBar(sleeve.Indicators, globalIndex);
+                            string exitReason = sleeve.Strategy.GetExitReason(sleeve.CurrentPosition, in currentBar, dataWindow, indicators);
+                            
+                            if (config.UseMocExit && sleeve.MocExitTimestamps.Contains(timestamp) && exitReason == "Hold")
+                                exitReason = "Market on Close";
+
+                            if (exitReason != "Hold")
+                            {
+                                var closedTrade = await ClosePositionAsync(sleeve, currentBar, runId, exitReason, indicators);
+                                if (closedTrade != null) allTrades.Add(closedTrade);
+                            }
+                        }
+                    }
+                    foreach (var sleeve in sleeves.Where(s => s.CurrentPosition == null))
+                    {
+                        if (sleeve.TimestampIndexMap.TryGetValue(timestamp, out var globalIndex))
+                        {
+                            var currentBar = sleeve.PriceData[globalIndex];
+                            marketHealthCache.TryGetValue(currentBar.Timestamp.Date, out var marketHealth);
+                            var dataWindow = sleeve.PriceData.Take(globalIndex + 1).ToList();
+                            var indicators = GetIndicatorsForBar(sleeve.Indicators, globalIndex);
+
+                            var signal = sleeve.Strategy.GenerateSignal(in currentBar, null, dataWindow, indicators, marketHealth);
+                            if (signal != SignalDecision.Hold)
+                            {
+                                await TryOpenPositionAsync(sleeve, currentBar, signal, runId, dataWindow, indicators, marketHealth, config.InitialCapital);
+                            }
+                        }
+                    }
+                }
+
+                _logger.LogInformation("[RunId: {RunId}] Main timeline loop complete. Closing any remaining open positions.", runId);
+
+                foreach (var sleeve in sleeves.Where(s => s.CurrentPosition != null))
+                {
+                    var lastBar = sleeve.PriceData.LastOrDefault(b => b.Timestamp <= config.EndDate) ?? sleeve.PriceData.Last();
+                    var lastBarIndex = sleeve.TimestampIndexMap[lastBar.Timestamp];
+                    var lastIndicators = GetIndicatorsForBar(sleeve.Indicators, lastBarIndex);
+                    var closedTrade = await ClosePositionAsync(sleeve, lastBar, runId, "End of Backtest", lastIndicators);
+                    if (closedTrade != null) allTrades.Add(closedTrade);
+                }
+
+                result.Trades.AddRange(allTrades);
+                result.TotalTrades = result.Trades.Count;
+                result.OptimizationResultId = config.OptimizationResultId;
+
+                await _performanceCalculator.CalculatePerformanceMetrics(result, config.InitialCapital);
+                await _tradesService.UpdateBacktestPerformanceMetrics(runId, result, config.InitialCapital);
+                await _tradesService.UpdateBacktestRunStatusAsync(runId, "Completed");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Critical error during portfolio backtest [RunId: {RunId}]", runId);
+                await _tradesService.UpdateBacktestRunStatusAsync(runId, "Failed", ex.Message);
+                throw;
+            }
+
+            return result;
+        }
+
+        private async Task TryOpenPositionAsync(StrategySleeve sleeve, HistoricalPriceModel currentBar, SignalDecision signal, Guid runId,
+            List<HistoricalPriceModel> dataWindow, Dictionary<string, double> indicators, MarketHealthScore? marketHealth, double initialCapital)
+        {
+            await using var scope = _serviceProvider.CreateAsyncScope();
+            var liquidityService = scope.ServiceProvider.GetRequiredService<ILiquidityService>();
+            var transactionCostService = scope.ServiceProvider.GetRequiredService<ITransactionCostService>();
+            var tradesService = scope.ServiceProvider.GetRequiredService<ITradeService>();
+
+            // ======== Step 1: Liquidity Check ========
+            long minimumAdv = sleeve.Strategy.GetMinimumAverageDailyVolume();
+            if (!liquidityService.IsSymbolLiquidAtTime(sleeve.Symbol, sleeve.Interval, minimumAdv, currentBar.Timestamp, 20, sleeve.PriceData))
+            {
+                _logger.LogDebug("[RunId: {RunId}] Signal generated for {Symbol} but skipped due to low liquidity.", runId, sleeve.Symbol);
+                return;
+            }
+
+            // ======== Step 2: Position Sizing ========
+            double allocationAmount = sleeve.Strategy.GetAllocationAmount(
+                in currentBar,
+                dataWindow,
+                indicators,
+                initialCapital * 0.02,
+                _portfolioManager.GetTotalEquity(),
+                0.5,
+                1,
+                marketHealth.Value
+            );
+
+            if (allocationAmount <= 0) return;
+
+            // Convert the dollar allocation into a share quantity.
+            double rawEntryPrice = currentBar.ClosePrice;
+            int quantity = (int)Math.Floor(allocationAmount / rawEntryPrice);
+            if (quantity <= 0) return; // Allocation was too small to even buy one share.
+
+            // ======== Step 3: Cost Analysis & Capital Check ========
+            var direction = (signal == SignalDecision.Buy) ? PositionDirection.Long : PositionDirection.Short;
+            double totalEntryCost = await transactionCostService.GetSpreadCost(rawEntryPrice, quantity, sleeve.Symbol, sleeve.Interval, currentBar.Timestamp);
+            double totalCashOutlay = (quantity * rawEntryPrice) + totalEntryCost;
+
+            if (!await _portfolioManager.CanOpenPosition(totalCashOutlay))
+            {
+                // This is a common and important scenario. The strategy had a good idea, but the portfolio couldn't afford it.
+                _logger.LogWarning("[RunId: {RunId}] Insufficient capital to open {Symbol} position. Required: {Required:C}, Available: {Available:C}",
+                    runId, sleeve.Symbol, totalCashOutlay, _portfolioManager.GetAvailableCapital());
+                return;
+            }
+
+            // ======== Step 4: Execution ========
+            await _portfolioManager.OpenPosition(sleeve.Symbol, sleeve.Interval, direction, quantity, rawEntryPrice, currentBar.Timestamp, totalEntryCost);
+
+            // Create the detailed record of the trade for later analysis.
+            var activeTrade = new TradeSummary
+            {
+                Id = Guid.NewGuid(),
+                RunId = runId,
+                StrategyName = sleeve.Strategy.Name,
+                EntryDate = currentBar.Timestamp,
+                EntryPrice = rawEntryPrice,
+                Direction = direction.ToString(),
+                Quantity = quantity,
+                Symbol = sleeve.Symbol,
+                Interval = sleeve.Interval,
+                TotalTransactionCost = totalEntryCost,
+                EntryReason = sleeve.Strategy.GetEntryReason(in currentBar, dataWindow, indicators)
+            };
+
+            // ======== Step 5: Update Sleeve State ========
+            sleeve.ActiveTrade = activeTrade;
+            sleeve.CurrentPosition = _portfolioManager.GetOpenPosition(sleeve.Symbol, sleeve.Interval);
+
+            // Set the initial stop-loss based on the conditions at the time of entry.
+            if (sleeve.CurrentPosition != null)
+            {
+                double entryAtr = indicators.GetValueOrDefault("ATR", 0);
+                if (entryAtr > 0)
+                {
+                    sleeve.CurrentPosition.StopLossPrice = (direction == PositionDirection.Long)
+                        ? sleeve.CurrentPosition.AverageEntryPrice - (sleeve.Strategy.GetAtrMultiplier() * entryAtr)
+                        : sleeve.CurrentPosition.AverageEntryPrice + (sleeve.Strategy.GetAtrMultiplier() * entryAtr);
+                }
+            }
+            else
+            {
+                _logger.LogCritical("[RunId: {RunId}] FATAL: Could not find newly opened position for {Symbol}. State inconsistency detected.", runId, sleeve.Symbol);
+            }
+
+            await tradesService.SaveOrUpdateBacktestTrade(activeTrade);
+        }
+
+        private async Task<TradeSummary?> ClosePositionAsync(StrategySleeve sleeve, HistoricalPriceModel currentBar,
+            Guid runId, string exitReason, IReadOnlyDictionary<string, double> indicators)
+        {
+            if (sleeve.CurrentPosition == null || sleeve.ActiveTrade == null)
+            {
+                _logger.LogError("[RunId: {RunId}] Attempted to close a position for {Symbol} but sleeve state was invalid.", runId, sleeve.Symbol);
+                return null;
+            }
+
+            await using var scope = _serviceProvider.CreateAsyncScope();
+            var transactionCostService = scope.ServiceProvider.GetRequiredService<ITransactionCostService>();
+            var tradesService = scope.ServiceProvider.GetRequiredService<ITradeService>();
+            var performanceCalculator = scope.ServiceProvider.GetRequiredService<IPerformanceCalculator>();
+
+            double rawExitPrice = currentBar.ClosePrice;
+            var exitSignal = sleeve.CurrentPosition.Direction == PositionDirection.Long ? SignalDecision.Sell : SignalDecision.Buy;
+            double effectiveExitPrice = await transactionCostService.CalculateExitCost(rawExitPrice, sleeve.CurrentPosition.Direction, 
+                sleeve.Symbol, sleeve.Interval, currentBar.Timestamp);
+            double exitTransactionCost = Math.Abs(rawExitPrice - effectiveExitPrice) * sleeve.CurrentPosition.Quantity;
+
+            var trade = sleeve.ActiveTrade;
+            trade.ExitDate = currentBar.Timestamp;
+            trade.ExitPrice = rawExitPrice;
+            trade.TotalTransactionCost = (trade.TotalTransactionCost ?? 0) + exitTransactionCost;
+
+            trade.ProfitLoss = performanceCalculator.CalculateProfitLoss(trade);
+
+            if (trade.EntryPrice != 0)
+                trade.ReturnPercentage = (trade.ProfitLoss / (trade.EntryPrice * trade.Quantity)) * 100;
+
+            await _portfolioManager.ClosePosition(
+                strategyName: sleeve.Strategy.Name,
+                symbol: sleeve.Symbol,
+                interval: sleeve.Interval,
+                direction: sleeve.CurrentPosition.Direction,
+                quantity: sleeve.CurrentPosition.Quantity,
+                exitPrice: rawExitPrice,
+                exitDate: currentBar.Timestamp,
+                transactionCost: exitTransactionCost,
+                profitLoss: trade.ProfitLoss ?? 0
+            );
+
+            trade.ExitReason = exitReason;
+
+            await tradesService.SaveOrUpdateBacktestTrade(trade);
+
+            sleeve.CurrentPosition = null;
+            sleeve.ActiveTrade = null;
+
+            return trade;
+        }
+
+        private Dictionary<string, double> GetIndicatorsForBar(Dictionary<string, double[]> allIndicators, int globalIndex)
+        {
+            var values = new Dictionary<string, double>();
+
+            foreach (var indicator in allIndicators)
+                if (globalIndex < indicator.Value.Length)
+                    values[indicator.Key] = indicator.Value[globalIndex];
+                else
+                    values[indicator.Key] = double.NaN;
+
+            return values;
+        }
+        private async Task<StrategySleeve?> PrepareStrategySleeveAsync(SymbolCoverageBacktestModel testCase, BacktestConfiguration config, Guid runId)
+        {
+            var symbol = testCase.Symbol.Trim();
+            var interval = testCase.Interval.Trim();
+            _logger.LogInformation("[RunId: {RunId}] Preparing sleeve for {Symbol} [{Interval}]...", runId, symbol, interval);
+
+            if (config.PortfolioParameters == null || !config.PortfolioParameters.TryGetValue(symbol, out var symbolSpecificParameters))
+            {
+                _logger.LogWarning("[RunId: {RunId}] Parameters not found for symbol {Symbol}. Skipping this sleeve.", runId, symbol);
+                return null;
+            }
+
+            await using var scope = _serviceProvider.CreateAsyncScope();
+            var strategyInstance = _strategyFactory.CreateStrategy<ISingleAssetStrategy>(
+                config.StrategyName,
+                config.InitialCapital,
+                symbolSpecificParameters
+            );
+
+            if (strategyInstance == null)
+            {
+                _logger.LogError("[RunId: {RunId}] Failed to create strategy instance '{StrategyName}' for {Symbol}.", runId, config.StrategyName, symbol);
+                return null;
+            }
+
+            var historicalPriceService = scope.ServiceProvider.GetRequiredService<IHistoricalPriceService>();
+            var orderedData = (await historicalPriceService.GetHistoricalPrices(symbol, interval))
+                .OrderBy(d => d.Timestamp)
+                .ToList();
+
+            int strategyMinimumLookback = strategyInstance.GetRequiredLookbackPeriod();
+            if (orderedData.Count < strategyMinimumLookback)
+            {
+                _logger.LogWarning("[RunId: {RunId}] Not enough historical data for {Symbol} [{Interval}] ({Count} bars) to meet lookback requirement of {Lookback}. Skipping.",
+                    runId, symbol, interval, orderedData.Count, strategyMinimumLookback);
+                return null;
+            }
+
+            _logger.LogDebug("[RunId: {RunId}] Loaded {Count} bars for {Symbol} [{Interval}]. Pre-calculating indicators...", runId, orderedData.Count, symbol, interval);
+
+            var highPrices = orderedData.Select(p => p.HighPrice).ToArray();
+            var lowPrices = orderedData.Select(p => p.LowPrice).ToArray();
+            var closePrices = orderedData.Select(p => p.ClosePrice).ToArray();
+
+            var atrPeriod = ParameterHelper.GetParameterOrDefault(config.StrategyParameters, "AtrPeriod", 14);
+            var stdDevMultiplier = strategyInstance.GetStdDevMultiplier();
+
+            var movingAverage = _gpuIndicatorService.CalculateSma(closePrices, strategyMinimumLookback);
+            var standardDeviation = _gpuIndicatorService.CalculateStdDev(closePrices, strategyMinimumLookback);
+            var rsi = strategyInstance.CalculateRSI(closePrices, strategyMinimumLookback);
+            var atr = _gpuIndicatorService.CalculateAtr(highPrices, lowPrices, closePrices, atrPeriod);
+            var upperBand = movingAverage.Zip(standardDeviation, (m, s) => m + (stdDevMultiplier * s)).ToArray();
+            var lowerBand = movingAverage.Zip(standardDeviation, (m, s) => m - (stdDevMultiplier * s)).ToArray();
+
+            var indicators = new Dictionary<string, double[]>
+            {
+                { "RSI", rsi },
+                { "UpperBand", upperBand },
+                { "LowerBand", lowerBand },
+                { "ATR", atr },
+                { "SMA", movingAverage }
+            };
+
+            var timestampIndexMap = orderedData
+                .Select((data, index) => new { data.Timestamp, index })
+                .ToDictionary(x => x.Timestamp, x => x.index);
+
+            var mocExitTimestamps = config.UseMocExit
+                ? orderedData.GroupBy(p => p.Timestamp.Date).Select(g => g.Max(p => p.Timestamp)).ToHashSet()
+                : new HashSet<DateTime>();
+
+            _logger.LogInformation("[RunId: {RunId}] Sleeve for {Symbol} [{Interval}] prepared successfully.", runId, symbol, interval);
+
+            return new StrategySleeve(
+                Symbol: symbol,
+                Interval: interval,
+                Strategy: strategyInstance,
+                PriceData: orderedData,
+                Indicators: indicators,
+                TimestampIndexMap: timestampIndexMap,
+                MocExitTimestamps: mocExitTimestamps
+            );
+        }
+
+        private async Task<TradeSummary?> ClosePositionAsync(
+            IPortfolioManager portfolioManager, ITransactionCostService transactionCostService,
+            IPerformanceCalculator performanceCalculator, ITradeService tradesService,
+            TradeSummary activeTrade, Position currentPosition, HistoricalPriceModel exitBar,
+            string symbol, string interval, Guid runId, int rollingKellyLookbackTrades,
+            ConcurrentDictionary<string, double> symbolKellyHalfFractions, string exitReason,
+            Dictionary<string, double> currentIndicatorValues)
+        {
+            double rawExitPrice;
+
+            if (exitReason.StartsWith("ATR Stop-Loss"))
+                rawExitPrice = currentPosition.StopLossPrice;
+            else if (exitReason.StartsWith("Profit Target"))
+                rawExitPrice = currentIndicatorValues["SMA"];
+            else
+                rawExitPrice = exitBar.ClosePrice;
+
+            PositionDirection exitDirection = currentPosition.Direction;
+            double effectiveExitPrice = await transactionCostService.CalculateExitCost(rawExitPrice, exitDirection, symbol, interval, exitBar.Timestamp);
+
+            double commissionCost = await transactionCostService.CalculateCommissionCost(rawExitPrice, currentPosition.Quantity, symbol, interval, exitBar.Timestamp);
+            double slippageCost = await transactionCostService.CalculateSlippageCost(rawExitPrice, currentPosition.Quantity, exitDirection, symbol, interval, exitBar.Timestamp);
+            double spreadAndOtherCost = await transactionCostService.GetSpreadCost(rawExitPrice, currentPosition.Quantity, symbol, interval, exitBar.Timestamp);
+            double totalExitCost = commissionCost + slippageCost + spreadAndOtherCost;
+
+            double grossPnl = (exitDirection == PositionDirection.Long)
+                 ? (rawExitPrice - currentPosition.AverageEntryPrice) * currentPosition.Quantity
+                 : (currentPosition.AverageEntryPrice - rawExitPrice) * currentPosition.Quantity;
+
+            double totalTransactionCost = (activeTrade.TotalTransactionCost ?? 0) + totalExitCost;
+            double netPnl = grossPnl - totalTransactionCost;
+
+            activeTrade.ExitDate = exitBar.Timestamp;
+            activeTrade.ExitPrice = effectiveExitPrice;
+            activeTrade.GrossProfitLoss = grossPnl;
+            activeTrade.ProfitLoss = netPnl;
+            activeTrade.CommissionCost = (activeTrade.CommissionCost ?? 0) + commissionCost;
+            activeTrade.SlippageCost = (activeTrade.SlippageCost ?? 0) + slippageCost;
+            activeTrade.OtherTransactionCost = (activeTrade.OtherTransactionCost ?? 0) + spreadAndOtherCost;
+            activeTrade.TotalTransactionCost = totalTransactionCost;
+            activeTrade.HoldingPeriodMinutes = (int)(exitBar.Timestamp - activeTrade.EntryDate).TotalMinutes;
+            activeTrade.ExitReason = exitReason;
+
+            activeTrade.EntryPrice = currentPosition.AverageEntryPrice;
+
+            var closedTrade = await portfolioManager.ClosePosition(activeTrade);
+
+            if (closedTrade != null)
+            {
+                await tradesService.SaveOrUpdateBacktestTrade(closedTrade);
+            }
+            return closedTrade;
+        }
+
+        private ISingleAssetStrategy? GetStrategyInstance(WalkForwardSleeve sleeve, double currentEquity)
+        {
+            if (_strategyCache.TryGetValue(sleeve.Symbol, out var cachedStrategy))
+            {
+                return cachedStrategy;
+            }
+
+            var parameters = JsonSerializer.Deserialize<Dictionary<string, object>>(sleeve.OptimizedParametersJson) ?? new();
+            var strategy = _strategyFactory.CreateStrategy<ISingleAssetStrategy>(sleeve.StrategyName, currentEquity, parameters);
+            if (strategy != null)
+            {
+                _strategyCache.TryAdd(sleeve.Symbol, strategy);
+            }
+            return strategy;
+        }
+
+        private Dictionary<string, double> GetIndicatorValuesForTimestamp(string symbol, DateTime timestamp)
+        {
+            var values = new Dictionary<string, double>();
+            if (_indicatorCache.TryGetValue(symbol, out var symbolIndicators))
+            {
+                if (symbolIndicators.TryGetValue("TimestampMap", out var timestampMapping))
+                {
+                    // This is a simplified lookup. A more robust implementation would use a direct map.
+                    // For now, we find the index.
+                    var timestamps = symbolIndicators["Timestamps"];
+                    int index = Array.IndexOf(timestamps, (double)timestamp.ToOADate());
+                    if (index != -1)
+                    {
+                        foreach (var kvp in symbolIndicators)
+                        {
+                            if (kvp.Key != "Timestamps")
+                            {
+                                values[kvp.Key] = kvp.Value[index];
+                            }
+                        }
+                    }
+                }
+            }
+            return values;
+        }
+
         [AutomaticRetry(Attempts = 1)]
         public async Task RunBacktest(BacktestConfiguration config, Guid runId)
         {
@@ -125,7 +600,7 @@ namespace Temperance.Services.BackTesting.Implementations
                         config.StrategyName,
                         config.InitialCapital,
                         symbolSpecificParameters
-                    ); 
+                    );
 
                     if (strategyInstance == null) return;
 
@@ -311,105 +786,6 @@ namespace Temperance.Services.BackTesting.Implementations
                 throw;
             }
         }
-
-        private async Task<TradeSummary?> ClosePositionAsync(
-            IPortfolioManager portfolioManager, ITransactionCostService transactionCostService,
-            IPerformanceCalculator performanceCalculator, ITradeService tradesService,
-            TradeSummary activeTrade, Position currentPosition, HistoricalPriceModel exitBar,
-            string symbol, string interval, Guid runId, int rollingKellyLookbackTrades,
-            ConcurrentDictionary<string, double> symbolKellyHalfFractions, string exitReason,
-            Dictionary<string, double> currentIndicatorValues)
-        {
-            // ... The exact same implementation of this method from your original BacktestRunner.cs ...
-            // This logic is sound and can be reused directly.
-            double rawExitPrice;
-
-            if (exitReason.StartsWith("ATR Stop-Loss"))
-                rawExitPrice = currentPosition.StopLossPrice;
-            else if (exitReason.StartsWith("Profit Target"))
-                rawExitPrice = currentIndicatorValues["SMA"];
-            else
-                rawExitPrice = exitBar.ClosePrice;
-
-            PositionDirection exitDirection = currentPosition.Direction;
-            double effectiveExitPrice = await transactionCostService.CalculateExitCost(rawExitPrice, exitDirection, symbol, interval, exitBar.Timestamp);
-
-            double commissionCost = await transactionCostService.CalculateCommissionCost(rawExitPrice, currentPosition.Quantity, symbol, interval, exitBar.Timestamp);
-            double slippageCost = await transactionCostService.CalculateSlippageCost(rawExitPrice, currentPosition.Quantity, exitDirection, symbol, interval, exitBar.Timestamp);
-            double spreadAndOtherCost = await transactionCostService.GetSpreadCost(rawExitPrice, currentPosition.Quantity, symbol, interval, exitBar.Timestamp);
-            double totalExitCost = commissionCost + slippageCost + spreadAndOtherCost;
-
-            double grossPnl = (exitDirection == PositionDirection.Long)
-                 ? (rawExitPrice - currentPosition.AverageEntryPrice) * currentPosition.Quantity
-                 : (currentPosition.AverageEntryPrice - rawExitPrice) * currentPosition.Quantity;
-
-            double totalTransactionCost = (activeTrade.TotalTransactionCost ?? 0) + totalExitCost;
-            double netPnl = grossPnl - totalTransactionCost;
-
-            activeTrade.ExitDate = exitBar.Timestamp;
-            activeTrade.ExitPrice = effectiveExitPrice;
-            activeTrade.GrossProfitLoss = grossPnl;
-            activeTrade.ProfitLoss = netPnl;
-            activeTrade.CommissionCost = (activeTrade.CommissionCost ?? 0) + commissionCost;
-            activeTrade.SlippageCost = (activeTrade.SlippageCost ?? 0) + slippageCost;
-            activeTrade.OtherTransactionCost = (activeTrade.OtherTransactionCost ?? 0) + spreadAndOtherCost;
-            activeTrade.TotalTransactionCost = totalTransactionCost;
-            activeTrade.HoldingPeriodMinutes = (int)(exitBar.Timestamp - activeTrade.EntryDate).TotalMinutes;
-            activeTrade.ExitReason = exitReason;
-
-            activeTrade.EntryPrice = currentPosition.AverageEntryPrice;
-
-            var closedTrade = await portfolioManager.ClosePosition(activeTrade);
-
-            if (closedTrade != null)
-            {
-                await tradesService.SaveOrUpdateBacktestTrade(closedTrade);
-            }
-            return closedTrade;
-        }
-
-        private ISingleAssetStrategy? GetStrategyInstance(WalkForwardSleeve sleeve, double currentEquity)
-        {
-            if (_strategyCache.TryGetValue(sleeve.Symbol, out var cachedStrategy))
-            {
-                return cachedStrategy;
-            }
-
-            var parameters = JsonSerializer.Deserialize<Dictionary<string, object>>(sleeve.OptimizedParametersJson) ?? new();
-            var strategy = _strategyFactory.CreateStrategy<ISingleAssetStrategy>(sleeve.StrategyName, currentEquity, parameters);
-            if (strategy != null)
-            {
-                _strategyCache.TryAdd(sleeve.Symbol, strategy);
-            }
-            return strategy;
-        }
-
-        private Dictionary<string, double> GetIndicatorValuesForTimestamp(string symbol, DateTime timestamp)
-        {
-            var values = new Dictionary<string, double>();
-            if (_indicatorCache.TryGetValue(symbol, out var symbolIndicators))
-            {
-                if (symbolIndicators.TryGetValue("TimestampMap", out var timestampMapping))
-                {
-                    // This is a simplified lookup. A more robust implementation would use a direct map.
-                    // For now, we find the index.
-                    var timestamps = symbolIndicators["Timestamps"];
-                    int index = Array.IndexOf(timestamps, (double)timestamp.ToOADate());
-                    if (index != -1)
-                    {
-                        foreach (var kvp in symbolIndicators)
-                        {
-                            if (kvp.Key != "Timestamps")
-                            {
-                                values[kvp.Key] = kvp.Value[index];
-                            }
-                        }
-                    }
-                }
-            }
-            return values;
-        }
-
 
         #region
         //[AutomaticRetry(Attempts = 1)]

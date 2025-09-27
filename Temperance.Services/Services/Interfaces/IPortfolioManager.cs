@@ -11,6 +11,7 @@ namespace Temperance.Services.Services.Interfaces
         double GetAvailableCapital();
         double GetAllocatedCapital();
         IReadOnlyList<Position> GetOpenPositions();
+        Position? GetOpenPosition(string symbol, string interval);
         void UpdateHoldings(Dictionary<string, double> currentPrices);
         IReadOnlyList<TradeSummary> GetCompletedTradesHistory();
 
