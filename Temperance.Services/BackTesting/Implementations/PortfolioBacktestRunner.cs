@@ -42,19 +42,21 @@ namespace Temperance.Services.BackTesting.Orchestration.Implementations
 
             var activeSleeve = await _walkForwardRepoitory.GetActiveSleeveAsync(sessionId, oosStartDate);
             _logger.LogInformation($"Active sleeve count: {activeSleeve.Count()}");
+
             var backtestConfig = new BacktestConfiguration
             {
-                RunId = Guid.NewGuid(), // A unique ID for this specific 1-month run
+                RunId = Guid.NewGuid(),
                 SessionId = session.SessionId,
-                StrategyName = session.StrategyName, // The overarching strategy
+                StrategyName = session.StrategyName,
                 Symbols = activeSleeve.Select(s => s.Symbol).ToList(),
+                Intervals = new List<string> { "60min" },
                 PortfolioParameters = activeSleeve.ToDictionary(
                     s => s.Symbol,
                     s => JsonSerializer.Deserialize<Dictionary<string, object>>(s.OptimizedParametersJson)
                 ),
                 StartDate = oosStartDate,
                 EndDate = oosEndDate,
-                InitialCapital = session.CurrentCapital // Start with the capital from the end of last month
+                InitialCapital = session.CurrentCapital
             };
 
             await _backtestRunner.RunPortfolioBacktest(backtestConfig, backtestConfig.RunId);

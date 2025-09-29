@@ -40,7 +40,7 @@ namespace Temperance.Constellations.Controllers
 
             var configurationJson = JsonSerializer.Serialize(
                 configuration,
-                new JsonSerializerOptions { WriteIndented = true } 
+                new JsonSerializerOptions { WriteIndented = true }
             );
 
             _logger.LogInformation("Backtest configuration details: {ConfigurationJson}", configurationJson);
