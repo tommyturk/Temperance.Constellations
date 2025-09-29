@@ -124,12 +124,18 @@ namespace TradingApp.src.Data.Repositories.HistoricalPrices.Implementations
                 SELECT [OpenPrice] AS OpenPrice, [HighPrice] AS HighPrice, [LowPrice] AS LowPrice, [ClosePrice] AS ClosePrice, [Volume] AS Volume, [Timestamp] AS Timestamp
                 FROM {tableName}
                 ORDER BY [Timestamp] ASC;";
-            await using (var connection = new SqlConnection(_historicalPriceConnectionString))
+            try
             {
-                return (await connection.QueryAsync<HistoricalPriceModel>(sql)).ToList();
+                await using (var connection = new SqlConnection(_historicalPriceConnectionString))
+                {
+                    return (await connection.QueryAsync<HistoricalPriceModel>(sql)).ToList();
+                }
+            }
+            catch (Exception ex)
+            {
+                return new List<HistoricalPriceModel>();
             }
         }
-
 
         #region Other Methods
         public Task<decimal> GetLatestPriceAsync(string symbol, DateTime backtestTimestamp)
