@@ -409,6 +409,12 @@ namespace Temperance.Services.BackTesting.Implementations
                 if(effectiveStart > effectiveEnd) continue;
 
                 var priceChunk = await _historicalPriceService.GetHistoricalPrices(symbol, interval, effectiveStart, effectiveEnd);
+                if(priceChunk == null || !priceChunk.Any())
+                {
+                    _logger.LogWarning("[RunId: {RunId}] No historical prices found for {Symbol} [{Interval}] between {StartDate:yyyy-MM-dd} and {EndDate:yyyy-MM-dd}.",
+                        runId, symbol, interval, effectiveStart, effectiveEnd);
+                    continue;
+                }
                 allPrices.AddRange(priceChunk);
             }
 

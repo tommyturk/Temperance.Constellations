@@ -9,13 +9,13 @@ namespace Temperance.Services.BackTesting.Orchestration.Implementations
 {
     public class PortfolioBacktestRunner : IPortfolioBacktestRunner
     {
-        private readonly IBacktestRunner _backtestRunner; // The engine
+        private readonly IBacktestRunner _backtestRunner;
         private readonly IWalkForwardRepository _walkForwardRepoitory;
         private readonly IBackgroundJobClient _backgroundJobClient;
         private readonly ILogger<PortfolioBacktestRunner> _logger;
 
         public PortfolioBacktestRunner(
-            IBacktestRunner coreBacktestRunner, // Inject the engine
+            IBacktestRunner coreBacktestRunner,
             IWalkForwardRepository walkForwardRepo,
             IBackgroundJobClient hangfireClient,
             ILogger<PortfolioBacktestRunner> logger)
