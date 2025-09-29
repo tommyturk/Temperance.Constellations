@@ -121,9 +121,9 @@ namespace TradingApp.src.Data.Repositories.HistoricalPrices.Implementations
         {
             var tableName = _sqlHelper.SanitizeTableName(symbol, interval);
             string sql = $@"
-                SELECT [open] AS Open, [high] AS High, [low] AS Low, [close] AS Close, [volume] AS Volume, [timestamp] AS Timestamp
+                SELECT [OpenPrice] AS OpenPrice, [HighPrice] AS HighPrice, [LowPrice] AS LowPrice, [ClosePrice] AS ClosePrice, [Volume] AS Volume, [Timestamp] AS Timestamp
                 FROM {tableName}
-                ORDER BY [timestamp] ASC;";
+                ORDER BY [Timestamp] ASC;";
             await using (var connection = new SqlConnection(_historicalPriceConnectionString))
             {
                 return (await connection.QueryAsync<HistoricalPriceModel>(sql)).ToList();

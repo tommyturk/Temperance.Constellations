@@ -10,5 +10,6 @@
         public DateTime InSampleEndDate { get; set; }
         public string Symbol { get; set; }
         public string ResultKey { get; set; }
+        public string OptimizedParametersJson { get; set; }
     }
 }

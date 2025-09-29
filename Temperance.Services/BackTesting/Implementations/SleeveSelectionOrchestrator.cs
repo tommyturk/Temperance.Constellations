@@ -40,28 +40,34 @@ namespace Temperance.Services.BackTesting.Implementations
             _logger.LogInformation("PHASE 2: Selecting initial sleeve for SessionId: {SessionId}", sessionId);
 
             var completedJobs = await _walkForwardRepository.GetCompletedJobsForSessionAsync(sessionId);
-
             var validJobs = completedJobs.Where(job => !string.IsNullOrEmpty(job.ResultKey)).ToList();
 
             if (!validJobs.Any())
             {
-                _logger.LogError("No completed jobs with valid optimization results found for session {SessionId}. Cannot create sleeve.", sessionId);
+                _logger.LogError("No completed jobs with valid results for session {SessionId}.", sessionId);
                 return;
             }
 
-            var session = await _walkForwardRepository.GetSessionAsync(sessionId);
-            var inSampleStartDate = session.StartDate;
-            var resultKeys = validJobs.Select(job => job.ResultKey).ToList();
+            var resultKeys = validJobs.Select(job => job.ResultKey).Distinct().ToList();
+            var allOptimizationResults = await _walkForwardRepository.GetResultsByKeysAsync(resultKeys, sessionId);
 
-            var allOptimizationResults = await _walkForwardRepository.GetResultsByKeysAsync(resultKeys);
-            var validResults = allOptimizationResults
+            var bestResultsBySymbol = allOptimizationResults
                 .Where(result => result != null && result.Id != null)
+                .GroupBy(result => result.Symbol)
+                .Select(group => group.First())
                 .ToList();
-            // 4. Create sleeve entries for ALL results found.
-            // The TradingPeriodStartDate is when this sleeve becomes active.
+
+            _logger.LogInformation("Found {Count} unique symbols with optimization results for session {SessionId}.", bestResultsBySymbol.Count, sessionId);
+
+            if (!bestResultsBySymbol.Any())
+            {
+                _logger.LogError("Could not determine a single best optimization result for any symbol in session {SessionId}.", sessionId);
+                return;
+            }
+
             var tradingPeriodStartDate = inSampleEndDate.AddDays(1);
 
-            var newSleeveEntries = validResults.Select(result => new WalkForwardSleeve
+            var newSleeveEntries = bestResultsBySymbol.Select(result => new WalkForwardSleeve
             {
                 SessionId = sessionId,
                 TradingPeriodStartDate = tradingPeriodStartDate,
@@ -75,10 +81,9 @@ namespace Temperance.Services.BackTesting.Implementations
             }).ToList();
 
             await _walkForwardRepository.CreateSleeveBatchAsync(newSleeveEntries);
-            _logger.LogInformation("Created and saved {Count} securities for the initial sleeve.", newSleeveEntries.Count);
+            _logger.LogInformation("Selected best parameters and created {Count} sleeves for the initial portfolio.", newSleeveEntries.Count);
 
             var firstOosDate = tradingPeriodStartDate;
-
             _backgroundJobClient.Enqueue<IPortfolioBacktestRunner>(
                 runner => runner.ExecuteBacktest(sessionId, firstOosDate)
             );

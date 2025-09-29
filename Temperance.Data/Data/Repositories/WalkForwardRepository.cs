@@ -44,7 +44,7 @@ namespace Temperance.Data.Data.Repositories.WalkForward.Implementations
         public async Task<IEnumerable<OptimizationJob>> GetCompletedJobsForSessionAsync(Guid sessionId)
         {
             const string sql = @"
-                SELECT OJ.*, SOP.Symbol, SOP.ResultKey FROM [Conductor].[OptimizationJobs] AS OJ
+                SELECT OJ.*, SOP.Symbol, SOP.ResultKey, SOP.OptimizedParametersJson FROM [Conductor].[OptimizationJobs] AS OJ
                 LEFT JOIN [Ludus].[StrategyOptimizedParameters] AS SOP
                 ON OJ.JobId = SOP.JobId
                 WHERE OJ.SessionId = @SessionId AND OJ.Status LIKE '%Completed%';";
@@ -52,15 +52,17 @@ namespace Temperance.Data.Data.Repositories.WalkForward.Implementations
             await using var connection = new SqlConnection(_connectionString);
             return await connection.QueryAsync<OptimizationJob>(sql, new { SessionId = sessionId });
         }
-        public async Task<IEnumerable<StrategyOptimizedParameters>> GetResultsByKeysAsync(List<string> resultKeys)
+
+        public async Task<IEnumerable<StrategyOptimizedParameters>> GetResultsByKeysAsync(List<string> resultKeys, Guid sessionId)
         {
             const string sql = @"
                 SELECT *
                 FROM [Ludus].[StrategyOptimizedParameters]
-                WHERE ResultKey IN @ResultKeys;";
+                WHERE ResultKey IN @ResultKeys;
+                    AND SessionId = '@SessionId'";
 
             await using var connection = new SqlConnection(_connectionString);
-            return await connection.QueryAsync<StrategyOptimizedParameters>(sql, new { ResultKeys = resultKeys });
+            return await connection.QueryAsync<StrategyOptimizedParameters>(sql, new { ResultKeys = resultKeys, SessionId = sessionId });
         }
 
         public async Task CreateSleeveBatchAsync(List<WalkForwardSleeve> sleeves)

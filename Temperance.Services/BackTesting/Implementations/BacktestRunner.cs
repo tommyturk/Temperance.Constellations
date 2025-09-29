@@ -398,8 +398,22 @@ namespace Temperance.Services.BackTesting.Implementations
             }
 
             var historicalPriceService = scope.ServiceProvider.GetRequiredService<IHistoricalPriceService>();
-            var orderedData = (await historicalPriceService.GetHistoricalPrices(symbol, interval))
-                .OrderBy(d => d.Timestamp)
+
+            var allPrices = new List<HistoricalPriceModel>();
+            for(var year = config.StartDate.Year; year <= config.EndDate.Year; year++)
+            {
+                var yearStart = new DateTime(year, 1, 1);
+                var yearEnd = new DateTime(year, 12, 31);
+                var effectiveStart = config.StartDate > yearStart ? config.StartDate : yearStart;
+                var effectiveEnd = config.EndDate < yearEnd ? config.EndDate : yearEnd;
+                if(effectiveStart > effectiveEnd) continue;
+
+                var priceChunk = await _historicalPriceService.GetHistoricalPrices(symbol, interval, effectiveStart, effectiveEnd);
+                allPrices.AddRange(priceChunk);
+            }
+
+            var orderedData = allPrices
+                .OrderBy(p => p.Timestamp)
                 .ToList();
 
             int strategyMinimumLookback = strategyInstance.GetRequiredLookbackPeriod();
