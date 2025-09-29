@@ -19,9 +19,7 @@ namespace Temperance.Constellations.Controllers
             _backgroundJobClient = backgroundJobClient;
         }
 
-        /// <summary>
-        /// ENTRY POINT: Kicks off the entire 20-year walk-forward process.
-        /// </summary>
+
         [HttpPost("start")]
         public IActionResult StartWalkForwardOrchestration(
             [FromQuery] Guid sessionId, [FromQuery] string strategyName,
@@ -33,9 +31,6 @@ namespace Temperance.Constellations.Controllers
             return Ok("Initial training phase enqueued.");
         }
 
-        /// <summary>
-        /// STATE TRANSITION: Called by Conductor when the initial training batch is complete.
-        /// </summary>
         [HttpPost("select-sleeve")]
         public IActionResult TriggerSleeveSelection([FromQuery] Guid sessionId, [FromQuery] DateTime inSampleEndDate)
         {
@@ -45,15 +40,11 @@ namespace Temperance.Constellations.Controllers
             return Ok("Sleeve selection phase enqueued.");
         }
 
-        /// <summary>
-        /// STATE TRANSITION: Called by Conductor when a fine-tuning batch is complete.
-        /// </summary>
         [HttpPost("run-portfolio-backtest")]
         public IActionResult TriggerPortfolioBacktest([FromQuery] Guid sessionId, [FromQuery] DateTime oosDate)
         {
             _logger.LogInformation("Received 'Run Portfolio Backtest' signal from Conductor for SessionId: {SessionId}, OOS Date: {OOSDate}", sessionId, oosDate);
 
-            // CORRECTED: Call the method on the orchestrator interface we designed.
             _backgroundJobClient.Enqueue<IPortfolioBacktestOrchestrator>(orchestrator =>
                 orchestrator.ExecuteNextPeriod(sessionId, oosDate));
 

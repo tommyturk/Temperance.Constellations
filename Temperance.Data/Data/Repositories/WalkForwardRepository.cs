@@ -41,6 +41,19 @@ namespace Temperance.Data.Data.Repositories.WalkForward.Implementations
             return await connection.QueryAsync<WalkForwardSleeve>(sql, new { SessionId = sessionId, TradingPeriodStartDate = tradingPeriodStartDate });
         }
 
+        public async Task<HashSet<string>> GetSleeveSymbolsForPeriodAsync(Guid sessionId, DateTime tradingPeriodStartDate)
+        {
+            const string sql = @"
+                SELECT Symbol 
+                FROM [Constellations].[WalkForwardSleeves]
+                WHERE SessionId = @SessionId 
+                  AND TradingPeriodStartDate = @TradingPeriodStartDate;";
+
+            await using var connection = new SqlConnection(_connectionString);
+            var symbols = await connection.QueryAsync<string>(sql, new { SessionId = sessionId, TradingPeriodStartDate = tradingPeriodStartDate });
+            return new HashSet<string>(symbols);
+        }
+
         public async Task<IEnumerable<OptimizationJob>> GetCompletedJobsForSessionAsync(Guid sessionId)
         {
             const string sql = @"
@@ -58,8 +71,8 @@ namespace Temperance.Data.Data.Repositories.WalkForward.Implementations
             const string sql = @"
                 SELECT *
                 FROM [Ludus].[StrategyOptimizedParameters]
-                WHERE ResultKey IN @ResultKeys;
-                    AND SessionId = '@SessionId'";
+                WHERE ResultKey IN @ResultKeys
+                    AND SessionId = @SessionId;";
 
             await using var connection = new SqlConnection(_connectionString);
             return await connection.QueryAsync<StrategyOptimizedParameters>(sql, new { ResultKeys = resultKeys, SessionId = sessionId });

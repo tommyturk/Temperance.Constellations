@@ -13,6 +13,7 @@ namespace Temperance.Conductor.Repository.Interfaces
         Task CreateSleeveBatchAsync(List<WalkForwardSleeve> sleeves);
         Task<IEnumerable<OptimizationJob>> GetCompletedJobsForSessionAsync(Guid sessionId);
         Task<IEnumerable<StrategyOptimizedParameters>> GetResultsByKeysAsync(List<string> resultKeys, Guid sessionId);
+        Task<HashSet<string>> GetSleeveSymbolsForPeriodAsync(Guid sessionId, DateTime tradingPeriodStartDate);
     }
 }
 

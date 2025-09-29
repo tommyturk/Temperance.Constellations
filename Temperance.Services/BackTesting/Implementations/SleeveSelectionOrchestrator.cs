@@ -39,17 +39,7 @@ namespace Temperance.Services.BackTesting.Implementations
         {
             _logger.LogInformation("PHASE 2: Selecting initial sleeve for SessionId: {SessionId}", sessionId);
 
-            var completedJobs = await _walkForwardRepository.GetCompletedJobsForSessionAsync(sessionId);
-            var validJobs = completedJobs.Where(job => !string.IsNullOrEmpty(job.ResultKey)).ToList();
-
-            if (!validJobs.Any())
-            {
-                _logger.LogError("No completed jobs with valid results for session {SessionId}.", sessionId);
-                return;
-            }
-
-            var resultKeys = validJobs.Select(job => job.ResultKey).Distinct().ToList();
-            var allOptimizationResults = await _walkForwardRepository.GetResultsByKeysAsync(resultKeys, sessionId);
+            // ... (your existing code to get completedJobs, validJobs, resultKeys, allOptimizationResults)
 
             var bestResultsBySymbol = allOptimizationResults
                 .Where(result => result != null && result.Id != null)
@@ -67,7 +57,23 @@ namespace Temperance.Services.BackTesting.Implementations
 
             var tradingPeriodStartDate = inSampleEndDate.AddDays(1);
 
-            var newSleeveEntries = bestResultsBySymbol.Select(result => new WalkForwardSleeve
+            var existingSleeveSymbols = await _walkForwardRepository.GetSleeveSymbolsForPeriodAsync(sessionId, tradingPeriodStartDate);
+
+            var newResultsToSleeve = bestResultsBySymbol
+                .Where(result => !existingSleeveSymbols.Contains(result.Symbol))
+                .ToList();
+
+            if (!newResultsToSleeve.Any())
+            {
+                _logger.LogInformation("All best symbols for this period have already been added to the sleeve. No new sleeves created.");
+                var firstOosDate = tradingPeriodStartDate;
+                _backgroundJobClient.Enqueue<IPortfolioBacktestRunner>(runner => runner.ExecuteBacktest(sessionId, firstOosDate));
+                return;
+            }
+            // --- END CHECK ---
+
+
+            var newSleeveEntries = newResultsToSleeve.Select(result => new WalkForwardSleeve
             {
                 SessionId = sessionId,
                 TradingPeriodStartDate = tradingPeriodStartDate,
@@ -81,7 +87,7 @@ namespace Temperance.Services.BackTesting.Implementations
             }).ToList();
 
             await _walkForwardRepository.CreateSleeveBatchAsync(newSleeveEntries);
-            _logger.LogInformation("Selected best parameters and created {Count} sleeves for the initial portfolio.", newSleeveEntries.Count);
+            _logger.LogInformation("Selected best parameters and created {Count} new sleeves for the initial portfolio.", newSleeveEntries.Count);
 
             var firstOosDate = tradingPeriodStartDate;
             _backgroundJobClient.Enqueue<IPortfolioBacktestRunner>(
