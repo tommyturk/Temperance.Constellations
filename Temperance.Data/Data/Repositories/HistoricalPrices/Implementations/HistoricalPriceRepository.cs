@@ -4,7 +4,6 @@ using System.Data;
 using Temperance.Data.Data.Repositories.Securities.Interfaces;
 using Temperance.Data.Models.HistoricalPriceData;
 using Temperance.Utilities.Helpers;
-using TradingApp.src.Core.Models;
 using TradingApp.src.Data.Repositories.HistoricalPrices.Interfaces;
 
 namespace TradingApp.src.Data.Repositories.HistoricalPrices.Implementations

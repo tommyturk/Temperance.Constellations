@@ -1,9 +1,11 @@
 ﻿using Hangfire;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using System.Text.Json;
 using Temperance.Conductor.Repository.Interfaces;
 using Temperance.Data.Models.Backtest;
 using Temperance.Services.BackTesting.Interfaces;
+using TradingApp.src.Core.Services.Interfaces;
 
 namespace Temperance.Services.BackTesting.Orchestration.Implementations
 {
@@ -12,17 +14,20 @@ namespace Temperance.Services.BackTesting.Orchestration.Implementations
         private readonly IBacktestRunner _backtestRunner;
         private readonly IWalkForwardRepository _walkForwardRepoitory;
         private readonly IBackgroundJobClient _backgroundJobClient;
+        private readonly ITradeService _tradeService;
         private readonly ILogger<PortfolioBacktestRunner> _logger;
 
         public PortfolioBacktestRunner(
             IBacktestRunner coreBacktestRunner,
             IWalkForwardRepository walkForwardRepo,
             IBackgroundJobClient hangfireClient,
+            ITradeService tradeService,
             ILogger<PortfolioBacktestRunner> logger)
         {
             _backtestRunner = coreBacktestRunner;
             _walkForwardRepoitory = walkForwardRepo;
             _backgroundJobClient = hangfireClient;
+            _tradeService = tradeService;
             _logger = logger;
         }
 
@@ -58,6 +63,8 @@ namespace Temperance.Services.BackTesting.Orchestration.Implementations
                 EndDate = oosEndDate,
                 InitialCapital = session.CurrentCapital
             };
+
+            await _tradeService.InitializeBacktestRunAsync(backtestConfig, backtestConfig.RunId);
 
             await _backtestRunner.RunPortfolioBacktest(backtestConfig, backtestConfig.RunId);
 

@@ -1,25 +1,19 @@
 ﻿using Hangfire;
-using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using System.Collections.Concurrent;
 using System.Text.Json;
-using Temperance.Conductor.Repository.Interfaces;
 using Temperance.Data.Data.Repositories.Trade.Interfaces;
 using Temperance.Data.Models.Backtest;
 using Temperance.Data.Models.HistoricalData;
 using Temperance.Data.Models.HistoricalPriceData;
 using Temperance.Data.Models.MarketHealth;
-using Temperance.Data.Models.Performance;
-using Temperance.Data.Models.Strategy;
 using Temperance.Data.Models.Trading;
 using Temperance.Services.BackTesting.Interfaces;
 using Temperance.Services.Factories.Interfaces;
 using Temperance.Services.Services.Interfaces;
 using Temperance.Services.Trading.Strategies;
-using Temperance.Services.Trading.Strategies.Momentum;
 using Temperance.Utilities.Helpers;
-using TradingApp.src.Core.Services.Implementations;
 using TradingApp.src.Core.Services.Interfaces;
 namespace Temperance.Services.BackTesting.Implementations
 {
@@ -60,6 +54,7 @@ namespace Temperance.Services.BackTesting.Implementations
             IQualityFilterService qualityFilterService,
             IMarketHealthService marketHealthService,
             IConductorClient conductorClient,
+            IHistoricalPriceService historicalPriceService,
             ILogger<BacktestRunner> logger)
         {
             _backgroundJobClient = backgroundJobClient;
@@ -75,6 +70,7 @@ namespace Temperance.Services.BackTesting.Implementations
             _qualityFilterService = qualityFilterService;
             _marketHealthService = marketHealthService;
             _conductorClient = conductorClient;
+            _historicalPriceService = historicalPriceService;
             _logger = logger;
         }
 
@@ -108,12 +104,12 @@ namespace Temperance.Services.BackTesting.Implementations
             var allTrades = new ConcurrentBag<TradeSummary>();
 
             var initialPortfolioState = await _tradesService.GetLatestPortfolioStateAsync(config.SessionId.Value);
-            
+
             if (initialPortfolioState.HasValue)
                 _portfolioManager.HydrateState(initialPortfolioState.Value.Cash, initialPortfolioState.Value.OpenPositions);
             else
                 await _portfolioManager.Initialize(config.SessionId.Value, config.InitialCapital);
-            
+
             try
             {
                 await _tradesService.UpdateBacktestRunStatusAsync(runId, "Loading Data");
@@ -121,7 +117,7 @@ namespace Temperance.Services.BackTesting.Implementations
                 var marketHealthCache = new ConcurrentDictionary<DateTime, MarketHealthScore>();
                 for (var day = config.StartDate.Date; day <= config.EndDate.Date; day = day.AddDays(1))
                     marketHealthCache.TryAdd(day, await _marketHealthService.GetCurrentMarketHealth(day));
-                
+
                 var sleeves = new List<StrategySleeve>();
                 var testCaseStream = _securitiesOverviewService.StreamSecuritiesForBacktest(config.Symbols, config.Intervals);
                 await foreach (var testCase in testCaseStream)
@@ -160,7 +156,7 @@ namespace Temperance.Services.BackTesting.Implementations
                             var dataWindow = sleeve.PriceData.Take(globalIndex + 1).ToList();
                             var indicators = GetIndicatorsForBar(sleeve.Indicators, globalIndex);
                             string exitReason = sleeve.Strategy.GetExitReason(sleeve.CurrentPosition, in currentBar, dataWindow, indicators);
-                            
+
                             if (config.UseMocExit && sleeve.MocExitTimestamps.Contains(timestamp) && exitReason == "Hold")
                                 exitReason = "Market on Close";
 
@@ -226,7 +222,6 @@ namespace Temperance.Services.BackTesting.Implementations
             var transactionCostService = scope.ServiceProvider.GetRequiredService<ITransactionCostService>();
             var tradesService = scope.ServiceProvider.GetRequiredService<ITradeService>();
 
-            // ======== Step 1: Liquidity Check ========
             long minimumAdv = sleeve.Strategy.GetMinimumAverageDailyVolume();
             if (!liquidityService.IsSymbolLiquidAtTime(sleeve.Symbol, sleeve.Interval, minimumAdv, currentBar.Timestamp, 20, sleeve.PriceData))
             {
@@ -234,7 +229,6 @@ namespace Temperance.Services.BackTesting.Implementations
                 return;
             }
 
-            // ======== Step 2: Position Sizing ========
             double allocationAmount = sleeve.Strategy.GetAllocationAmount(
                 in currentBar,
                 dataWindow,
@@ -248,28 +242,24 @@ namespace Temperance.Services.BackTesting.Implementations
 
             if (allocationAmount <= 0) return;
 
-            // Convert the dollar allocation into a share quantity.
             double rawEntryPrice = currentBar.ClosePrice;
             int quantity = (int)Math.Floor(allocationAmount / rawEntryPrice);
-            if (quantity <= 0) return; // Allocation was too small to even buy one share.
+            if (quantity <= 0) return;
 
-            // ======== Step 3: Cost Analysis & Capital Check ========
             var direction = (signal == SignalDecision.Buy) ? PositionDirection.Long : PositionDirection.Short;
             double totalEntryCost = await transactionCostService.GetSpreadCost(rawEntryPrice, quantity, sleeve.Symbol, sleeve.Interval, currentBar.Timestamp);
             double totalCashOutlay = (quantity * rawEntryPrice) + totalEntryCost;
 
             if (!await _portfolioManager.CanOpenPosition(totalCashOutlay))
             {
-                // This is a common and important scenario. The strategy had a good idea, but the portfolio couldn't afford it.
                 _logger.LogWarning("[RunId: {RunId}] Insufficient capital to open {Symbol} position. Required: {Required:C}, Available: {Available:C}",
                     runId, sleeve.Symbol, totalCashOutlay, _portfolioManager.GetAvailableCapital());
                 return;
             }
 
-            // ======== Step 4: Execution ========
-            await _portfolioManager.OpenPosition(sleeve.Symbol, sleeve.Interval, direction, quantity, rawEntryPrice, currentBar.Timestamp, totalEntryCost);
+            var newOrExistingPosition = await _portfolioManager.OpenPosition(sleeve.Symbol,
+                sleeve.Interval, direction, quantity, rawEntryPrice, currentBar.Timestamp, totalEntryCost);
 
-            // Create the detailed record of the trade for later analysis.
             var activeTrade = new TradeSummary
             {
                 Id = Guid.NewGuid(),
@@ -285,24 +275,21 @@ namespace Temperance.Services.BackTesting.Implementations
                 EntryReason = sleeve.Strategy.GetEntryReason(in currentBar, dataWindow, indicators)
             };
 
-            // ======== Step 5: Update Sleeve State ========
-            sleeve.ActiveTrade = activeTrade;
-            sleeve.CurrentPosition = _portfolioManager.GetOpenPosition(sleeve.Symbol, sleeve.Interval);
-
-            // Set the initial stop-loss based on the conditions at the time of entry.
-            if (sleeve.CurrentPosition != null)
+            if (newOrExistingPosition == null)
             {
-                double entryAtr = indicators.GetValueOrDefault("ATR", 0);
-                if (entryAtr > 0)
-                {
-                    sleeve.CurrentPosition.StopLossPrice = (direction == PositionDirection.Long)
-                        ? sleeve.CurrentPosition.AverageEntryPrice - (sleeve.Strategy.GetAtrMultiplier() * entryAtr)
-                        : sleeve.CurrentPosition.AverageEntryPrice + (sleeve.Strategy.GetAtrMultiplier() * entryAtr);
-                }
+                _logger.LogCritical("[RunId: {RunId}] FATAL: Position open reported success but no position returned for {Symbol}. State inconsistency detected.", runId, sleeve.Symbol);
+                return;
             }
-            else
+
+            sleeve.ActiveTrade = activeTrade;
+            sleeve.CurrentPosition = newOrExistingPosition;
+
+            double entryAtr = indicators.GetValueOrDefault("ATR", 0);
+            if (entryAtr > 0)
             {
-                _logger.LogCritical("[RunId: {RunId}] FATAL: Could not find newly opened position for {Symbol}. State inconsistency detected.", runId, sleeve.Symbol);
+                sleeve.CurrentPosition.StopLossPrice = (direction == PositionDirection.Long)
+                    ? sleeve.CurrentPosition.AverageEntryPrice - (sleeve.Strategy.GetAtrMultiplier() * entryAtr)
+                    : sleeve.CurrentPosition.AverageEntryPrice + (sleeve.Strategy.GetAtrMultiplier() * entryAtr);
             }
 
             await tradesService.SaveOrUpdateBacktestTrade(activeTrade);
@@ -324,7 +311,7 @@ namespace Temperance.Services.BackTesting.Implementations
 
             double rawExitPrice = currentBar.ClosePrice;
             var exitSignal = sleeve.CurrentPosition.Direction == PositionDirection.Long ? SignalDecision.Sell : SignalDecision.Buy;
-            double effectiveExitPrice = await transactionCostService.CalculateExitCost(rawExitPrice, sleeve.CurrentPosition.Direction, 
+            double effectiveExitPrice = await transactionCostService.CalculateExitCost(rawExitPrice, sleeve.CurrentPosition.Direction,
                 sleeve.Symbol, sleeve.Interval, currentBar.Timestamp);
             double exitTransactionCost = Math.Abs(rawExitPrice - effectiveExitPrice) * sleeve.CurrentPosition.Quantity;
 
@@ -372,6 +359,7 @@ namespace Temperance.Services.BackTesting.Implementations
 
             return values;
         }
+
         private async Task<StrategySleeve?> PrepareStrategySleeveAsync(SymbolCoverageBacktestModel testCase, BacktestConfiguration config, Guid runId)
         {
             var symbol = testCase.Symbol.Trim();
@@ -397,19 +385,17 @@ namespace Temperance.Services.BackTesting.Implementations
                 return null;
             }
 
-            var historicalPriceService = scope.ServiceProvider.GetRequiredService<IHistoricalPriceService>();
-
             var allPrices = new List<HistoricalPriceModel>();
-            for(var year = config.StartDate.Year; year <= config.EndDate.Year; year++)
+            for (var year = config.StartDate.Year; year <= config.EndDate.Year; year++)
             {
                 var yearStart = new DateTime(year, 1, 1);
                 var yearEnd = new DateTime(year, 12, 31);
                 var effectiveStart = config.StartDate > yearStart ? config.StartDate : yearStart;
                 var effectiveEnd = config.EndDate < yearEnd ? config.EndDate : yearEnd;
-                if(effectiveStart > effectiveEnd) continue;
+                if (effectiveStart > effectiveEnd) continue;
 
                 var priceChunk = await _historicalPriceService.GetHistoricalPrices(symbol, interval, effectiveStart, effectiveEnd);
-                if(priceChunk == null || !priceChunk.Any())
+                if (priceChunk == null || !priceChunk.Any())
                 {
                     _logger.LogWarning("[RunId: {RunId}] No historical prices found for {Symbol} [{Interval}] between {StartDate:yyyy-MM-dd} and {EndDate:yyyy-MM-dd}.",
                         runId, symbol, interval, effectiveStart, effectiveEnd);

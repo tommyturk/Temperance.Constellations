@@ -83,17 +83,32 @@ namespace Temperance.Services.Services.Implementations
                     position.CurrentMarketValue = position.Quantity * currentPrice;
         }
 
-        public Task OpenPosition(string symbol, string interval, PositionDirection direction, int quantity, double entryPrice, DateTime entryDate, double totalEntryCost)
+        public Task<Position?> OpenPosition(
+            string symbol,
+            string interval,
+            PositionDirection direction,
+            int quantity,
+            double entryPrice,
+            DateTime entryDate,
+            double totalEntryCost)
         {
+            if (_openPositions.TryGetValue(symbol, out var existingPosition))
+            {
+                _logger.LogWarning("Failed to open position for {Symbol} as one already exists. Returning existing position.", symbol);
+                return Task.FromResult<Position?>(existingPosition);
+            }
+
             double totalCashOutlay = (quantity * entryPrice) + totalEntryCost;
 
             lock (_cashLock)
             {
                 if (_currentCash < totalCashOutlay)
                 {
-                    _logger.LogWarning("Insufficient cash to open position for {Symbol}. Required: {Required}, Available: {Available}", symbol, totalCashOutlay, _currentCash);
-                    return Task.CompletedTask;
+                    _logger.LogWarning("Insufficient cash to open position for {Symbol}. Required: {Required:C}, Available: {Available:C}",
+                        symbol, totalCashOutlay, _currentCash);
+                    return Task.FromResult<Position?>(null);
                 }
+
                 _currentCash -= totalCashOutlay;
             }
 
@@ -102,17 +117,29 @@ namespace Temperance.Services.Services.Implementations
                 Symbol = symbol,
                 Direction = direction,
                 Quantity = quantity,
-                AverageEntryPrice = entryPrice, 
-                InitialEntryDate = entryDate, 
+                AverageEntryPrice = entryPrice,
+                InitialEntryDate = entryDate,
                 TotalEntryCost = totalEntryCost
             };
 
-            if (!_openPositions.TryAdd(symbol, newPosition))
+            if (_openPositions.TryAdd(symbol, newPosition))
             {
-                _logger.LogError("Failed to open position for {Symbol} as one already exists.", symbol);
-                lock (_cashLock) { _currentCash += totalCashOutlay; }
+                _logger.LogInformation("Successfully opened new position for {Symbol}.", symbol);
+                return Task.FromResult<Position?>(newPosition);
             }
-            return Task.CompletedTask;
+            else
+            {
+                lock (_cashLock) { _currentCash += totalCashOutlay; }
+
+                if (_openPositions.TryGetValue(symbol, out var positionAfterRace))
+                {
+                    _logger.LogWarning("Lost concurrency race for {Symbol}. Cash rolled back. Returning winning existing position.", symbol);
+                    return Task.FromResult<Position?>(positionAfterRace);
+                }
+
+                _logger.LogError("CRITICAL CONCURRENCY ERROR: Position for {Symbol} exists but could not be retrieved for state continuity.", symbol);
+                return Task.FromResult<Position?>(null);
+            }
         }
 
         public Position? GetOpenPosition(string symbol, string interval)

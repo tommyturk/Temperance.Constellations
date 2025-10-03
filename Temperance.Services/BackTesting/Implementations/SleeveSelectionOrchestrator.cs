@@ -92,10 +92,8 @@ namespace Temperance.Services.BackTesting.Implementations
 
         public async Task ReselectAnnualSleeve(Guid sessionId, DateTime yearEnd)
         {
-            // This is where the annual re-selection logic will go.
             _logger.LogInformation("ORCHESTRATOR (ReselectAnnualSleeve): Kicking off for year {Year}.", yearEnd.Year);
 
-            // For now, we'll just continue the loop by enqueuing the next backtest
             var nextOosDate = yearEnd.AddDays(1);
             _backgroundJobClient.Enqueue<IPortfolioBacktestOrchestrator>(
                orchestrator => orchestrator.ExecuteNextPeriod(sessionId, nextOosDate)

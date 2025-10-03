@@ -69,7 +69,7 @@ builder.Services.AddTransient<ITransactionCostService, TransactionCostService>()
 builder.Services.AddTransient<ILiquidityService, LiquidityService>();
 builder.Services.AddTransient<IGpuIndicatorService, GpuIndicatorService>();
 builder.Services.AddScoped<IPortfolioManager, PortfolioManager>();
-builder.Services.AddTransient<ISecuritiesOverviewService, SecuritiesOverviewService>();
+builder.Services.AddScoped<ISecuritiesOverviewService, SecuritiesOverviewService>();
 builder.Services.AddTransient<IBalanceSheetService, BalanceSheetService>();
 builder.Services.AddTransient<IPriceService, PriceService>();
 builder.Services.AddTransient<IHistoricalPriceService, HistoricalPriceService>();
@@ -85,7 +85,7 @@ builder.Services.AddTransient<IPortfolioBacktestOrchestrator, PortfolioBacktestO
 builder.Services.AddTransient<IPortfolioBacktestRunner, PortfolioBacktestRunner>();
 builder.Services.AddTransient<IFineTuneOrchestrator, FineTuneOrchestrator>();
 builder.Services.AddTransient<IOptimizationKeyGenerator, OptimizationKeyGenerator>();
-builder.Services.AddTransient<ISecuritiesOverviewRepository>(provider =>
+builder.Services.AddScoped<ISecuritiesOverviewRepository>(provider =>
 {
     var connectionStrings = provider.GetRequiredService<IOptions<ConnectionStrings>>().Value;
     var cs = connectionStrings.DefaultConnection;

@@ -16,7 +16,7 @@ namespace Temperance.Services.Services.Interfaces
         IReadOnlyList<TradeSummary> GetCompletedTradesHistory();
 
         Task<bool> CanOpenPosition(double allocationAmount);
-        Task OpenPosition(string symbol, string interval, PositionDirection direction, int quantity, double entryPrice, DateTime entryDate, double transactionCost);
+        Task<Position?> OpenPosition(string symbol, string interval, PositionDirection direction, int quantity, double entryPrice, DateTime entryDate, double transactionCost);
         Task AddToPosition(string symbol, int quantityToAdd, double entryPrice, double transactionCost);
 
         Task OpenPairPosition(string strategyName, string pairIdentifier, string interval, ActivePairTrade trade);

@@ -1,6 +1,8 @@
 ﻿using Hangfire;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Configuration;
 using Temperance.Services.BackTesting.Interfaces;
+using TradingApp.src.Core.Services.Interfaces;
 
 namespace Temperance.Constellations.Controllers
 {
@@ -10,13 +12,16 @@ namespace Temperance.Constellations.Controllers
     {
         private readonly ILogger<OrchestrationController> _logger;
         private readonly IBackgroundJobClient _backgroundJobClient;
+        private readonly ITradeService _tradeService;
 
         public OrchestrationController(
             ILogger<OrchestrationController> logger,
-            IBackgroundJobClient backgroundJobClient)
+            IBackgroundJobClient backgroundJobClient,
+            ITradeService tradeService)
         {
             _logger = logger;
             _backgroundJobClient = backgroundJobClient;
+            _tradeService = tradeService;
         }
 
 
@@ -28,6 +33,9 @@ namespace Temperance.Constellations.Controllers
             _logger.LogInformation("Received 'Start' signal from Conductor for SessionId: {SessionId}", sessionId);
             _backgroundJobClient.Enqueue<IMasterWalkForwardOrchestrator>(orchestrator =>
                 orchestrator.StartInitialTrainingPhase(sessionId, strategyName, startDate, endDate));
+
+            //await _tradeService.InitializeBacktestRunAsync(configuration, configuration.RunId);
+
             return Ok("Initial training phase enqueued.");
         }
 
