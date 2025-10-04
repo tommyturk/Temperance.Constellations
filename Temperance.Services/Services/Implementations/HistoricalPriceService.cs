@@ -131,7 +131,7 @@ namespace TradingApp.src.Core.Services.Implementations
 
         public async Task<List<HistoricalPriceModel>> GetHistoricalPrices(string symbol, string interval, DateTime startDate, DateTime endDate)
         {
-            return await _historicalPricesRepository.GetHistoricalPrices(symbol, interval);
+            return await _historicalPricesRepository.GetHistoricalPrices(symbol, interval, startDate, endDate);
         }
 
         public async Task<bool> UpdateHistoricalPrices(string symbol, string interval, int year, int month)

@@ -14,6 +14,8 @@ namespace Temperance.Conductor.Repository.Interfaces
         Task<IEnumerable<OptimizationJob>> GetCompletedJobsForSessionAsync(Guid sessionId);
         Task<IEnumerable<StrategyOptimizedParameters>> GetResultsByKeysAsync(List<string> resultKeys, Guid sessionId);
         Task<HashSet<string>> GetSleeveSymbolsForPeriodAsync(Guid sessionId, DateTime tradingPeriodStartDate);
+
+        Task UpdateSessionCapitalAsync(Guid sessionId, double? finalCapital);
     }
 }
 

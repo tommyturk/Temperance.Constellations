@@ -69,9 +69,9 @@ namespace Temperance.Services.BackTesting.Implementations
 
             // 5. ENQUEUE THE NEXT ORCHESTRATOR (The key change)
             var firstOosDate = tradingPeriodStartDate;
-            _backgroundJobClient.Enqueue<IPortfolioBacktestRunner>(
-                runner => runner.ExecuteBacktest(sessionId, firstOosDate)
-            );
+            //_backgroundJobClient.Enqueue<IPortfolioBacktestRunner>(
+            //    runner => runner.ExecuteBacktest(sessionId, firstOosDate, oosEndDate)
+            //);
 
             _logger.LogInformation("PHASE 2 Complete. Enqueued portfolio backtest orchestrator for SessionId {SessionId} starting {Date}.", sessionId, firstOosDate);
         }

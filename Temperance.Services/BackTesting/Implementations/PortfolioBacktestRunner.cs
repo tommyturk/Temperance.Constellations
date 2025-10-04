@@ -31,7 +31,7 @@ namespace Temperance.Services.BackTesting.Orchestration.Implementations
             _logger = logger;
         }
 
-        public async Task ExecuteBacktest(Guid sessionId, DateTime oosStartDate)
+        public async Task ExecuteBacktest(Guid sessionId, DateTime oosStartDate, DateTime oosEndDate)
         {
             var session = await _walkForwardRepoitory.GetSessionAsync(sessionId);
             if (oosStartDate >= session.EndDate)
@@ -41,7 +41,6 @@ namespace Temperance.Services.BackTesting.Orchestration.Implementations
                 return;
             }
 
-            var oosEndDate = oosStartDate.AddMonths(1).AddDays(-1);
             _logger.LogInformation("MAIN LOOP: Running 1-Month OOS Backtest for {Date:yyyy-MM} on SessionId: {SessionId}",
                 oosStartDate, sessionId);
 
@@ -66,7 +65,18 @@ namespace Temperance.Services.BackTesting.Orchestration.Implementations
 
             await _tradeService.InitializeBacktestRunAsync(backtestConfig, backtestConfig.RunId);
 
-            await _backtestRunner.RunPortfolioBacktest(backtestConfig, backtestConfig.RunId);
+            var result = await _backtestRunner.RunPortfolioBacktest(backtestConfig, backtestConfig.RunId);
+
+            if (result == null)
+            {
+                _logger.LogError("Backtest result is null for SessionId {SessionId} during period starting {StartDate}. Aborting further processing.", sessionId, oosStartDate);
+                return;
+            }
+
+            await _tradeService.UpdateBacktestPerformanceMetrics(backtestConfig.RunId, result, backtestConfig.InitialCapital);
+            await _tradeService.UpdateBacktestRunStatusAsync(backtestConfig.RunId, "Completed");
+            var finalCapital = backtestConfig.InitialCapital + result.TotalProfitLoss; 
+            await _walkForwardRepoitory.UpdateSessionCapitalAsync(sessionId, finalCapital);
 
             if (oosStartDate.Month == 12)
             {

@@ -12,8 +12,8 @@ namespace Temperance.Services.BackTesting.Interfaces
         [Hangfire.JobDisplayName("Run Backtest {0}")]
         Task RunBacktest(BacktestConfiguration config, Guid runId);
 
-    //    [Hangfire.JobDisplayName("Run Pairs Backtest {0}")]
-    //    Task RunPairsBacktest(PairsBacktestConfiguration configuration, Guid runId);
+        [Hangfire.JobDisplayName("Run Pairs Backtest {0}")]
+        Task RunPairsBacktest(PairsBacktestConfiguration configuration, Guid runId);
 
     //    [Hangfire.JobDisplayName("Run Dual Momentum Backtest {0}")]
     //    Task RunDualMomentumBacktest(string configJson, Guid runId);

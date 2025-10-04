@@ -2,6 +2,8 @@
 {
     public class PairsBacktestConfiguration
     {
+        public Guid RunId { get; set; }
+        public Guid? SessionId { get; set; }
         public string StrategyName { get; set; }
         public PairStrategyParameters StrategyParameters { get; set; }
         public List<PairDefinition> PairsToTest { get; set; }

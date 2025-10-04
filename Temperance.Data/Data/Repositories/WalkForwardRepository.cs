@@ -2,6 +2,7 @@
 using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Logging;
 using System.Data;
+using System.Data.Common;
 using System.Text.Json;
 using Temperance.Conductor.Repository.Interfaces;
 using Temperance.Data.Models.Backtest;
@@ -52,6 +53,18 @@ namespace Temperance.Data.Data.Repositories.WalkForward.Implementations
             await using var connection = new SqlConnection(_connectionString);
             var symbols = await connection.QueryAsync<string>(sql, new { SessionId = sessionId, TradingPeriodStartDate = tradingPeriodStartDate });
             return new HashSet<string>(symbols);
+        }
+
+        public async Task UpdateSessionCapitalAsync(Guid sessionId, double? finalCapital)
+        {
+            const string sql = @"
+                UPDATE [Constellations].[WalkForwardSessions]
+                SET CurrentCapital = @FinalCapital
+                WHERE SessionId = @SessionId;";
+
+            await using var connection = new SqlConnection(_connectionString);
+            await connection.ExecuteAsync(sql, new { FinalCapital = finalCapital, SessionId = sessionId });
+            return;
         }
 
         public async Task<IEnumerable<OptimizationJob>> GetCompletedJobsForSessionAsync(Guid sessionId)

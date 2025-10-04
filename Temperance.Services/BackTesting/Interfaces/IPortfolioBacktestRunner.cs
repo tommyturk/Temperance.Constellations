@@ -2,6 +2,6 @@
 {
     public interface IPortfolioBacktestRunner
     {
-        Task ExecuteBacktest(Guid sessionId, DateTime oosStartDate);
+        Task ExecuteBacktest(Guid sessionId, DateTime oosStartDate, DateTime oosEndDate);
     }
 }

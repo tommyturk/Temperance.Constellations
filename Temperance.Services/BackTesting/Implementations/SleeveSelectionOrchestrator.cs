@@ -39,6 +39,13 @@ namespace Temperance.Services.BackTesting.Implementations
         {
             _logger.LogInformation("PHASE 2: Selecting initial sleeve for SessionId: {SessionId}", sessionId);
 
+            var session = await _walkForwardRepository.GetSessionAsync(sessionId);
+            if (session == null)
+            {
+                _logger.LogError("Could not find session {SessionId} during sleeve selection. Aborting.", sessionId);
+                return;
+            }
+
             var completedJobs = await _walkForwardRepository.GetCompletedJobsForSessionAsync(sessionId);
             var validJobs = completedJobs.Where(job => !string.IsNullOrEmpty(job.ResultKey)).ToList();
 
@@ -66,7 +73,11 @@ namespace Temperance.Services.BackTesting.Implementations
             }
 
             var tradingPeriodStartDate = inSampleEndDate.AddDays(1);
-
+            var outOfSampleEndDate = tradingPeriodStartDate.AddYears(session.TradingWindowYears)
+                .AddDays(-1);
+            if (outOfSampleEndDate > session.EndDate)
+                outOfSampleEndDate = session.EndDate;
+            
             var newSleeveEntries = bestResultsBySymbol.Select(result => new WalkForwardSleeve
             {
                 SessionId = sessionId,
@@ -85,7 +96,7 @@ namespace Temperance.Services.BackTesting.Implementations
 
             var firstOosDate = tradingPeriodStartDate;
             _backgroundJobClient.Enqueue<IPortfolioBacktestRunner>(
-                runner => runner.ExecuteBacktest(sessionId, firstOosDate)
+                runner => runner.ExecuteBacktest(sessionId, firstOosDate, outOfSampleEndDate)
             );
             _logger.LogInformation("PHASE 2 Complete. Enqueued first portfolio backtest for {Date:yyyy-MM-dd}.", firstOosDate);
         }

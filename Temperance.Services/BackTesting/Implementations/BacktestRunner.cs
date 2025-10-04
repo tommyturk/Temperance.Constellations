@@ -8,6 +8,8 @@ using Temperance.Data.Models.Backtest;
 using Temperance.Data.Models.HistoricalData;
 using Temperance.Data.Models.HistoricalPriceData;
 using Temperance.Data.Models.MarketHealth;
+using Temperance.Data.Models.Performance;
+using Temperance.Data.Models.Strategy;
 using Temperance.Data.Models.Trading;
 using Temperance.Services.BackTesting.Interfaces;
 using Temperance.Services.Factories.Interfaces;
@@ -201,8 +203,8 @@ namespace Temperance.Services.BackTesting.Implementations
                 result.OptimizationResultId = config.OptimizationResultId;
 
                 await _performanceCalculator.CalculatePerformanceMetrics(result, config.InitialCapital);
-                await _tradesService.UpdateBacktestPerformanceMetrics(runId, result, config.InitialCapital);
-                await _tradesService.UpdateBacktestRunStatusAsync(runId, "Completed");
+                //await _tradesService.UpdateBacktestPerformanceMetrics(runId, result, config.InitialCapital);
+                //await _tradesService.UpdateBacktestRunStatusAsync(runId, "Completed");
             }
             catch (Exception ex)
             {
@@ -362,6 +364,9 @@ namespace Temperance.Services.BackTesting.Implementations
 
         private async Task<StrategySleeve?> PrepareStrategySleeveAsync(SymbolCoverageBacktestModel testCase, BacktestConfiguration config, Guid runId)
         {
+            _logger.LogCritical("[RunId: {RunId}] Preparing sleeve for {Symbol}. CONFIG DATES ARE: Start={StartDate}, End={EndDate}",
+                runId, testCase.Symbol, config.StartDate, config.EndDate);
+
             var symbol = testCase.Symbol.Trim();
             var interval = testCase.Interval.Trim();
             _logger.LogInformation("[RunId: {RunId}] Preparing sleeve for {Symbol} [{Interval}]...", runId, symbol, interval);
@@ -401,6 +406,10 @@ namespace Temperance.Services.BackTesting.Implementations
                         runId, symbol, interval, effectiveStart, effectiveEnd);
                     continue;
                 }
+                var minDate = priceChunk.Min(p => p.Timestamp);
+                var maxDate = priceChunk.Max(p => p.Timestamp);
+                _logger.LogCritical("[RunId: {RunId}] For symbol {Symbol}, REQUESTED dates {start} to {end}. RECEIVED dates {min} to {max}",
+                    runId, symbol, effectiveStart, effectiveEnd, minDate, maxDate);
                 allPrices.AddRange(priceChunk);
             }
 
@@ -841,204 +850,204 @@ namespace Temperance.Services.BackTesting.Implementations
         //    });
         //}
 
-        //public async Task RunPairsBacktest(PairsBacktestConfiguration config, Guid runId)
-        //{
-        //    var result = new BacktestResult();
-        //    // --- Initial Setup ---
-        //    await _tradesService.UpdateBacktestRunStatusAsync(runId, "Running");
-        //    _logger.LogInformation("Starting GPU-accelerated pairs backtest for RunId: {RunId}", runId);
+        public async Task RunPairsBacktest(PairsBacktestConfiguration config, Guid runId)
+        {
+            var result = new BacktestResult();
+            // --- Initial Setup ---
+            await _tradesService.UpdateBacktestRunStatusAsync(runId, "Running");
+            _logger.LogInformation("Starting GPU-accelerated pairs backtest for RunId: {RunId}", runId);
 
-        //    await _portfolioManager.Initialize(config.InitialCapital);
-        //    var allTrades = new ConcurrentBag<TradeSummary>();
-        //    var pairKellyHalfFractions = new ConcurrentDictionary<string, double>();
+            await _portfolioManager.Initialize(config.SessionId.Value, config.InitialCapital);
+            var allTrades = new ConcurrentBag<TradeSummary>();
+            var pairKellyHalfFractions = new ConcurrentDictionary<string, double>();
 
-        //    string strategyParametersJson = JsonSerializer.Serialize(config.StrategyParameters);
+            string strategyParametersJson = JsonSerializer.Serialize(config.StrategyParameters);
 
-        //    Dictionary<string, object> strategyParameters = JsonSerializer.Deserialize<Dictionary<string, object>>(strategyParametersJson)
-        //        ?? new Dictionary<string, object>();
+            Dictionary<string, object> strategyParameters = JsonSerializer.Deserialize<Dictionary<string, object>>(strategyParametersJson)
+                ?? new Dictionary<string, object>();
 
-        //    var strategyInstance = _strategyFactory.CreateStrategy<IPairTradingStrategy>(
-        //        config.StrategyName, config.InitialCapital, strategyParameters);
+            var strategyInstance = _strategyFactory.CreateStrategy<IPairTradingStrategy>(
+                config.StrategyName, config.InitialCapital, strategyParameters);
 
-        //    if (strategyInstance == null)
-        //        throw new InvalidOperationException($"Could not create a valid IPairTradingStrategy for '{config.StrategyName}'.");
+            if (strategyInstance == null)
+                throw new InvalidOperationException($"Could not create a valid IPairTradingStrategy for '{config.StrategyName}'.");
 
-        //    int lookbackPeriod = strategyInstance.GetRequiredLookbackPeriod();
-        //    int rollingKellyLookbackTrades = 50;
-        //    var parallelOptions = new ParallelOptions { MaxDegreeOfParallelism = config.MaxParallelism };
+            int lookbackPeriod = strategyInstance.GetRequiredLookbackPeriod();
+            int rollingKellyLookbackTrades = 50;
+            var parallelOptions = new ParallelOptions { MaxDegreeOfParallelism = config.MaxParallelism };
 
-        //    //await Parallel.ForEachAsync(config.PairsToTest, parallelOptions, async (pair, cancellationToken) =>
-        //    //{
-        //    foreach (var pair in config.PairsToTest)
-        //    {
-        //        var pairIdentifier = $"{pair.SymbolA}/{pair.SymbolB}";
-        //        try
-        //        {
-        //            // --- Stage 1: Data Fetching, Alignment, and Full Indicator Pre-calculation ---
-        //            var historicalDataA = await _historicalPriceService.GetHistoricalPrices(pair.SymbolA, config.Interval);
-        //            var historicalDataB = await _historicalPriceService.GetHistoricalPrices(pair.SymbolB, config.Interval);
+            //await Parallel.ForEachAsync(config.PairsToTest, parallelOptions, async (pair, cancellationToken) =>
+            //{
+            foreach (var pair in config.PairsToTest)
+            {
+                var pairIdentifier = $"{pair.SymbolA}/{pair.SymbolB}";
+                try
+                {
+                    // --- Stage 1: Data Fetching, Alignment, and Full Indicator Pre-calculation ---
+                    var historicalDataA = await _historicalPriceService.GetHistoricalPrices(pair.SymbolA, config.Interval, config.StartDate, config.EndDate);
+                    var historicalDataB = await _historicalPriceService.GetHistoricalPrices(pair.SymbolB, config.Interval, config.StartDate, config.EndDate);
 
-        //            var alignedData = AlignData(historicalDataA, historicalDataB);
-        //            if (alignedData.Count < lookbackPeriod)
-        //            {
-        //                _logger.LogWarning("Insufficient aligned data for pair {Pair} to meet lookback of {Lookback}", pairIdentifier, lookbackPeriod);
-        //                return;
-        //            }
+                    var alignedData = AlignData(historicalDataA, historicalDataB);
+                    if (alignedData.Count < lookbackPeriod)
+                    {
+                        _logger.LogWarning("Insufficient aligned data for pair {Pair} to meet lookback of {Lookback}", pairIdentifier, lookbackPeriod);
+                        return;
+                    }
 
-        //            // Extract aligned close prices into arrays for GPU processing
-        //            var closePricesA = alignedData.Select(d => (double)d.Item1.ClosePrice).ToArray();
-        //            var closePricesB = alignedData.Select(d => (double)d.Item2.ClosePrice).ToArray();
+                    // Extract aligned close prices into arrays for GPU processing
+                    var closePricesA = alignedData.Select(d => (double)d.Item1.ClosePrice).ToArray();
+                    var closePricesB = alignedData.Select(d => (double)d.Item2.ClosePrice).ToArray();
 
-        //            // 1. Calculate the entire spread series
-        //            var spreadSeries = new double[alignedData.Count];
-        //            for (int i = 0; i < alignedData.Count; i++)
-        //                spreadSeries[i] = closePricesA[i] - (pair.HedgeRatio * closePricesB[i]);
+                    // 1. Calculate the entire spread series
+                    var spreadSeries = new double[alignedData.Count];
+                    for (int i = 0; i < alignedData.Count; i++)
+                        spreadSeries[i] = closePricesA[i] - (pair.HedgeRatio * closePricesB[i]);
 
-        //            var spreadSma = _gpuIndicatorService.CalculateSma(spreadSeries, lookbackPeriod);
-        //            var spreadStdDev = _gpuIndicatorService.CalculateStdDev(spreadSeries, lookbackPeriod);
+                    var spreadSma = _gpuIndicatorService.CalculateSma(spreadSeries, lookbackPeriod);
+                    var spreadStdDev = _gpuIndicatorService.CalculateStdDev(spreadSeries, lookbackPeriod);
 
-        //            var zScoreSeries = new double[alignedData.Count];
-        //            for (int i = 0; i < alignedData.Count; i++)
-        //            {
-        //                if (spreadStdDev[i] != 0)
-        //                    zScoreSeries[i] = (spreadSeries[i] - spreadSma[i]) / spreadStdDev[i];
-        //                else
-        //                    zScoreSeries[i] = 0;
-        //            }
+                    var zScoreSeries = new double[alignedData.Count];
+                    for (int i = 0; i < alignedData.Count; i++)
+                    {
+                        if (spreadStdDev[i] != 0)
+                            zScoreSeries[i] = (spreadSeries[i] - spreadSma[i]) / spreadStdDev[i];
+                        else
+                            zScoreSeries[i] = 0;
+                    }
 
-        //            var backtestData = alignedData
-        //                .Where(d => d.Item1.Timestamp >= config.StartDate && d.Item1.Timestamp <= config.EndDate).ToList();
+                    var backtestData = alignedData
+                        .Where(d => d.Item1.Timestamp >= config.StartDate && d.Item1.Timestamp <= config.EndDate).ToList();
 
-        //            var timestampIndexMap = alignedData.Select((data, index) => new { data.Item1.Timestamp, index })
-        //                                             .ToDictionary(x => x.Timestamp, x => x.index);
+                    var timestampIndexMap = alignedData.Select((data, index) => new { data.Item1.Timestamp, index })
+                                                     .ToDictionary(x => x.Timestamp, x => x.index);
 
-        //            ActivePairTrade? activePairTrade = null;
-        //            double currentPairKellyHalfFraction = pairKellyHalfFractions.GetOrAdd(pairIdentifier, 0.01);
+                    ActivePairTrade? activePairTrade = null;
+                    double currentPairKellyHalfFraction = pairKellyHalfFractions.GetOrAdd(pairIdentifier, 0.01);
 
-        //            foreach (var (currentBarA, currentBarB) in backtestData)
-        //            {
-        //                if (!timestampIndexMap.TryGetValue(currentBarA.Timestamp, out var globalIndex) || globalIndex < lookbackPeriod)
-        //                    continue;
+                    foreach (var (currentBarA, currentBarB) in backtestData)
+                    {
+                        if (!timestampIndexMap.TryGetValue(currentBarA.Timestamp, out var globalIndex) || globalIndex < lookbackPeriod)
+                            continue;
 
-        //                var currentIndicatorValues = new Dictionary<string, double>
-        //                    {
-        //                        { "ZScore", zScoreSeries[globalIndex] }
-        //                    };
+                        var currentIndicatorValues = new Dictionary<string, double>
+                            {
+                                { "ZScore", zScoreSeries[globalIndex] }
+                            };
 
-        //                // --- Decision Making ---
-        //                var signal = strategyInstance.GenerateSignal(currentBarA, currentBarB, currentIndicatorValues);
+                        // --- Decision Making ---
+                        var signal = strategyInstance.GenerateSignal(currentBarA, currentBarB, currentIndicatorValues);
 
-        //                if (activePairTrade != null && strategyInstance.ShouldExitPosition(new Position { Direction = activePairTrade.Direction, EntryDate = activePairTrade.EntryDate }, currentBarA, currentBarB, currentIndicatorValues))
-        //                {
-        //                    _logger.LogInformation("RunId: {RunId}, Pair: {Pair}, Attempting to close position at Timestamp: {Timestamp}", runId, pairIdentifier, currentBarA.Timestamp);
+                        if (activePairTrade != null && strategyInstance.ShouldExitPosition(new Position { Direction = activePairTrade.Direction, EntryDate = activePairTrade.EntryDate }, currentBarA, currentBarB, currentIndicatorValues))
+                        {
+                            _logger.LogInformation("RunId: {RunId}, Pair: {Pair}, Attempting to close position at Timestamp: {Timestamp}", runId, pairIdentifier, currentBarA.Timestamp);
 
-        //                    var rawExitPriceA = currentBarA.ClosePrice;
-        //                    var directionA = activePairTrade.Direction == PositionDirection.Long ? PositionDirection.Long : PositionDirection.Short;
-        //                    var effectiveExitPriceA = await _transactionCostService.CalculateExitCost(rawExitPriceA, directionA, pair.SymbolA, config.Interval, currentBarA.Timestamp);
-        //                    var exitSpreadCostA = await _transactionCostService.GetSpreadCost(rawExitPriceA, (int)activePairTrade.QuantityA, pair.SymbolA, config.Interval, currentBarA.Timestamp);
+                            var rawExitPriceA = currentBarA.ClosePrice;
+                            var directionA = activePairTrade.Direction == PositionDirection.Long ? PositionDirection.Long : PositionDirection.Short;
+                            var effectiveExitPriceA = await _transactionCostService.CalculateExitCost(rawExitPriceA, directionA, pair.SymbolA, config.Interval, currentBarA.Timestamp);
+                            var exitSpreadCostA = await _transactionCostService.GetSpreadCost(rawExitPriceA, (int)activePairTrade.QuantityA, pair.SymbolA, config.Interval, currentBarA.Timestamp);
 
-        //                    var rawExitPriceB = currentBarB.ClosePrice;
-        //                    var directionB = activePairTrade.Direction == PositionDirection.Long ? PositionDirection.Short : PositionDirection.Long;
-        //                    var effectiveExitPriceB = await _transactionCostService.CalculateExitCost(rawExitPriceB, directionB, pair.SymbolB, config.Interval, currentBarB.Timestamp);
-        //                    var exitSpreadCostB = await _transactionCostService.GetSpreadCost(rawExitPriceB, (int)activePairTrade.QuantityB, pair.SymbolB, config.Interval, currentBarB.Timestamp);
+                            var rawExitPriceB = currentBarB.ClosePrice;
+                            var directionB = activePairTrade.Direction == PositionDirection.Long ? PositionDirection.Short : PositionDirection.Long;
+                            var effectiveExitPriceB = await _transactionCostService.CalculateExitCost(rawExitPriceB, directionB, pair.SymbolB, config.Interval, currentBarB.Timestamp);
+                            var exitSpreadCostB = await _transactionCostService.GetSpreadCost(rawExitPriceB, (int)activePairTrade.QuantityB, pair.SymbolB, config.Interval, currentBarB.Timestamp);
 
-        //                    var pnlA = (directionA == PositionDirection.Long) ? (effectiveExitPriceA - activePairTrade.EntryPriceA) * activePairTrade.QuantityA : (activePairTrade.EntryPriceA - effectiveExitPriceA) * activePairTrade.QuantityA;
-        //                    var pnlB = (directionB == PositionDirection.Long) ? (effectiveExitPriceB - activePairTrade.EntryPriceB) * activePairTrade.QuantityB : (activePairTrade.EntryPriceB - effectiveExitPriceB) * activePairTrade.QuantityB;
+                            var pnlA = (directionA == PositionDirection.Long) ? (effectiveExitPriceA - activePairTrade.EntryPriceA) * activePairTrade.QuantityA : (activePairTrade.EntryPriceA - effectiveExitPriceA) * activePairTrade.QuantityA;
+                            var pnlB = (directionB == PositionDirection.Long) ? (effectiveExitPriceB - activePairTrade.EntryPriceB) * activePairTrade.QuantityB : (activePairTrade.EntryPriceB - effectiveExitPriceB) * activePairTrade.QuantityB;
 
-        //                    var profitLossBeforeCosts = pnlA + pnlB;
-        //                    var totalExitTransactionCost = exitSpreadCostA + exitSpreadCostB;
-        //                    var totalTradeTransactionCost = activePairTrade.TotalEntryTransactionCost + totalExitTransactionCost;
-        //                    var netProfitLoss = profitLossBeforeCosts - totalTradeTransactionCost;
+                            var profitLossBeforeCosts = pnlA + pnlB;
+                            var totalExitTransactionCost = exitSpreadCostA + exitSpreadCostB;
+                            var totalTradeTransactionCost = activePairTrade.TotalEntryTransactionCost + totalExitTransactionCost;
+                            var netProfitLoss = profitLossBeforeCosts - totalTradeTransactionCost;
 
-        //                    var finalizedClosedTrade = await _portfolioManager.ClosePairPosition(activePairTrade, effectiveExitPriceA, effectiveExitPriceB, currentBarA.Timestamp, totalTradeTransactionCost);
+                            var finalizedClosedTrade = await _portfolioManager.ClosePairPosition(activePairTrade, effectiveExitPriceA, effectiveExitPriceB, currentBarA.Timestamp, totalTradeTransactionCost);
 
-        //                    var recentTradesForKelly = _portfolioManager.GetCompletedTradesHistory().Where(t => t.Symbol == pairIdentifier && t.Interval == config.Interval).OrderByDescending(t => t.ExitDate).Take(rollingKellyLookbackTrades).ToList();
-        //                    KellyMetrics kellyMetrics = _performanceCalculator.CalculateKellyMetrics(recentTradesForKelly);
-        //                    currentPairKellyHalfFraction = kellyMetrics.KellyHalfFraction;
-        //                    pairKellyHalfFractions[pairIdentifier] = currentPairKellyHalfFraction;
+                            var recentTradesForKelly = _portfolioManager.GetCompletedTradesHistory().Where(t => t.Symbol == pairIdentifier && t.Interval == config.Interval).OrderByDescending(t => t.ExitDate).Take(rollingKellyLookbackTrades).ToList();
+                            KellyMetrics kellyMetrics = _performanceCalculator.CalculateKellyMetrics(recentTradesForKelly);
+                            currentPairKellyHalfFraction = kellyMetrics.KellyHalfFraction;
+                            pairKellyHalfFractions[pairIdentifier] = currentPairKellyHalfFraction;
 
-        //                    if (finalizedClosedTrade != null)
-        //                    {
-        //                        allTrades.Add(finalizedClosedTrade);
-        //                        _logger.LogInformation("RunId: {RunId}, Pair: {Pair}, Position Closed. PnL: {PnL:C}", runId, pairIdentifier, netProfitLoss);
-        //                    }
-        //                    activePairTrade = null;
-        //                }
+                            if (finalizedClosedTrade != null)
+                            {
+                                allTrades.Add(finalizedClosedTrade);
+                                _logger.LogInformation("RunId: {RunId}, Pair: {Pair}, Position Closed. PnL: {PnL:C}", runId, pairIdentifier, netProfitLoss);
+                            }
+                            activePairTrade = null;
+                        }
 
-        //                // --- Open Position Logic ---
-        //                if (activePairTrade != null && signal != SignalDecision.Hold)
-        //                {
-        //                    // This block for opening a position (sizing, calculating costs, updating portfolio)
-        //                    // also remains the same.
-        //                    #region Open Position Logic
-        //                    double allocation = _portfolioManager.GetTotalEquity() * currentPairKellyHalfFraction;
-        //                    if (allocation <= 0) continue;
+                        // --- Open Position Logic ---
+                        if (activePairTrade != null && signal != SignalDecision.Hold)
+                        {
+                            // This block for opening a position (sizing, calculating costs, updating portfolio)
+                            // also remains the same.
+                            #region Open Position Logic
+                            double allocation = _portfolioManager.GetTotalEquity() * currentPairKellyHalfFraction;
+                            if (allocation <= 0) continue;
 
-        //                    long quantityA = (long)(allocation / currentBarA.ClosePrice);
-        //                    long quantityB = (long)((quantityA * (long)currentBarA.ClosePrice * pair.HedgeRatio) / (long)currentBarB.ClosePrice);
-        //                    if (quantityA <= 0 || quantityB <= 0) continue;
+                            long quantityA = (long)(allocation / currentBarA.ClosePrice);
+                            long quantityB = (long)((quantityA * (long)currentBarA.ClosePrice * pair.HedgeRatio) / (long)currentBarB.ClosePrice);
+                            if (quantityA <= 0 || quantityB <= 0) continue;
 
-        //                    var directionA = signal == SignalDecision.Buy ? PositionDirection.Long : PositionDirection.Short;
-        //                    var effectiveEntryPriceA = await _transactionCostService.CalculateEntryCost(currentBarA.ClosePrice, signal, pair.SymbolA, config.Interval, currentBarA.Timestamp);
-        //                    var entrySpreadCostA = await _transactionCostService.GetSpreadCost(currentBarA.ClosePrice, quantityA, pair.SymbolA, config.Interval, currentBarA.Timestamp);
+                            var directionA = signal == SignalDecision.Buy ? PositionDirection.Long : PositionDirection.Short;
+                            var effectiveEntryPriceA = await _transactionCostService.CalculateEntryCost(currentBarA.ClosePrice, signal, pair.SymbolA, config.Interval, currentBarA.Timestamp);
+                            var entrySpreadCostA = await _transactionCostService.GetSpreadCost(currentBarA.ClosePrice, quantityA, pair.SymbolA, config.Interval, currentBarA.Timestamp);
 
-        //                    var directionB = signal == SignalDecision.Buy ? PositionDirection.Short : PositionDirection.Long;
-        //                    var effectiveEntryPriceB = await _transactionCostService.CalculateEntryCost(currentBarB.ClosePrice, signal, pair.SymbolB, config.Interval, currentBarB.Timestamp);
-        //                    var entrySpreadCostB = await _transactionCostService.GetSpreadCost(currentBarB.ClosePrice, quantityB, pair.SymbolB, config.Interval, currentBarB.Timestamp);
+                            var directionB = signal == SignalDecision.Buy ? PositionDirection.Short : PositionDirection.Long;
+                            var effectiveEntryPriceB = await _transactionCostService.CalculateEntryCost(currentBarB.ClosePrice, signal, pair.SymbolB, config.Interval, currentBarB.Timestamp);
+                            var entrySpreadCostB = await _transactionCostService.GetSpreadCost(currentBarB.ClosePrice, quantityB, pair.SymbolB, config.Interval, currentBarB.Timestamp);
 
-        //                    double totalCostToOpen = (quantityA * effectiveEntryPriceA) + (quantityB * effectiveEntryPriceB) + entrySpreadCostA + entrySpreadCostB;
-        //                    if (!await _portfolioManager.CanOpenPosition(totalCostToOpen)) continue;
+                            double totalCostToOpen = (quantityA * effectiveEntryPriceA) + (quantityB * effectiveEntryPriceB) + entrySpreadCostA + entrySpreadCostB;
+                            if (!await _portfolioManager.CanOpenPosition(totalCostToOpen)) continue;
 
-        //                    activePairTrade = new ActivePairTrade(pair.SymbolA, pair.SymbolB, (long)pair.HedgeRatio, (signal == SignalDecision.Buy ? PositionDirection.Long : PositionDirection.Short), quantityA, quantityB, effectiveEntryPriceA, effectiveEntryPriceB, currentBarA.Timestamp, entrySpreadCostA + entrySpreadCostB);
-        //                    await _portfolioManager.OpenPairPosition(strategyInstance.Name, pairIdentifier, config.Interval, activePairTrade);
-        //                    _logger.LogInformation("RunId: {RunId}, Pair: {Pair}, Position Opened. Direction: {Direction}", runId, pairIdentifier, activePairTrade.Direction);
-        //                    #endregion
-        //                }
-        //            }
-        //            // Logic to close any trade still open at the end of the test period would go here.
-        //        }
-        //        catch (Exception ex)
-        //        {
-        //            _logger.LogError(ex, "RunId: {RunId} - Unhandled error processing pair {Pair}", runId, pairIdentifier);
-        //        }
-        //        //});
-        //    }
+                            activePairTrade = new ActivePairTrade(pair.SymbolA, pair.SymbolB, (long)pair.HedgeRatio, (signal == SignalDecision.Buy ? PositionDirection.Long : PositionDirection.Short), quantityA, quantityB, effectiveEntryPriceA, effectiveEntryPriceB, currentBarA.Timestamp, entrySpreadCostA + entrySpreadCostB);
+                            await _portfolioManager.OpenPairPosition(strategyInstance.Name, pairIdentifier, config.Interval, activePairTrade);
+                            _logger.LogInformation("RunId: {RunId}, Pair: {Pair}, Position Opened. Direction: {Direction}", runId, pairIdentifier, activePairTrade.Direction);
+                            #endregion
+                        }
+                    }
+                    // Logic to close any trade still open at the end of the test period would go here.
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "RunId: {RunId} - Unhandled error processing pair {Pair}", runId, pairIdentifier);
+                }
+                //});
+            }
 
-        //    if (allTrades.Any())
-        //    {
-        //        foreach (var trade in allTrades)
-        //        {
-        //            trade.RunId = runId;
-        //        }
-        //        await _backtestRepository.SaveBacktestTradesAsync(runId, allTrades);
-        //        _logger.LogInformation("RunId: {RunId} - Saved {TradeCount} trades for pairs backtest.", runId, allTrades.Count);
-        //    }
+            if (allTrades.Any())
+            {
+                foreach (var trade in allTrades)
+                {
+                    trade.RunId = runId;
+                }
+                await _backtestRepository.SaveBacktestTradesAsync(runId, allTrades);
+                _logger.LogInformation("RunId: {RunId} - Saved {TradeCount} trades for pairs backtest.", runId, allTrades.Count);
+            }
 
-        //    // --- Finalization ---
-        //    result.Trades.AddRange(allTrades);
-        //    result.TotalTrades = result.Trades.Count;
-        //    await _performanceCalculator.CalculatePerformanceMetrics(result, config.InitialCapital);
-        //    await _tradesService.UpdateBacktestPerformanceMetrics(runId, result, config.InitialCapital);
-        //    await _tradesService.UpdateBacktestRunStatusAsync(runId, "Completed");
-        //}
+            // --- Finalization ---
+            result.Trades.AddRange(allTrades);
+            result.TotalTrades = result.Trades.Count;
+            await _performanceCalculator.CalculatePerformanceMetrics(result, config.InitialCapital);
+            await _tradesService.UpdateBacktestPerformanceMetrics(runId, result, config.InitialCapital);
+            await _tradesService.UpdateBacktestRunStatusAsync(runId, "Completed");
+        }
 
 
-        //private List<(HistoricalPriceModel, HistoricalPriceModel)> AlignData(
-        //    IEnumerable<HistoricalPriceModel> dataA,
-        //    IEnumerable<HistoricalPriceModel> dataB)
-        //{
-        //    if (dataA == null || dataB == null)
-        //        return new List<(HistoricalPriceModel, HistoricalPriceModel)>();
+        private List<(HistoricalPriceModel, HistoricalPriceModel)> AlignData(
+            IEnumerable<HistoricalPriceModel> dataA,
+            IEnumerable<HistoricalPriceModel> dataB)
+        {
+            if (dataA == null || dataB == null)
+                return new List<(HistoricalPriceModel, HistoricalPriceModel)>();
 
-        //    var joinedQuery = dataA.Join(
-        //        dataB,
-        //        barA => barA.Timestamp,
-        //        barB => barB.Timestamp,
-        //        (barA, barB) => (barA, barB)
-        //    );
+            var joinedQuery = dataA.Join(
+                dataB,
+                barA => barA.Timestamp,
+                barB => barB.Timestamp,
+                (barA, barB) => (barA, barB)
+            );
 
-        //    return joinedQuery.OrderBy(pair => pair.barA.Timestamp).ToList();
-        //}
+            return joinedQuery.OrderBy(pair => pair.barA.Timestamp).ToList();
+        }
 
         #endregion
     }
