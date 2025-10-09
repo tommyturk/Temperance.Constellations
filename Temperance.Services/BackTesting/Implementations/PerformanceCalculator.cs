@@ -17,7 +17,7 @@ namespace Temperance.Services.BackTesting.Implementations
 
         public KellyMetrics CalculateKellyMetrics(IReadOnlyList<TradeSummary> trades)
         {
-            var metrics = new KellyMetrics(); // Create an instance of the new class
+            var metrics = new KellyMetrics();
 
             if (trades == null || !trades.Any())
                 return metrics;

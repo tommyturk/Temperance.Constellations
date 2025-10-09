@@ -27,34 +27,31 @@ namespace Temperance.Constellations.Controllers
 
         [HttpPost("start")]
         public IActionResult StartWalkForwardOrchestration(
-            [FromQuery] Guid sessionId, [FromQuery] string strategyName,
-            [FromQuery] DateTime startDate, [FromQuery] DateTime endDate)
+            [FromQuery] Guid sessionId)
         {
             _logger.LogInformation("Received 'Start' signal from Conductor for SessionId: {SessionId}", sessionId);
-            _backgroundJobClient.Enqueue<IMasterWalkForwardOrchestrator>(orchestrator =>
-                orchestrator.StartInitialTrainingPhase(sessionId, strategyName, startDate, endDate));
-
-            //await _tradeService.InitializeBacktestRunAsync(configuration, configuration.RunId);
+            _backgroundJobClient.Enqueue<IInitialTrainingOrchestrator>(orchestrator =>
+                orchestrator.StartInitialTraining(sessionId));
 
             return Ok("Initial training phase enqueued.");
         }
 
-        [HttpPost("select-sleeve")]
-        public IActionResult TriggerSleeveSelection([FromQuery] Guid sessionId, [FromQuery] DateTime inSampleEndDate)
+        [HttpPost("start-next-cycle")]
+        public IActionResult StartNextWalkForwardCycle([FromQuery] Guid sessionId, [FromQuery] DateTime cycleStartDate)
         {
             _logger.LogInformation("Received 'Select Sleeve' signal from Conductor for SessionId: {SessionId}", sessionId);
-            _backgroundJobClient.Enqueue<ISleeveSelectionOrchestrator>(orchestrator =>
-                orchestrator.SelectInitialSleeve(sessionId, inSampleEndDate));
+            _backgroundJobClient.Enqueue<IMasterWalkForwardOrchestrator>(orchestrator =>
+                orchestrator.ExecuteCycle(sessionId, cycleStartDate));
             return Ok("Sleeve selection phase enqueued.");
         }
 
         [HttpPost("run-portfolio-backtest")]
-        public IActionResult TriggerPortfolioBacktest([FromQuery] Guid sessionId, [FromQuery] DateTime oosDate)
+        public IActionResult TriggerPortfolioBacktest([FromQuery] Guid sessionId, [FromQuery] DateTime oosStartDate)
         {
-            _logger.LogInformation("Received 'Run Portfolio Backtest' signal from Conductor for SessionId: {SessionId}, OOS Date: {OOSDate}", sessionId, oosDate);
+            _logger.LogInformation("Received 'Run Portfolio Backtest' signal from Conductor for SessionId: {SessionId}, OOS Date: {OOSDate}", sessionId, oosStartDate);
 
             _backgroundJobClient.Enqueue<IPortfolioBacktestOrchestrator>(orchestrator =>
-                orchestrator.ExecuteNextPeriod(sessionId, oosDate));
+                orchestrator.ExecuteNextPeriod(sessionId, oosStartDate));
 
             return Ok("Portfolio backtest phase enqueued.");
         }

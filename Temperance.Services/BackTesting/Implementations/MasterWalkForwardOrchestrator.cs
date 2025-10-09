@@ -1,6 +1,7 @@
 ﻿using Hangfire;
 using Microsoft.Extensions.Logging;
 using Temperance.Conductor.Repository.Interfaces;
+using Temperance.Data.Data.Repositories;
 using Temperance.Data.Models.Backtest;
 using Temperance.Services.BackTesting.Interfaces;
 using Temperance.Services.Services.Interfaces;
@@ -10,17 +11,12 @@ namespace Temperance.Services.BackTesting.Implementations
 {
     public class MasterWalkForwardOrchestrator : IMasterWalkForwardOrchestrator
     {
-        private readonly IBackgroundJobClient _backgroundJobClient;
         private readonly ILogger<MasterWalkForwardOrchestrator> _logger;
         private readonly ISecuritiesOverviewService _securitiesOverviewService;
-        private readonly IConductorService _conductorService;
-        private readonly ITradeService _tradeService;
         private readonly IConductorClient _conductorClient;
         private readonly IWalkForwardRepository _walkForwardRepository;
-
-        // --- Configuration Constants ---
-        private const int InSampleYears = 2;
-        private const int OutOfSampleYears = 1;
+        private readonly IPerformanceRepository _performanceRepository;
+        private readonly IBackgroundJobClient _backgroundJobClient;
 
         public object OptimizationMode { get; private set; }
 
@@ -31,18 +27,18 @@ namespace Temperance.Services.BackTesting.Implementations
             IConductorService conductorService,
             ITradeService tradeService,
             IConductorClient conductorClient,
-            IWalkForwardRepository walkForwardRepository)
+            IWalkForwardRepository walkForwardRepository,
+            IPerformanceRepository performanceRepository)
         {
-            _backgroundJobClient = backgroundJobClient;
             _logger = logger;
             _securitiesOverviewService = securitiesOverviewService;
-            _conductorService = conductorService;
-            _tradeService = tradeService;
             _conductorClient = conductorClient;
             _walkForwardRepository = walkForwardRepository;
+            _performanceRepository = performanceRepository;
+            _backgroundJobClient = backgroundJobClient;
         }
 
-        public async Task StartInitialTrainingPhase(Guid sessionId, string strategyName, DateTime startDate, DateTime endDate)
+        public async Task ExecuteCycle(Guid sessionId, DateTime cycleStartDate)
         {
             _logger.LogInformation("PHASE 1: Starting Initial Bulk Training for SessionId: {SessionId}", sessionId);
 
@@ -50,102 +46,83 @@ namespace Temperance.Services.BackTesting.Implementations
             if (session == null)
             {
                 _logger.LogError("Could not find session {SessionId}. Aborting.", sessionId);
+                await _walkForwardRepository.UpdateSessionStatusAsync(sessionId, "Failed");
                 return;
             }
-
-            var inSampleStartDate = session.StartDate;
-            var inSampleEndDate = session.StartDate
-                                        .AddYears(session.OptimizationWindowYears)
-                                        .AddDays(-1);
-
-            var universe = new List<string>();
-            await foreach (var security in _securitiesOverviewService.StreamSecuritiesForBacktest(null, new List<string> { "60min" }))
-                universe.Add(security.Symbol);
-
-            var symbols = universe.ToList();
-
-            if (!symbols.Any())
+            if (cycleStartDate >= session.EndDate)
             {
-                _logger.LogError("No securities found for the initial training period. Aborting walk-forward session {SessionId}.", sessionId);
+                _logger.LogInformation("ORCHESTRATOR: Walk-forward session {SessionId} complete.", sessionId);
+                await _walkForwardRepository.UpdateSessionStatusAsync(sessionId, "Completed");
                 return;
             }
 
-            _logger.LogInformation("Found {SymbolCount} securities for initial training.", symbols.Count);
+            var inSampleStartDate = cycleStartDate.AddYears(-session.OptimizationWindowYears);
+            var inSampleEndDate = cycleStartDate.AddDays(-1);
+
+            List<string> fullUniverse;
+            BacktestRun previousRun = await _walkForwardRepository.GetLatestRunForSessionAsync(sessionId);
+
+            int activeSleeveSize = 50; // Number of top securities in the active sleeve
+            if (previousRun == null)
+            {
+                _logger.LogInformation($"First cycle: getting initial universe from securities...");
+                fullUniverse = await _securitiesOverviewService.GetSecurities();
+            }
+            else
+            {
+                _logger.LogInformation($"Subsequent cycle: Ranking securities based on performance from RunId");
+                var activeSleevePerformance = await _performanceRepository.GetSleeveComponentsAsync(previousRun.RunId);
+                var shadowSleevePerformance = await _performanceRepository.GetShadowPerformanceAsync(previousRun.RunId);
+
+                var combinedPerformance = activeSleevePerformance
+                    .Select(p => new { p.Symbol, p.SharpeRatio })
+                    .Concat(shadowSleevePerformance.Select(p => new { p.Symbol, p.SharpeRatio }));
+
+                fullUniverse = combinedPerformance
+                    .OrderByDescending(p => p.SharpeRatio)
+                    .Select(p => p.Symbol)
+                    .ToList();
+
+                activeSleeveSize = Math.Max(activeSleeveSize, activeSleevePerformance.Count());
+            }
+
+            if (!fullUniverse.Any())
+            {
+                _logger.LogError("No securities found for the initial universe. Aborting.");
+                return;
+            }
+
+            var activeUniverse = fullUniverse.Take(activeSleeveSize).ToList();
+            var shadowUniverse = fullUniverse.Skip(activeSleeveSize).ToList();
+
+            var tradingPeriodEndDate = cycleStartDate.AddYears(session.TradingWindowYears).AddDays(-1);
+            if(tradingPeriodEndDate > session.EndDate)
+                tradingPeriodEndDate = session.EndDate;
+
+            var activeRunId = Guid.NewGuid();
+            _backgroundJobClient.Enqueue<IPortfolioBacktestOrchestrator>(
+                orchestrator => orchestrator.ExecuteNextPeriod(sessionId, cycleStartDate, tradingPeriodEndDate));
+
+            var shadowRunId = Guid.NewGuid();
+            _backgroundJobClient.Enqueue<IShadowBacktestOrchestrator>(
+                orchestrator => orchestrator.Execute(sessionId, shadowRunId, shadowUniverse, cycleStartDate, tradingPeriodEndDate));
+
+            _logger.LogInformation("Found {SymbolCount} securities for initial training.", fullUniverse.Count);
 
             var batchRequest = new OptimizationBatchRequest
             {
                 SessionId = sessionId,
-                StrategyName = strategyName,
+                StrategyName = session.StrategyName,
                 Mode = Data.Models.Backtest.OptimizationMode.Train,
                 InSampleStartDate = inSampleStartDate,
                 InSampleEndDate = inSampleEndDate,
-                Symbols = symbols,
+                Symbols = fullUniverse,
                 Interval = "60min",
             };
 
             await _conductorClient.DispatchOptimizationBatchAsync(batchRequest);
 
-            _logger.LogInformation("PHASE 1: Batch dispatch request sent to Conductor for {SymbolCount} securities. This job is now complete.", symbols.Count);
+            _logger.LogInformation("PHASE 1: Batch dispatch request sent to Conductor for {SymbolCount} securities. This job is now complete.", batchRequest.Symbols.Count);
         }
-
-        //[AutomaticRetry(Attempts = 2)]
-        //public async Task ExecuteCycle(Guid sessionId, DateTime currentTradingPeriodStart)
-        //{
-        //    _logger.LogInformation("Master orchestrator executing new cycle for SessionId {SessionId} starting {StartDate}", 
-        //        sessionId, currentTradingPeriodStart);
-
-        //    var session = await _tradeService.GetSessionAsync(sessionId);
-        //    if (session == null || currentTradingPeriodStart >= session.EndDate)
-        //    {
-        //        _logger.LogInformation("Walk-forward session {SessionId} has completed its full term. Stopping.", sessionId);
-        //        await _tradeService.UpdateBacktestRunStatusAsync(sessionId, "Completed");
-        //        return;
-        //    }
-
-        //    // 1. Define the next in-sample/out-of-sample windows
-        //    var inSampleEndDate = currentTradingPeriodStart.AddDays(-OutOfSampleYears);
-        //    var inSampleStartDate = inSampleEndDate.AddYears(-InSampleYears).AddDays(1);
-
-        //    string optimizationMode = (currentTradingPeriodStart == session.StartDate) ? "train" : "fine-tune";
-
-        //    _logger.LogInformation("Session {SessionId}: In-Sample Period set from {InSampleStart} to {InSampleEnd}", 
-        //        sessionId, inSampleStartDate, inSampleEndDate);
-
-        //    // 2. Get the Point-in-Time universe of symbols to optimize
-        //    // We pass null for symbols to get the entire universe based on the repository's rules (e.g., market cap > 5B)
-        //    var pitUniverseSymbols = new List<string>();
-        //    await foreach (var security in _securitiesOverviewService.StreamSecuritiesForBacktest(null, new List<string> { "60min" }))
-        //    {
-        //        pitUniverseSymbols.Add(security.Symbol);
-        //    }
-
-        //    if (!pitUniverseSymbols.Any())
-        //    {
-        //        _logger.LogError("Session {SessionId}: Could not retrieve any symbols for the Point-in-Time universe. Aborting cycle.", sessionId);
-        //        return;
-        //    }
-        //    _logger.LogInformation("Session {SessionId}: Retrieved {SymbolCount} symbols for optimization.", sessionId, pitUniverseSymbols.Count);
-
-        //    // 3. Call Conductor to dispatch optimization jobs for the entire universe
-        //    await _conductorService.DispatchOptimizationJobsAsync(
-        //        sessionId,
-        //        session.StrategyName,
-        //        "60min", // Assuming a fixed interval for this walk-forward session
-        //        inSampleStartDate,
-        //        inSampleEndDate,
-        //        pitUniverseSymbols,
-        //        optimizationMode
-        //    );
-        //    _logger.LogInformation("Session {SessionId}: Dispatched all optimization jobs via Conductor.", sessionId);
-
-        //    // 4. Schedule the FilterAndSelectSleevesJob to run after a delay
-        //    // This delay should be long enough for Ludus to process all jobs.
-        //    var filterDelay = TimeSpan.FromHours(8); // This should be configurable
-        //    _backgroundJobClient.Schedule<FilterAndSelectSleevesJob>(
-        //        job => job.Execute(sessionId, currentTradingPeriodStart, inSampleStartDate, inSampleEndDate),
-        //        filterDelay
-        //    );
-        //    _logger.LogInformation("Session {SessionId}: Scheduled sleeve filtering job to run in {Delay}.", sessionId, filterDelay);
-        //}
     }
 }

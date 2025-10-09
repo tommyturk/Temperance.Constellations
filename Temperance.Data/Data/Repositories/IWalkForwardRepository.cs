@@ -16,6 +16,8 @@ namespace Temperance.Conductor.Repository.Interfaces
         Task<HashSet<string>> GetSleeveSymbolsForPeriodAsync(Guid sessionId, DateTime tradingPeriodStartDate);
 
         Task UpdateSessionCapitalAsync(Guid sessionId, double? finalCapital);
+        Task<BacktestRun> GetLatestRunForSessionAsync(Guid sessionId);
+        Task<StrategyOptimizedParameters> GetOptimizedParametersForSymbol(Guid sessionId, string symbol, DateTime dateTime);
     }
 }
 

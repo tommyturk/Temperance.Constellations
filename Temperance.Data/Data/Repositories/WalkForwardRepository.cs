@@ -1,8 +1,6 @@
 ﻿using Dapper;
 using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Logging;
-using System.Data;
-using System.Data.Common;
 using System.Text.Json;
 using Temperance.Conductor.Repository.Interfaces;
 using Temperance.Data.Models.Backtest;
@@ -219,6 +217,31 @@ namespace Temperance.Data.Data.Repositories.WalkForward.Implementations
 
             using var connection = new SqlConnection(_connectionString);
             return await connection.QueryAsync<WalkForwardSleeve>(sql, new { SessionId = sessionId, AsOfDate = asOfDate });
+        }
+
+        public async Task<BacktestRun> GetLatestRunForSessionAsync(Guid sessionId)
+        {
+            var query = @"
+                SELECT TOP 1 *
+                FROM [Constellations].[BacktestRuns]
+                WHERE SessionId = @SessionId
+                ORDER BY CreatedAt DESC;";
+
+            using var connection = new SqlConnection(_connectionString);
+            return await connection.QuerySingleOrDefaultAsync<BacktestRun>(query, new { SessionId = sessionId });
+        }
+
+        public async Task<StrategyOptimizedParameters> GetOptimizedParametersForSymbol(Guid sessionId, string symbol, DateTime dateTime)
+        {
+            var query = @"
+                SELECT TOP 1 *
+                FROM [Ludus].[StrategyOptimizedParameters]
+                WHERE SessionId = @SessionId
+                  AND Symbol = @Symbol
+                  AND CreatedAt <= @DateTime
+                ORDER BY CreatedAt DESC;";
+            using var connection = new SqlConnection(_connectionString);
+            return await connection.QuerySingleOrDefaultAsync<StrategyOptimizedParameters>(query, new { SessionId = sessionId, Symbol = symbol, DateTime = dateTime });
         }
     }
 }

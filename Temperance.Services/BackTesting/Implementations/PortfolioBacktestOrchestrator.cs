@@ -1,9 +1,8 @@
 ﻿using Hangfire;
 using Microsoft.Extensions.Logging;
 using Temperance.Conductor.Repository.Interfaces;
-using Temperance.Data.Data.Repositories.WalkForward.Implementations;
 using Temperance.Data.Models.Backtest;
-using Temperance.Services.BackTesting.Interfaces; // Your existing IBacktestRunner
+using Temperance.Services.BackTesting.Interfaces;
 
 namespace Temperance.Services.BackTesting.Orchestration.Implementations
 {
@@ -26,7 +25,7 @@ namespace Temperance.Services.BackTesting.Orchestration.Implementations
             _logger = logger;
         }
 
-        public async Task ExecuteNextPeriod(Guid sessionId, DateTime oosStartDate)
+        public async Task ExecuteNextPeriod(Guid sessionId, DateTime oosStartDate, DateTime oosEndDate)
         {
             _logger.LogInformation($"THIS IS THE OOSSTARTDATE: {oosStartDate} inside ExecuteNextPeriod.");
 
@@ -37,9 +36,6 @@ namespace Temperance.Services.BackTesting.Orchestration.Implementations
                 await _walkForwardRepository.UpdateSessionStatusAsync(sessionId, "Completed");
                 return;
             }
-
-            var oosEndDate = oosStartDate.AddYears(session.TradingWindowYears).AddDays(-1);
-            _logger.LogInformation($"THIS IS THE OOSENDDATE: {oosEndDate} inside ExecuteNextPeriod.");
 
             _logger.LogInformation("ORCHESTRATOR: Preparing 1-Month OOS Backtest for {Date:yyyy-MM}", oosStartDate);
 
@@ -67,7 +63,7 @@ namespace Temperance.Services.BackTesting.Orchestration.Implementations
                     MaxParallelism = 16,
                 };
 
-                await _backtestEngine.RunBacktest(config, config.RunId);
+                await _backtestEngine.RunPortfolioBacktest(config, config.RunId);
             }
 
             if (oosStartDate.Month == 12)
