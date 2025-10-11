@@ -107,7 +107,7 @@ namespace Temperance.Services.BackTesting.Implementations
 
             var nextOosDate = yearEnd.AddDays(1);
             _backgroundJobClient.Enqueue<IPortfolioBacktestOrchestrator>(
-               orchestrator => orchestrator.ExecuteNextPeriod(sessionId, nextOosDate)
+               orchestrator => orchestrator.ExecuteNextPeriod(sessionId, nextOosDate, yearEnd)
            );
         }
     }

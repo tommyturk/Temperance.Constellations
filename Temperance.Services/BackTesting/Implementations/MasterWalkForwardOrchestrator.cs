@@ -62,7 +62,9 @@ namespace Temperance.Services.BackTesting.Implementations
             List<string> fullUniverse;
             BacktestRun previousRun = await _walkForwardRepository.GetLatestRunForSessionAsync(sessionId);
 
-            int activeSleeveSize = 50; // Number of top securities in the active sleeve
+            int activeSleeveSize = 50;
+            var optimizationMode = Data.Models.Backtest.OptimizationMode.Train;
+
             if (previousRun == null)
             {
                 _logger.LogInformation($"First cycle: getting initial universe from securities...");
@@ -84,6 +86,7 @@ namespace Temperance.Services.BackTesting.Implementations
                     .ToList();
 
                 activeSleeveSize = Math.Max(activeSleeveSize, activeSleevePerformance.Count());
+                optimizationMode = Data.Models.Backtest.OptimizationMode.FineTune;
             }
 
             if (!fullUniverse.Any())
@@ -113,10 +116,10 @@ namespace Temperance.Services.BackTesting.Implementations
             {
                 SessionId = sessionId,
                 StrategyName = session.StrategyName,
-                Mode = Data.Models.Backtest.OptimizationMode.Train,
+                Mode = optimizationMode,
                 InSampleStartDate = inSampleStartDate,
                 InSampleEndDate = inSampleEndDate,
-                Symbols = fullUniverse,
+                Symbols = activeUniverse,
                 Interval = "60min",
             };
 

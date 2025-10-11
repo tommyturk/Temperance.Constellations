@@ -3,12 +3,16 @@ using Hangfire.SqlServer;
 using ILGPU;
 using ILGPU.Algorithms;
 using ILGPU.Runtime;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using Microsoft.OpenApi.Models;
 using System.Text.Json.Serialization;
 using Temperance.Conductor.Repository.Interfaces;
+using Temperance.Data.Data.Repositories;
 using Temperance.Data.Data.Repositories.BalanceSheet.Implementation;
 using Temperance.Data.Data.Repositories.BalanceSheet.Interface;
+using Temperance.Data.Data.Repositories.HistoricalData.Implementations;
+using Temperance.Data.Data.Repositories.HistoricalData.Interfaces;
 using Temperance.Data.Data.Repositories.Indicator.Implementation;
 using Temperance.Data.Data.Repositories.Indicator.Interfaces;
 using Temperance.Data.Data.Repositories.Securities.Implementations;
@@ -77,14 +81,24 @@ builder.Services.AddTransient<IConductorService, ConductorService>();
 builder.Services.AddTransient<ITradeService, TradesService>();
 builder.Services.AddTransient<IQualityFilterService, QualityFilterService>();
 builder.Services.AddTransient<IMarketHealthService, MarketHealthService>();
+builder.Services.AddTransient<IMarketDataService, MarketDataService>();
 builder.Services.AddTransient<IEconomicDataService, EconomicDataService>();
 builder.Services.AddTransient<IMasterWalkForwardOrchestrator, MasterWalkForwardOrchestrator>();
+builder.Services.AddTransient<IInitialTrainingOrchestrator, InitialTrainingOrchestrator>();
 builder.Services.AddTransient<FilterAndSelectSleevesJob>();
 builder.Services.AddTransient<ISleeveSelectionOrchestrator, SleeveSelectionOrchestrator>();
 builder.Services.AddTransient<IPortfolioBacktestOrchestrator, PortfolioBacktestOrchestrator>();
 builder.Services.AddTransient<IPortfolioBacktestRunner, PortfolioBacktestRunner>();
 builder.Services.AddTransient<IFineTuneOrchestrator, FineTuneOrchestrator>();
 builder.Services.AddTransient<IOptimizationKeyGenerator, OptimizationKeyGenerator>();
+
+builder.Services.AddTransient<IHistoricalDataRepository>(provider =>
+{
+    var connectionString = provider.GetRequiredService<IOptions<ConnectionStrings>>().Value;
+    var defaultConnnection = connectionString.DefaultConnection;
+    var securitiesOverviewRepository = provider.GetRequiredService<ISecuritiesOverviewRepository>();
+    return new HistoricalDataRepository(defaultConnnection, securitiesOverviewRepository);
+});
 builder.Services.AddScoped<ISecuritiesOverviewRepository>(provider =>
 {
     var connectionStrings = provider.GetRequiredService<IOptions<ConnectionStrings>>().Value;
@@ -153,6 +167,14 @@ builder.Services.AddSingleton<IWalkForwardRepository>(provider =>
     var defaultConnnection = connectionString.DefaultConnection;
     var logger = provider.GetRequiredService<ILogger<WalkForwardRepository>>();
     return new WalkForwardRepository(defaultConnnection, logger);
+});
+
+builder.Services.AddSingleton<IPerformanceRepository>(provider =>
+{
+   var connectionString = provider.GetRequiredService<IOptions<ConnectionStrings>>().Value;
+    var defaultConnnection = connectionString.DefaultConnection;
+    var logger = provider.GetRequiredService<ILogger<PerformanceRepository>>();
+    return new PerformanceRepository(defaultConnnection, logger);
 });
 
 builder.Services.AddSingleton<Accelerator>(sp =>

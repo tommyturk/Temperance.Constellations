@@ -45,15 +45,15 @@ namespace Temperance.Constellations.Controllers
             return Ok("Sleeve selection phase enqueued.");
         }
 
-        [HttpPost("run-portfolio-backtest")]
-        public IActionResult TriggerPortfolioBacktest([FromQuery] Guid sessionId, [FromQuery] DateTime oosStartDate)
-        {
-            _logger.LogInformation("Received 'Run Portfolio Backtest' signal from Conductor for SessionId: {SessionId}, OOS Date: {OOSDate}", sessionId, oosStartDate);
+        //[HttpPost("run-portfolio-backtest")]
+        //public IActionResult TriggerPortfolioBacktest([FromQuery] Guid sessionId, [FromQuery] DateTime oosStartDate)
+        //{
+        //    _logger.LogInformation("Received 'Run Portfolio Backtest' signal from Conductor for SessionId: {SessionId}, OOS Date: {OOSDate}", sessionId, oosStartDate);
 
-            _backgroundJobClient.Enqueue<IPortfolioBacktestOrchestrator>(orchestrator =>
-                orchestrator.ExecuteNextPeriod(sessionId, oosStartDate));
+        //    _backgroundJobClient.Enqueue<IPortfolioBacktestOrchestrator>(orchestrator =>
+        //        orchestrator.ExecuteNextPeriod(sessionId, oosStartDate));
 
-            return Ok("Portfolio backtest phase enqueued.");
-        }
+        //    return Ok("Portfolio backtest phase enqueued.");
+        //}
     }
 }
