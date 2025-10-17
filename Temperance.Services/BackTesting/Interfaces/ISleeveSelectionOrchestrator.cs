@@ -2,8 +2,6 @@
 {
     public interface ISleeveSelectionOrchestrator
     {
-        Task SelectInitialSleeve(Guid sessionId, DateTime inSampleEndDate);
-        Task ReselectAnnualSleeve(Guid sessionId, DateTime yearEnd);
-
+        Task ReselectAnnualSleeve(Guid cycleTrackerId, Guid sessionId, DateTime yearEnd);
     }
 }

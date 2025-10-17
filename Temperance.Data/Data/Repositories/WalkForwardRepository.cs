@@ -176,9 +176,6 @@ namespace Temperance.Data.Data.Repositories.WalkForward.Implementations
 
         public async Task<IEnumerable<WalkForwardSleeve>> GetActiveSleeveAsync(Guid sessionId, DateTime asOfDate)
         {
-            // This SQL is correct. It finds the most recent sleeve record for each symbol
-            // on or before the given date and filters for the ones that are marked as active.
-            // If this fails, the issue is with the _connectionString not pointing to TradingBotDb.
             const string sql = @"
                 WITH RankedSleeves AS (
                     SELECT 
@@ -225,7 +222,7 @@ namespace Temperance.Data.Data.Repositories.WalkForward.Implementations
                 SELECT TOP 1 *
                 FROM [Constellations].[BacktestRuns]
                 WHERE SessionId = @SessionId
-                ORDER BY CreatedAt DESC;";
+                ORDER BY StartTime DESC;";
 
             using var connection = new SqlConnection(_connectionString);
             return await connection.QuerySingleOrDefaultAsync<BacktestRun>(query, new { SessionId = sessionId });
@@ -238,10 +235,60 @@ namespace Temperance.Data.Data.Repositories.WalkForward.Implementations
                 FROM [Ludus].[StrategyOptimizedParameters]
                 WHERE SessionId = @SessionId
                   AND Symbol = @Symbol
-                  AND CreatedAt <= @DateTime
                 ORDER BY CreatedAt DESC;";
             using var connection = new SqlConnection(_connectionString);
             return await connection.QuerySingleOrDefaultAsync<StrategyOptimizedParameters>(query, new { SessionId = sessionId, Symbol = symbol, DateTime = dateTime });
+        }
+
+        public async Task CreateCycleTracker(CycleTracker cycle)
+        {
+            const string sql = @"
+                INSERT INTO [Constellations].[CycleTrackers]
+                    (CycleTrackerId, SessionId, CycleStartDate, PortfolioBacktestRunId, ShadowBacktestRunId, CreatedAt)
+                VALUES
+                    (@CycleTrackerId, @SessionId, @CycleStartDate, @PortfolioBacktestRunId, @ShadowBacktestRunId, @CreatedAt);";
+            await using var connection = new SqlConnection(_connectionString);
+            await connection.ExecuteAsync(sql, cycle);
+        }
+
+        public async Task<CycleTracker> GetCycleTrackerAsync(Guid cycleTrackerId)
+        {
+            const string sql = "SELECT * FROM [Constellations].[CycleTrackers] WHERE CycleTrackerId = @CycleTrackerId;";
+            using var connection = new SqlConnection(_connectionString);
+            return await connection.QuerySingleOrDefaultAsync<CycleTracker>(sql, new { CycleTrackerId = cycleTrackerId });
+        }
+
+        public async Task<CycleTracker> SignalCompletionAndCheckIfReady(Guid cycleTrackerId, BacktestType backtestType)
+        {
+            var sql = @"
+                UPDATE [Constellations].[CycleTrackers]
+                SET 
+                    IsPortfolioBacktestComplete = CASE WHEN @BacktestType = 0 THEN 1 ELSE IsPortfolioBacktestComplete END,
+                    IsShadowBacktestComplete = CASE WHEN @BacktestType = 1 THEN 1 ELSE IsShadowBacktestComplete END
+                OUTPUT INSERTED.*
+                WHERE CycleTrackerId = @CycleTrackerId;";
+
+            using var connection = new SqlConnection(_connectionString);
+
+            // Dapper's QuerySingleOrDefaultAsync executes the command and maps the OUTPUT row back to our C# object.
+            var updatedTracker = await connection.QuerySingleOrDefaultAsync<CycleTracker>(sql, new
+            {
+                CycleTrackerId = cycleTrackerId,
+                BacktestType = (int)backtestType 
+            });
+
+            return updatedTracker;
+        }
+
+        public async Task MarkOptimizationAsDispatchedAsync(Guid cycleTrackerId)
+        {
+            const string sql = @"
+                UPDATE [Constellations].[CycleTrackers]
+                SET IsOptimizationDispatched = 1
+                WHERE CycleTrackerId = @CycleTrackerId;";
+
+            using var connection = new SqlConnection(_connectionString);
+            await connection.ExecuteAsync(sql, new { CycleTrackerId = cycleTrackerId });
         }
     }
 }

@@ -137,7 +137,6 @@ namespace Temperance.Services.BackTesting.Implementations
                             EntryPrice = currentBar.ClosePrice,
                             Quantity = quantity,
                             Direction = direction,
-                            TotalEntryCost = entryCosts,
                         };
                     }
                 }
@@ -158,7 +157,8 @@ namespace Temperance.Services.BackTesting.Implementations
                 SharpeRatio = (decimal)backtest.SharpeRatio,
                 ProfitLoss = (decimal)backtest?.TotalProfitLoss,
                 TotalTrades = backtest.TotalTrades,
-                WinRate = (decimal)backtest?.WinRate
+                WinRate = (decimal)backtest?.WinRate,
+                TotalTransactionCost = (decimal)backtest?.Trades?.Sum(t => t.TotalTransactionCost)
             };
         }
 

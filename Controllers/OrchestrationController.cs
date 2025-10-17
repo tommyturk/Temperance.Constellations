@@ -1,6 +1,5 @@
 ﻿using Hangfire;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.Extensions.Configuration;
 using Temperance.Services.BackTesting.Interfaces;
 using TradingApp.src.Core.Services.Interfaces;
 
@@ -41,7 +40,7 @@ namespace Temperance.Constellations.Controllers
         {
             _logger.LogInformation("Received 'Select Sleeve' signal from Conductor for SessionId: {SessionId}", sessionId);
             _backgroundJobClient.Enqueue<IMasterWalkForwardOrchestrator>(orchestrator =>
-                orchestrator.ExecuteCycle(sessionId, cycleStartDate));
+                orchestrator.InitiateCycle(sessionId, cycleStartDate));
             return Ok("Sleeve selection phase enqueued.");
         }
 

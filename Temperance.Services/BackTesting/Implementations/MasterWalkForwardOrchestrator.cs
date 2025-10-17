@@ -38,7 +38,7 @@ namespace Temperance.Services.BackTesting.Implementations
             _backgroundJobClient = backgroundJobClient;
         }
 
-        public async Task ExecuteCycle(Guid sessionId, DateTime cycleStartDate)
+        public async Task InitiateCycle(Guid sessionId, DateTime cycleStartDate)
         {
             _logger.LogInformation("PHASE 1: Starting Initial Bulk Training for SessionId: {SessionId}", sessionId);
 
@@ -98,34 +98,108 @@ namespace Temperance.Services.BackTesting.Implementations
             var activeUniverse = fullUniverse.Take(activeSleeveSize).ToList();
             var shadowUniverse = fullUniverse.Skip(activeSleeveSize).ToList();
 
+            var cycleTracker = new CycleTracker
+            {
+                CycleTrackerId = Guid.NewGuid(),
+                SessionId = sessionId,
+                CycleStartDate = cycleStartDate,
+                PortfolioBacktestRunId = Guid.NewGuid(),
+                ShadowBacktestRunId = Guid.NewGuid(),
+                CreatedAt = DateTime.UtcNow
+            };
+            await _walkForwardRepository.CreateCycleTracker(cycleTracker);
+
             var tradingPeriodEndDate = cycleStartDate.AddYears(session.TradingWindowYears).AddDays(-1);
             if(tradingPeriodEndDate > session.EndDate)
                 tradingPeriodEndDate = session.EndDate;
 
             var activeRunId = Guid.NewGuid();
             _backgroundJobClient.Enqueue<IPortfolioBacktestOrchestrator>(
-                orchestrator => orchestrator.ExecuteNextPeriod(sessionId, cycleStartDate, tradingPeriodEndDate));
+                orchestrator => orchestrator.ExecuteNextPeriod(cycleTracker.CycleTrackerId, sessionId, cycleStartDate, tradingPeriodEndDate));
 
             var shadowRunId = Guid.NewGuid();
             _backgroundJobClient.Enqueue<IShadowBacktestOrchestrator>(
-                orchestrator => orchestrator.Execute(sessionId, shadowRunId, shadowUniverse, cycleStartDate, tradingPeriodEndDate));
+                orchestrator => orchestrator.Execute(cycleTracker.CycleTrackerId, sessionId, shadowRunId, shadowUniverse, cycleStartDate, tradingPeriodEndDate));
 
-            _logger.LogInformation("Found {SymbolCount} securities for initial training.", fullUniverse.Count);
+            _logger.LogInformation(
+                        "PHASE 1: Enqueued Active and Shadow backtests for CycleTrackerId {CycleTrackerId}. Waiting for completion signals.",
+                        cycleTracker.CycleTrackerId);
+        }
 
+        [AutomaticRetry(Attempts = 3)]
+        public async Task SignalBacktestCompletion(Guid cycleTrackerId, BacktestType backtestType)
+        {
+            _logger.LogInformation("Received completion signal for {BacktestType} backtest in CycleTrackerId: {CycleTrackerId}", backtestType, cycleTrackerId);
+
+            var tracker = await _walkForwardRepository.SignalCompletionAndCheckIfReady(cycleTrackerId, backtestType);
+
+            if(tracker != null && tracker.IsPortfolioBacktestComplete && tracker.IsShadowBacktestComplete && !tracker.IsOptimizationDispatched)
+                _backgroundJobClient.Enqueue(() => DispatchOptimizationPhase(cycleTrackerId));
+            else if(tracker == null)
+                _logger.LogError("CycleTrackerId {CycleTrackerId} not found while signaling backtest completion.", cycleTrackerId);
+            else
+                _logger.LogInformation("Waiting for the other backtest to complete for CycleTrackerId: {CycleTrackerId}.", cycleTrackerId);
+        }
+
+        public async Task DispatchOptimizationPhase(Guid cycleTrackerId)
+        {
+            var tracker = await _walkForwardRepository.GetCycleTrackerAsync(cycleTrackerId);
+            if (tracker == null)
+            {
+                _logger.LogError("CycleTrackerId {CycleTrackerId} not found. Cannot dispatch optimization phase.", cycleTrackerId);
+                return;
+            }
+            var session = await _walkForwardRepository.GetSessionAsync(tracker.SessionId);
+            if (session == null)
+            {
+                _logger.LogError("SessionId {SessionId} not found for CycleTrackerId {CycleTrackerId}. Cannot dispatch optimization phase.", tracker.SessionId, cycleTrackerId);
+                return;
+            }
+            var previousRun = await _walkForwardRepository.GetLatestRunForSessionAsync(tracker.SessionId);
+            List<string> fullUniverse;
+            var optimizationMode = Data.Models.Backtest.OptimizationMode.Train;
+            int activeSleeveSize = 50;
+            if(previousRun == null)
+                fullUniverse = await _securitiesOverviewService.GetSecurities();
+            else
+            {
+                var activeSleevePerformance = await _performanceRepository.GetSleeveComponentsAsync(previousRun.RunId);
+                var shadowSleevePerformance = await _performanceRepository.GetShadowPerformanceAsync(previousRun.RunId);
+
+                var projectedActive = activeSleevePerformance
+                    .Select(p => new { p.Symbol, p.SharpeRatio });
+                var projectedShadow = shadowSleevePerformance
+                    .Select(p => new { p.Symbol, p.SharpeRatio });
+
+                var combinedPerformance = projectedActive
+                    .Concat(projectedShadow);
+
+                fullUniverse = combinedPerformance
+                    .OrderByDescending(p => p.SharpeRatio)
+                    .Select(p => p.Symbol)
+                    .Distinct()
+                    .ToList();
+
+                activeSleeveSize = Math.Max(activeSleeveSize, activeSleevePerformance.Count());
+                optimizationMode = Data.Models.Backtest.OptimizationMode.FineTune;
+            }
+            var activeUniverse = fullUniverse.Take(activeSleeveSize).ToList();
+
+            var inSampleStartDate = tracker.CycleStartDate.AddYears(-session.OptimizationWindowYears);
+            var inSampleEndDate = tracker.CycleStartDate.AddDays(-1);
+            _logger.LogInformation("PHASE 2: Dispatching Optimization Phase for CycleTrackerId: {CycleTrackerId}", cycleTrackerId);
             var batchRequest = new OptimizationBatchRequest
             {
-                SessionId = sessionId,
+                SessionId = session.SessionId,
                 StrategyName = session.StrategyName,
-                Mode = optimizationMode,
+                Mode = Data.Models.Backtest.OptimizationMode.FineTune,
                 InSampleStartDate = inSampleStartDate,
                 InSampleEndDate = inSampleEndDate,
-                Symbols = activeUniverse,
+                Symbols = (await _walkForwardRepository.GetActiveSleeveAsync(session.SessionId, tracker.CycleStartDate)).Select(s => s.Symbol).ToList(),
                 Interval = "60min",
             };
-
             await _conductorClient.DispatchOptimizationBatchAsync(batchRequest);
-
-            _logger.LogInformation("PHASE 1: Batch dispatch request sent to Conductor for {SymbolCount} securities. This job is now complete.", batchRequest.Symbols.Count);
+            _logger.LogInformation("PHASE 2: Batch dispatch request sent to Conductor for optimization. This job is now complete.");
         }
     }
 }

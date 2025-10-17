@@ -1,7 +1,10 @@
-﻿namespace Temperance.Services.BackTesting.Interfaces
+﻿using Temperance.Data.Models.Backtest;
+
+namespace Temperance.Services.BackTesting.Interfaces
 {
     public interface IMasterWalkForwardOrchestrator
     {
-        Task ExecuteCycle(Guid sessionId, DateTime startDate);
+        Task InitiateCycle(Guid sessionId, DateTime cycleStartDate);
+        Task SignalBacktestCompletion(Guid cycleTrackerId, BacktestType backtestType);
     }
 }

@@ -2,6 +2,6 @@
 {
     public interface IShadowBacktestOrchestrator
     {
-        Task Execute(Guid sessionId, Guid runId, List<string> shadowUniverse, DateTime startDate, DateTime endDate);
+        Task Execute(Guid cycleTrackerId, Guid sessionId, Guid runId, List<string> shadowUniverse, DateTime startDate, DateTime endDate);
     }
 }

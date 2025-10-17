@@ -15,6 +15,7 @@ using Temperance.Services.BackTesting.Interfaces;
 using Temperance.Services.Factories.Interfaces;
 using Temperance.Services.Services.Interfaces;
 using Temperance.Services.Trading.Strategies;
+using Temperance.Services.Trading.Strategies.Momentum;
 using Temperance.Utilities.Helpers;
 using TradingApp.src.Core.Services.Interfaces;
 namespace Temperance.Services.BackTesting.Implementations
@@ -803,52 +804,53 @@ namespace Temperance.Services.BackTesting.Implementations
         }
 
         #region
-        //[AutomaticRetry(Attempts = 1)]
-        //public async Task RunDualMomentumBacktest(string configJson, Guid runId)
-        //{
-        //    var config = JsonSerializer.Deserialize<DualMomentumBacktestConfiguration>(configJson);
-        //    if (config == null || !config.RiskAssetSymbols.Any() || string.IsNullOrWhiteSpace(config.SafeAssetSymbol))
-        //    {
-        //        await _tradesService.UpdateBacktestRunStatusAsync(runId, "Failed", "Invalid configuration for Dual Momentum Backtest.");
-        //        throw new ArgumentException("Invalid configuration for Dual Momentum Backtest.");
-        //    }
+        [AutomaticRetry(Attempts = 1)]
+        public async Task RunDualMomentumBacktest(string configJson, Guid runId)
+        {
+            var session = await _tradesService.GetSessionAsync(runId);
+            var config = JsonSerializer.Deserialize<DualMomentumBacktestConfiguration>(configJson);
+            if (config == null || !config.RiskAssetSymbols.Any() || string.IsNullOrWhiteSpace(config.SafeAssetSymbol))
+            {
+                await _tradesService.UpdateBacktestRunStatusAsync(runId, "Failed", "Invalid configuration for Dual Momentum Backtest.");
+                throw new ArgumentException("Invalid configuration for Dual Momentum Backtest.");
+            }
 
-        //    await _tradesService.UpdateBacktestRunStatusAsync(runId, "Running");
-        //    _logger.LogInformation("Starting Dual Momentum backtest for RunId: {RunId}", runId);
+            await _tradesService.UpdateBacktestRunStatusAsync(runId, "Running");
+            _logger.LogInformation("Starting Dual Momentum backtest for RunId: {RunId}", runId);
 
-        //    await _portfolioManager.Initialize(config.InitialCapital);
-        //    var allTrades = new ConcurrentBag<TradeSummary>();
-        //    var riskAssetKellyHalfFractions = new ConcurrentDictionary<string, double>();
+            await _portfolioManager.Initialize(session.SessionId, config.InitialCapital);
+            var allTrades = new ConcurrentBag<TradeSummary>();
+            var riskAssetKellyHalfFractions = new ConcurrentDictionary<string, double>();
 
-        //    string strategyParametersJson = JsonSerializer.Serialize(config.StrategyParameters);
-        //    var strategyInstance = _strategyFactory.CreateStrategy<IDualMomentumStrategy>(
-        //        config.StrategyName, config.InitialCapital, config.StrategyParameters);
+            string strategyParametersJson = JsonSerializer.Serialize(config.StrategyParameters);
+            var strategyInstance = _strategyFactory.CreateStrategy<IDualMomentumStrategy>(
+                config.StrategyName, config.InitialCapital, config.StrategyParameters);
 
-        //    if (strategyInstance == null)
-        //        throw new InvalidOperationException($"Could not create a valid IDualMomentumStrategy for '{config.StrategyName}'.");
+            if (strategyInstance == null)
+                throw new InvalidOperationException($"Could not create a valid IDualMomentumStrategy for '{config.StrategyName}'.");
 
-        //    int lookbackPeriod = config.MomentumLookbackMonths;
-        //    var testCases = config.RiskAssetSymbols.Select(symbol => new { Symbol = symbol }).ToList();
+            int lookbackPeriod = config.MomentumLookbackMonths;
+            var testCases = config.RiskAssetSymbols.Select(symbol => new { Symbol = symbol }).ToList();
 
-        //    var parallelOptions = new ParallelOptions { MaxDegreeOfParallelism = config.MaxParallelism };
-        //    await Parallel.ForEachAsync(testCases, parallelOptions, async (testCase, cancellationToken) =>
-        //    {
-        //        var dmStrategy = strategyInstance as DualMomentumStrategy;
-        //        if (dmStrategy == null)
-        //        {
-        //            _logger.LogError("RunId: {RunId} - Strategy instance is not a valid DualMomentumStrategy.", runId);
-        //            return;
-        //        }
+            var parallelOptions = new ParallelOptions { MaxDegreeOfParallelism = config.MaxParallelism };
+            await Parallel.ForEachAsync(testCases, parallelOptions, async (testCase, cancellationToken) =>
+            {
+                var dmStrategy = strategyInstance as DualMomentumStrategy;
+                if (dmStrategy == null)
+                {
+                    _logger.LogError("RunId: {RunId} - Strategy instance is not a valid DualMomentumStrategy.", runId);
+                    return;
+                }
 
-        //        var assetDataCache = new Dictionary<string, List<HistoricalPriceModel>>();
-        //        var allPortfolioAssets = new List<string>(config.RiskAssetSymbols) { config.SafeAssetSymbol };
-        //        foreach (var symbol in allPortfolioAssets)
-        //        {
-        //            var data = await _historicalPriceService.GetHistoricalPrices(symbol, string.Empty);
-        //            assetDataCache[symbol] = data.OrderBy(d => d.Timestamp).ToList();
-        //        }
-        //    });
-        //}
+                var assetDataCache = new Dictionary<string, List<HistoricalPriceModel>>();
+                var allPortfolioAssets = new List<string>(config.RiskAssetSymbols) { config.SafeAssetSymbol };
+                foreach (var symbol in allPortfolioAssets)
+                {
+                    var data = await _historicalPriceService.GetHistoricalPrices(symbol, string.Empty);
+                    assetDataCache[symbol] = data.OrderBy(d => d.Timestamp).ToList();
+                }
+            });
+        }
 
         public async Task RunPairsBacktest(PairsBacktestConfiguration config, Guid runId)
         {

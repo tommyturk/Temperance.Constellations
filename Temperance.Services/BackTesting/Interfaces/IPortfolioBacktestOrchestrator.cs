@@ -2,6 +2,6 @@
 {
     public interface IPortfolioBacktestOrchestrator
     {
-        Task ExecuteNextPeriod(Guid sessionId, DateTime oosStartDate, DateTime oosEndDate);
+        Task ExecuteNextPeriod(Guid cycleTrackerId, Guid sessionId, DateTime oosStartDate, DateTime oosEndDate);
     }
 }

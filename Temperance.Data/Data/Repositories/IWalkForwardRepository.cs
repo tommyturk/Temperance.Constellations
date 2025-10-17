@@ -14,7 +14,10 @@ namespace Temperance.Conductor.Repository.Interfaces
         Task<IEnumerable<OptimizationJob>> GetCompletedJobsForSessionAsync(Guid sessionId);
         Task<IEnumerable<StrategyOptimizedParameters>> GetResultsByKeysAsync(List<string> resultKeys, Guid sessionId);
         Task<HashSet<string>> GetSleeveSymbolsForPeriodAsync(Guid sessionId, DateTime tradingPeriodStartDate);
-
+        Task<CycleTracker> GetCycleTrackerAsync(Guid cycleTrackerId);
+        Task CreateCycleTracker(CycleTracker cycle);
+        Task MarkOptimizationAsDispatchedAsync(Guid cycleTrackerId);
+        Task<CycleTracker> SignalCompletionAndCheckIfReady(Guid cycleTrackerId, BacktestType backtestType);
         Task UpdateSessionCapitalAsync(Guid sessionId, double? finalCapital);
         Task<BacktestRun> GetLatestRunForSessionAsync(Guid sessionId);
         Task<StrategyOptimizedParameters> GetOptimizedParametersForSymbol(Guid sessionId, string symbol, DateTime dateTime);

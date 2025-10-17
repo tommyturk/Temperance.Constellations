@@ -2,6 +2,8 @@
 {
     public class DualMomentumBacktestConfiguration : BacktestConfiguration
     {
+        public Guid RunId { get; set; }
+        public Guid? SessionId { get; set; }
         public List<string> RiskAssetSymbols { get; set; }
 
         public string SafeAssetSymbol { get; set; }

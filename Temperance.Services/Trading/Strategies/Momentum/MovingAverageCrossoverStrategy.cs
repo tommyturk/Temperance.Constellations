@@ -11,20 +11,26 @@ namespace Temperance.Services.Trading.Strategies.Momentum
         public string Name => "Momentum_MACrossover";
         private int _shortTermPeriod;
         private int _longTermPeriod;
-
+        private double _atrMultiplier; 
+        private MarketHealthScore _marketHealthThreshold; 
         public void Initialize(double initialCapital, Dictionary<string, object> parameters)
         {
             _shortTermPeriod = ParameterHelper.GetParameterOrDefault(parameters, "ShortTermPeriod", 50);
             _longTermPeriod = ParameterHelper.GetParameterOrDefault(parameters, "LongTermPeriod", 200);
+            _atrMultiplier = ParameterHelper.GetParameterOrDefault(parameters, "AtrMultiplier", 2.5);
+            _marketHealthThreshold = ParameterHelper.GetParameterOrDefault(parameters, "MarketHealthThreshold", MarketHealthScore.Neutral);
         }
 
         public SignalDecision GenerateSignal(
             in HistoricalPriceModel currentBar,
-            Position currentPosition, 
+            Position currentPosition,
             IReadOnlyList<HistoricalPriceModel> historicalDataWindow,
             Dictionary<string, double> currentIndicatorValues,
-            MarketHealthScore marketHealth) 
+            MarketHealthScore marketHealth)
         {
+            if (marketHealth < _marketHealthThreshold)
+                return SignalDecision.Hold;
+
             if (currentPosition != null)
                 return SignalDecision.Hold;
 
@@ -50,14 +56,26 @@ namespace Temperance.Services.Trading.Strategies.Momentum
         {
             var smaShort = currentIndicatorValues["SMA_Short"];
             var smaLong = currentIndicatorValues["SMA_Long"];
-            var smaShort_Prev = currentIndicatorValues["SMA_Short_Prev"];
-            var smaLong_Prev = currentIndicatorValues["SMA_Long_Prev"];
+            var atr = currentIndicatorValues["ATR"];
 
-            if (position.Direction == PositionDirection.Long && smaShort_Prev >= smaLong_Prev && smaShort < smaLong)
-                return true;
+            if (position.Direction == PositionDirection.Long)
+            {
+                var stopLossPrice = position.EntryPrice - (_atrMultiplier * atr);
+                if (currentBar.LowPrice <= stopLossPrice)
+                    return true;
+            }
+            else 
+            {
+                var stopLossPrice = position.EntryPrice + (_atrMultiplier * atr);
+                if (currentBar.HighPrice >= stopLossPrice)
+                {
+                    return true;
+                }
+            }
 
-            if (position.Direction == PositionDirection.Short && smaShort_Prev <= smaLong_Prev && smaShort > smaLong)
-                return true;
+            // Original exit logic (Death Cross) can be used as a secondary exit
+            // if (position.Direction == PositionDirection.Long && smaShort < smaLong) return true;
+            // if (position.Direction == PositionDirection.Short && smaShort > smaLong) return true;
 
             return false;
         }
@@ -69,8 +87,7 @@ namespace Temperance.Services.Trading.Strategies.Momentum
             Dictionary<string, double> currentIndicatorValues)
         {
             if (ShouldExitPosition(position, in currentBar, historicalDataWindow, currentIndicatorValues))
-                return position.Direction == PositionDirection.Long ? "Death Cross" : "Golden Cross";
-           
+                return "ATR Stop-Loss Hit";
             return "Hold";
         }
 
@@ -94,13 +111,28 @@ namespace Temperance.Services.Trading.Strategies.Momentum
             in HistoricalPriceModel currentBar,
             IReadOnlyList<HistoricalPriceModel> historicalDataWindow,
             Dictionary<string, double> currentIndicatorValues,
-            double maxTradeAllocationInitialCapital, 
+            double maxTradeAllocationInitialCapital,
             double currentTotalEquity,
-            double kellyHalfFraction,
+            double kellyHalfFraction, 
             int currentPyramidEntries,
-            MarketHealthScore marketHealth) 
+            MarketHealthScore marketHealth)
         {
-            return maxTradeAllocationInitialCapital;
+            if (kellyHalfFraction <= 0)
+                return 0;
+
+            double kellySizedCapital = currentTotalEquity * kellyHalfFraction;
+
+            double finalCapitalForSizing = Math.Min(kellySizedCapital, maxTradeAllocationInitialCapital);
+
+            var atr = currentIndicatorValues["ATR"];
+            if (atr == 0) return 0;
+
+            double riskAmountPerShare = atr * _atrMultiplier;
+            if (riskAmountPerShare == 0) return 0;
+
+            double numShares = finalCapitalForSizing / riskAmountPerShare;
+
+            return numShares * currentBar.ClosePrice;
         }
 
         public Dictionary<string, object> GetDefaultParameters()
@@ -108,7 +140,9 @@ namespace Temperance.Services.Trading.Strategies.Momentum
             return new Dictionary<string, object>
             {
                 { "ShortTermPeriod", 50 },
-                { "LongTermPeriod", 200 }
+                { "LongTermPeriod", 200 },
+                { "AtrMultiplier", 2.5 },
+                { "MarketHealthThreshold", 60 }
             };
         }
 

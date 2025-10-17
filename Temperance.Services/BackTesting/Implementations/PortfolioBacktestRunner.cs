@@ -78,18 +78,18 @@ namespace Temperance.Services.BackTesting.Orchestration.Implementations
             var finalCapital = backtestConfig.InitialCapital + result.TotalProfitLoss; 
             await _walkForwardRepoitory.UpdateSessionCapitalAsync(sessionId, finalCapital);
 
-            if (oosStartDate.Month == 12)
-            {
-                _backgroundJobClient.Enqueue<ISleeveSelectionOrchestrator>(orchestrator =>
-                    orchestrator.ReselectAnnualSleeve(sessionId, oosEndDate));
-                _logger.LogInformation("End of year reached. Enqueued annual re-selection job.");
-            }
-            else
-            {
-                _backgroundJobClient.Enqueue<IFineTuneOrchestrator>(orchestrator =>
-                    orchestrator.ExecuteFineTune(sessionId, oosEndDate));
-                _logger.LogInformation("Monthly backtest complete. Enqueued fine-tuning job.");
-            }
+            //if (oosStartDate.Month == 12)
+            //{
+            //    _backgroundJobClient.Enqueue<ISleeveSelectionOrchestrator>(orchestrator =>
+            //        orchestrator.ReselectAnnualSleeve(cycleTrackerId, sessionId, oosEndDate));
+            //    _logger.LogInformation("End of year reached. Enqueued annual re-selection job.");
+            //}
+            //else
+            //{
+            //    _backgroundJobClient.Enqueue<IFineTuneOrchestrator>(orchestrator =>
+            //        orchestrator.ExecuteFineTune(sessionId, oosEndDate));
+            //    _logger.LogInformation("Monthly backtest complete. Enqueued fine-tuning job.");
+            //}
         }
     }
 }

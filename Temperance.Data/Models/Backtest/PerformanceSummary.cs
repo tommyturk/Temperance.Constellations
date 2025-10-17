@@ -7,5 +7,6 @@
         public decimal? ProfitLoss { get; set; }
         public int? TotalTrades { get; set; }
         public decimal? WinRate { get; set; }
+        public decimal TotalTransactionCost { get; set; }
     }
 }
