@@ -22,5 +22,6 @@ namespace Temperance.Data.Data.Repositories.Securities.Interfaces
         Task<SortedDictionary<DateTime, decimal>> GetSharesOutstandingHistoryAsync(string symbol);
 
         Task<Dictionary<string, double>> GetSectorAveragePERatiosAsync();
+        Task<List<string>> GetUniverseAsOfDateAsync(DateTime asOfDate);
     }
 }

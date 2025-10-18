@@ -36,11 +36,11 @@ namespace Temperance.Constellations.Controllers
         }
 
         [HttpPost("start-next-cycle")]
-        public IActionResult StartNextWalkForwardCycle([FromQuery] Guid sessionId, [FromQuery] DateTime cycleStartDate)
+        public IActionResult StartNextWalkForwardCycle([FromQuery] Guid sessionId, [FromQuery] DateTime inSampleEndDate)
         {
             _logger.LogInformation("Received 'Select Sleeve' signal from Conductor for SessionId: {SessionId}", sessionId);
             _backgroundJobClient.Enqueue<IMasterWalkForwardOrchestrator>(orchestrator =>
-                orchestrator.InitiateCycle(sessionId, cycleStartDate));
+                orchestrator.InitiateCycle(sessionId, inSampleEndDate));
             return Ok("Sleeve selection phase enqueued.");
         }
 

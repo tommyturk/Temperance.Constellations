@@ -395,5 +395,18 @@ namespace Temperance.Data.Repositories.Securities.Implementations
                 return new Dictionary<string, double>();
             }
         }
+
+        public async Task<List<string>> GetUniverseAsOfDateAsync(DateTime asOfDate)
+        {
+            const string query = @"
+                SELECT DISTINCT Symbol
+                FROM [TradingBotDb].[Financials].[SecurityMaster]
+                WHERE IpoDate <= @AsOfDate
+                  AND (DelistingDate IS NULL OR DelistingDate > @AsOfDate);
+            ";
+            using var connection = new SqlConnection(_connectionString);
+            var results = await connection.QueryAsync<string>(query, new { AsOfDate = asOfDate });
+            return results.ToList();
+        }
     }
 }

@@ -1,7 +1,6 @@
 ﻿using Microsoft.Extensions.Logging;
 using Temperance.Data.Data.Repositories.Securities.Interfaces;
 using Temperance.Data.Models.HistoricalData;
-using Temperance.Data.Models.Securities.SecurityOverview;
 using Temperance.Services.Services.Interfaces;
 
 namespace Temperance.Services.Services.Implementations
@@ -76,6 +75,11 @@ namespace Temperance.Services.Services.Implementations
         public async Task<Dictionary<string, double>> GetSectorAveragePERatiosAsync()
         {
             return await _securitiesOverviewRepository.GetSectorAveragePERatiosAsync();
+        }
+
+        public async Task<List<string>> GetUniverseAsOfDateAsync(DateTime asOfDate)
+        {
+            return await _securitiesOverviewRepository.GetUniverseAsOfDateAsync(asOfDate);
         }
     }
 }

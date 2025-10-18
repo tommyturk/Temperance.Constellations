@@ -55,8 +55,13 @@ namespace Temperance.Services.BackTesting.Implementations
                 _logger.LogWarning("No optimized parameters for {Symbol} in session {SessionId}. Skipping.", symbol, session.SessionId);
                 return null;
             }
+            else
+            {
+                _logger.LogInformation("Running backtest for {Symbol} from {StartDate:yyyy-MM-dd} to {EndDate:yyyy-MM-dd} with optimized parameters ID {ParametersId}.",
+                    symbol, startDate, endDate, parameters.Id);
+            }
 
-            var strategyParameters = JsonSerializer.Deserialize<Dictionary<string, object>>(parameters.OptimizedParametersJson);
+                var strategyParameters = JsonSerializer.Deserialize<Dictionary<string, object>>(parameters.OptimizedParametersJson);
             var strategy = _strategyFactory.CreateStrategy<ISingleAssetStrategy>(session.StrategyName, session.InitialCapital, strategyParameters);
 
             int lookback = strategy.GetRequiredLookbackPeriod();

@@ -134,9 +134,6 @@ namespace Temperance.Data.Data.Repositories.WalkForward.Implementations
 
         public async Task<Dictionary<string, Dictionary<string, object>>> GetLatestParametersForSleeveAsync(Guid sessionId, IEnumerable<string> symbols)
         {
-            // This SQL query uses a Common Table Expression (CTE) and the ROW_NUMBER() window function.
-            // It partitions the data by Symbol and orders it by creation date descending,
-            // ensuring we get only the single most recent optimization result for each symbol within the session.
             const string sql = @"
                 WITH RankedResults AS (
                     SELECT
@@ -235,6 +232,7 @@ namespace Temperance.Data.Data.Repositories.WalkForward.Implementations
                 FROM [Ludus].[StrategyOptimizedParameters]
                 WHERE SessionId = @SessionId
                   AND Symbol = @Symbol
+                  AND CreatedAt <= @DateTime
                 ORDER BY CreatedAt DESC;";
             using var connection = new SqlConnection(_connectionString);
             return await connection.QuerySingleOrDefaultAsync<StrategyOptimizedParameters>(query, new { SessionId = sessionId, Symbol = symbol, DateTime = dateTime });
@@ -244,9 +242,18 @@ namespace Temperance.Data.Data.Repositories.WalkForward.Implementations
         {
             const string sql = @"
                 INSERT INTO [Constellations].[CycleTrackers]
-                    (CycleTrackerId, SessionId, CycleStartDate, PortfolioBacktestRunId, ShadowBacktestRunId, CreatedAt)
+                    (
+                        CycleTrackerId, SessionId, 
+                        CycleStartDate, OosStartDate, OosEndDate
+                        PortfolioBacktestRunId, ShadowBacktestRunId,
+                        IsPortfolioBacktestComplete, IsShadowBacktestComplete, IsOptimizationDispatched,
+                        CreatedAt)
                 VALUES
-                    (@CycleTrackerId, @SessionId, @CycleStartDate, @PortfolioBacktestRunId, @ShadowBacktestRunId, @CreatedAt);";
+                    (@CycleTrackerId, @SessionId, 
+                    @CycleStartDate, @OosStartDate, @OosEndDate,
+                    @PortfolioBacktestRunId, @ShadowBacktestRunId, 
+                    @IsPortfolioBacktestComplete, @IsShadowBacktestComplete, @IsOptimizationDispatched,                    
+                    @CreatedAt);";
             await using var connection = new SqlConnection(_connectionString);
             await connection.ExecuteAsync(sql, cycle);
         }

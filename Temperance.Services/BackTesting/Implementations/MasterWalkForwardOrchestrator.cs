@@ -17,7 +17,7 @@ namespace Temperance.Services.BackTesting.Implementations
         private readonly IWalkForwardRepository _walkForwardRepository;
         private readonly IPerformanceRepository _performanceRepository;
         private readonly IBackgroundJobClient _backgroundJobClient;
-
+        private const int OosCycleMonths = 6;
         public object OptimizationMode { get; private set; }
 
         public MasterWalkForwardOrchestrator(
@@ -38,7 +38,7 @@ namespace Temperance.Services.BackTesting.Implementations
             _backgroundJobClient = backgroundJobClient;
         }
 
-        public async Task InitiateCycle(Guid sessionId, DateTime cycleStartDate)
+        public async Task InitiateCycle(Guid sessionId, DateTime inSampleEndDate)
         {
             _logger.LogInformation("PHASE 1: Starting Initial Bulk Training for SessionId: {SessionId}", sessionId);
 
@@ -49,15 +49,19 @@ namespace Temperance.Services.BackTesting.Implementations
                 await _walkForwardRepository.UpdateSessionStatusAsync(sessionId, "Failed");
                 return;
             }
-            if (cycleStartDate >= session.EndDate)
+
+            var oosStartDate = inSampleEndDate.AddDays(1);
+            if (oosStartDate >= session.EndDate)
             {
                 _logger.LogInformation("ORCHESTRATOR: Walk-forward session {SessionId} complete.", sessionId);
                 await _walkForwardRepository.UpdateSessionStatusAsync(sessionId, "Completed");
                 return;
             }
 
-            var inSampleStartDate = cycleStartDate.AddYears(-session.OptimizationWindowYears);
-            var inSampleEndDate = cycleStartDate.AddDays(-1);
+            var oosEndDate = oosStartDate.AddMonths(OosCycleMonths).AddDays(-1);
+
+            if (oosEndDate > session.EndDate)
+                oosEndDate = session.EndDate;
 
             List<string> fullUniverse;
             BacktestRun previousRun = await _walkForwardRepository.GetLatestRunForSessionAsync(sessionId);
@@ -67,12 +71,12 @@ namespace Temperance.Services.BackTesting.Implementations
 
             if (previousRun == null)
             {
-                _logger.LogInformation($"First cycle: getting initial universe from securities...");
-                fullUniverse = await _securitiesOverviewService.GetSecurities();
+                _logger.LogInformation("First cycle: getting initial universe from securities...");
+                fullUniverse = await _securitiesOverviewService.GetUniverseAsOfDateAsync(session.StartDate);
             }
             else
             {
-                _logger.LogInformation($"Subsequent cycle: Ranking securities based on performance from RunId");
+                _logger.LogInformation("Subsequent cycle: Ranking securities based on performance from previous run.");
                 var activeSleevePerformance = await _performanceRepository.GetSleeveComponentsAsync(previousRun.RunId);
                 var shadowSleevePerformance = await _performanceRepository.GetShadowPerformanceAsync(previousRun.RunId);
 
@@ -102,28 +106,27 @@ namespace Temperance.Services.BackTesting.Implementations
             {
                 CycleTrackerId = Guid.NewGuid(),
                 SessionId = sessionId,
-                CycleStartDate = cycleStartDate,
+                CycleStartDate = oosStartDate,
                 PortfolioBacktestRunId = Guid.NewGuid(),
                 ShadowBacktestRunId = Guid.NewGuid(),
+                IsPortfolioBacktestComplete = false,
+                IsShadowBacktestComplete = false,
+                IsOptimizationDispatched = false,
                 CreatedAt = DateTime.UtcNow
             };
             await _walkForwardRepository.CreateCycleTracker(cycleTracker);
 
-            var tradingPeriodEndDate = cycleStartDate.AddYears(session.TradingWindowYears).AddDays(-1);
-            if(tradingPeriodEndDate > session.EndDate)
-                tradingPeriodEndDate = session.EndDate;
-
-            var activeRunId = Guid.NewGuid();
             _backgroundJobClient.Enqueue<IPortfolioBacktestOrchestrator>(
-                orchestrator => orchestrator.ExecuteNextPeriod(cycleTracker.CycleTrackerId, sessionId, cycleStartDate, tradingPeriodEndDate));
+                orchestrator => orchestrator.ExecuteNextPeriod(cycleTracker.CycleTrackerId, sessionId, oosStartDate, oosEndDate));
 
             var shadowRunId = Guid.NewGuid();
             _backgroundJobClient.Enqueue<IShadowBacktestOrchestrator>(
-                orchestrator => orchestrator.Execute(cycleTracker.CycleTrackerId, sessionId, shadowRunId, shadowUniverse, cycleStartDate, tradingPeriodEndDate));
+                orchestrator => orchestrator.Execute(cycleTracker.CycleTrackerId, sessionId, shadowRunId, shadowUniverse, oosStartDate, oosEndDate));
+            // --- END CORRECTION ---
 
             _logger.LogInformation(
-                        "PHASE 1: Enqueued Active and Shadow backtests for CycleTrackerId {CycleTrackerId}. Waiting for completion signals.",
-                        cycleTracker.CycleTrackerId);
+                "PHASE 1: Enqueued Active and Shadow backtests for CycleTrackerId {CycleTrackerId}. Waiting for completion signals.",
+                cycleTracker.CycleTrackerId);
         }
 
         [AutomaticRetry(Attempts = 3)]
@@ -133,9 +136,9 @@ namespace Temperance.Services.BackTesting.Implementations
 
             var tracker = await _walkForwardRepository.SignalCompletionAndCheckIfReady(cycleTrackerId, backtestType);
 
-            if(tracker != null && tracker.IsPortfolioBacktestComplete && tracker.IsShadowBacktestComplete && !tracker.IsOptimizationDispatched)
+            if (tracker != null && tracker.IsPortfolioBacktestComplete && tracker.IsShadowBacktestComplete && !tracker.IsOptimizationDispatched)
                 _backgroundJobClient.Enqueue(() => DispatchOptimizationPhase(cycleTrackerId));
-            else if(tracker == null)
+            else if (tracker == null)
                 _logger.LogError("CycleTrackerId {CycleTrackerId} not found while signaling backtest completion.", cycleTrackerId);
             else
                 _logger.LogInformation("Waiting for the other backtest to complete for CycleTrackerId: {CycleTrackerId}.", cycleTrackerId);
@@ -155,11 +158,13 @@ namespace Temperance.Services.BackTesting.Implementations
                 _logger.LogError("SessionId {SessionId} not found for CycleTrackerId {CycleTrackerId}. Cannot dispatch optimization phase.", tracker.SessionId, cycleTrackerId);
                 return;
             }
+
             var previousRun = await _walkForwardRepository.GetLatestRunForSessionAsync(tracker.SessionId);
             List<string> fullUniverse;
             var optimizationMode = Data.Models.Backtest.OptimizationMode.Train;
             int activeSleeveSize = 50;
-            if(previousRun == null)
+
+            if (previousRun == null)
                 fullUniverse = await _securitiesOverviewService.GetSecurities();
             else
             {
@@ -195,7 +200,7 @@ namespace Temperance.Services.BackTesting.Implementations
                 Mode = Data.Models.Backtest.OptimizationMode.FineTune,
                 InSampleStartDate = inSampleStartDate,
                 InSampleEndDate = inSampleEndDate,
-                Symbols = (await _walkForwardRepository.GetActiveSleeveAsync(session.SessionId, tracker.CycleStartDate)).Select(s => s.Symbol).ToList(),
+                Symbols = activeUniverse,
                 Interval = "60min",
             };
             await _conductorClient.DispatchOptimizationBatchAsync(batchRequest);
