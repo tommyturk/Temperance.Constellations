@@ -18,11 +18,6 @@ namespace Temperance.Services.Services.Implementations
             _securitiesOverviewRepository = securitiesOverviewRepository;
             _conductorService = conductorService;
             _logger = logger; 
-
-            if (_securitiesOverviewRepository == null)
-                _logger.LogCritical("FATAL: SecuritiesOverviewService was created, but its ISecuritiesOverviewRepository is NULL!");
-            else
-                _logger.LogInformation("SecuritiesOverviewService instance created successfully with a valid repository.");
         }
 
         public async Task<int> GetSecurityId(string symbol)

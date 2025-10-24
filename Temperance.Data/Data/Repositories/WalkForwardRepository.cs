@@ -244,7 +244,7 @@ namespace Temperance.Data.Data.Repositories.WalkForward.Implementations
                 INSERT INTO [Constellations].[CycleTrackers]
                     (
                         CycleTrackerId, SessionId, 
-                        CycleStartDate, OosStartDate, OosEndDate
+                        CycleStartDate, OosStartDate, OosEndDate,
                         PortfolioBacktestRunId, ShadowBacktestRunId,
                         IsPortfolioBacktestComplete, IsShadowBacktestComplete, IsOptimizationDispatched,
                         CreatedAt)

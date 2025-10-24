@@ -95,15 +95,5 @@ namespace Temperance.Services.BackTesting.Implementations
         //    );
         //    _logger.LogInformation("PHASE 2 Complete. Enqueued first portfolio backtest for {Date:yyyy-MM-dd}.", firstOosDate);
         //}
-
-        public async Task ReselectAnnualSleeve(Guid cycleTrackerId, Guid sessionId, DateTime yearEnd)
-        {
-            _logger.LogInformation("ORCHESTRATOR (ReselectAnnualSleeve): Kicking off for year {Year}.", yearEnd.Year);
-
-            var nextOosDate = yearEnd.AddDays(1);
-            _backgroundJobClient.Enqueue<IPortfolioBacktestOrchestrator>(
-               orchestrator => orchestrator.ExecuteNextPeriod(cycleTrackerId, sessionId, nextOosDate, yearEnd)
-           );
-        }
     }
 }

@@ -100,6 +100,12 @@ builder.Services.AddTransient<IHistoricalDataRepository>(provider =>
     var securitiesOverviewRepository = provider.GetRequiredService<ISecuritiesOverviewRepository>();
     return new HistoricalDataRepository(defaultConnnection, securitiesOverviewRepository);
 });
+builder.Services.AddTransient<IOptimizationRepository>(provider =>
+{
+    var connectionString = provider.GetRequiredService<IOptions<ConnectionStrings>>().Value;
+    var defaultConnnection = connectionString.DefaultConnection;
+    return new OptimizationRepository(defaultConnnection);
+});
 builder.Services.AddScoped<ISecuritiesOverviewRepository>(provider =>
 {
     var connectionStrings = provider.GetRequiredService<IOptions<ConnectionStrings>>().Value;

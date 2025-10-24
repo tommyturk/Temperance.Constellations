@@ -11,5 +11,9 @@ namespace Temperance.Services.BackTesting.Interfaces
         Task CalculatePerformanceMetrics(BacktestResult result, double initialCapital);
 
         KellyMetrics CalculateKellyMetrics(IReadOnlyList<TradeSummary> trades);
+        Task<List<SleeveComponent>> CalculateSleevePerformanceFromTradesAsync(
+                    BacktestResult portfolioSummary,
+                    Guid sessionId,
+                    Guid portfolioBacktestRunId);
     }
 }

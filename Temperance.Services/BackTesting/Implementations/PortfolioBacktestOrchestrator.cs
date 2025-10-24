@@ -1,8 +1,10 @@
 ﻿using Hangfire;
 using Microsoft.Extensions.Logging;
 using Temperance.Conductor.Repository.Interfaces;
+using Temperance.Data.Data.Repositories;
 using Temperance.Data.Models.Backtest;
 using Temperance.Services.BackTesting.Interfaces;
+using TradingApp.src.Core.Services.Interfaces;
 
 namespace Temperance.Services.BackTesting.Orchestration.Implementations
 {
@@ -11,76 +13,101 @@ namespace Temperance.Services.BackTesting.Orchestration.Implementations
         private readonly IBacktestRunner _backtestEngine;
         private readonly IWalkForwardRepository _walkForwardRepository;
         private readonly IBackgroundJobClient _backgroundJobClient;
+        private readonly IPerformanceCalculator _performanceCalculator;
+        private readonly IPerformanceRepository _performanceRepository;
+        private readonly IOptimizationRepository _optimizationRepository;
+        private readonly ITradeService _tradeService;
         private readonly ILogger<PortfolioBacktestOrchestrator> _logger;
 
         public PortfolioBacktestOrchestrator(
             IBacktestRunner backtestEngine,
             IWalkForwardRepository walkForwardRepo,
             IBackgroundJobClient hangfireClient,
+            IPerformanceCalculator performanceCalculator,
+            IPerformanceRepository performanceRepository,
+            IOptimizationRepository optimizationRepository,
+            ITradeService tradeService,
             ILogger<PortfolioBacktestOrchestrator> logger)
         {
             _backtestEngine = backtestEngine;
             _walkForwardRepository = walkForwardRepo;
             _backgroundJobClient = hangfireClient;
+            _performanceCalculator = performanceCalculator;
+            _performanceRepository = performanceRepository;
+            _optimizationRepository = optimizationRepository;
+            _tradeService = tradeService;
             _logger = logger;
         }
 
-        public async Task ExecuteNextPeriod(Guid cycleTrackerId, Guid sessionId, DateTime oosStartDate, DateTime oosEndDate)
+        public async Task ExecuteNextPeriod(
+            Guid cycleTrackerId,
+            Guid sessionId,
+            Guid portfolioBacktestRunId,
+            List<string> activeUniverse,
+            DateTime inSampleStartDate,
+            DateTime inSampleEndDate,
+            DateTime oosStartDate,
+            DateTime oosEndDate)
         {
             try
             {
-                _logger.LogInformation($"THIS IS THE OOSSTARTDATE: {oosStartDate} inside ExecuteNextPeriod.");
-
                 var session = await _walkForwardRepository.GetSessionAsync(sessionId);
-                if (oosStartDate >= session.EndDate)
+                if (session == null)
                 {
-                    _logger.LogInformation("ORCHESTRATOR: Walk-forward session {SessionId} complete.", sessionId);
-                    await _walkForwardRepository.UpdateSessionStatusAsync(sessionId, "Completed");
+                    _logger.LogError("Could not find session {SessionId}. Aborting backtest for Cycle {CycleTrackerId}.",
+                        sessionId, cycleTrackerId);
                     return;
                 }
-
-                _logger.LogInformation("ORCHESTRATOR: Preparing 1-Month OOS Backtest for {Date:yyyy-MM}", oosStartDate);
-
-                var activeSleeve = (await _walkForwardRepository.GetActiveSleeveAsync(sessionId, oosStartDate)).ToList();
-                var activeSleeveSymbols = activeSleeve.Select(s => s.Symbol).ToList();
-
-                if (!activeSleeve.Any())
-                {
-                    _logger.LogWarning("ORCHESTRATOR: No active sleeve for {Date}. Skipping backtest.", oosStartDate);
-                }
+                if (!activeUniverse.Any())
+                    _logger.LogWarning("ORCHESTRATOR: No active sleeve symbols provided for Cycle {CycleTrackerId}. Skipping backtest.", cycleTrackerId);
                 else
                 {
-                    var sleeveParameters = await _walkForwardRepository.GetLatestParametersForSleeveAsync(sessionId, activeSleeveSymbols);
+                    var sleeveParameters = await _optimizationRepository.GetOptimizationResultsBySymbolsAsync(
+                        session.StrategyName,
+                        "60min",
+                        inSampleStartDate,
+                        inSampleEndDate,
+                        activeUniverse);
 
                     var config = new BacktestConfiguration
                     {
-                        RunId = Guid.NewGuid(),
+                        RunId = portfolioBacktestRunId,
                         SessionId = session.SessionId,
                         StartDate = oosStartDate,
                         EndDate = oosEndDate,
                         InitialCapital = session.CurrentCapital,
-                        Symbols = activeSleeve.Select(s => s.Symbol).ToList(),
+                        Symbols = activeUniverse,
                         StrategyName = session.StrategyName,
                         PortfolioParameters = sleeveParameters,
                         MaxParallelism = 16,
                     };
+                    _logger.LogInformation("ORCHESTRATOR: Starting OOS Backtest {RunId} for Cycle {CycleTrackerId} with {SymbolCount} symbols.",
+                        config.RunId, cycleTrackerId, config.Symbols.Count);
 
-                    await _backtestEngine.RunPortfolioBacktest(config, config.RunId);
-                }
+                    await _tradeService.InitializeBacktestRunAsync(config, config.RunId);
 
-                if (oosStartDate.Month == 12)
-                {
-                    _backgroundJobClient.Enqueue<ISleeveSelectionOrchestrator>(o => o.ReselectAnnualSleeve(cycleTrackerId, sessionId, oosEndDate));
-                    _logger.LogInformation("ORCHESTRATOR: Enqueued annual re-selection job.");
+                    var portfolioSummary = await _backtestEngine.RunPortfolioBacktest(config, config.RunId);
+                    _logger.LogInformation("ORCHESTRATOR: OOS Backtest {RunId} for Cycle {CycleTrackerId} completed.",
+                        config.RunId, cycleTrackerId);
+
+                    List<SleeveComponent> sleeveComponents = await _performanceCalculator.CalculateSleevePerformanceFromTradesAsync(
+                        portfolioSummary,
+                        sessionId,
+                        portfolioBacktestRunId);
+                    
+
+                    if (sleeveComponents.Any())
+                        await _performanceRepository.SaveSleeveComponentsAsync(sleeveComponents);
                 }
-                else
-                {
-                    _backgroundJobClient.Enqueue<IFineTuneOrchestrator>(o => o.ExecuteFineTune(sessionId, oosEndDate));
-                    _logger.LogInformation("ORCHESTRATOR: Enqueued fine-tuning job.");
-                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to execute portfolio backtest for Cycle {CycleTrackerId}", cycleTrackerId);
             }
             finally
             {
+                _logger.LogInformation("Enqueuing completion signal for Portfolio Backtest, Cycle {CycleTrackerId}", cycleTrackerId);
+
                 _backgroundJobClient.Enqueue<IMasterWalkForwardOrchestrator>(
                     master => master.SignalBacktestCompletion(cycleTrackerId, BacktestType.Portfolio));
             }

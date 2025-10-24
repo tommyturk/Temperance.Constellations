@@ -161,6 +161,56 @@ namespace Temperance.Services.BackTesting.Implementations
             return pnl - (trade.TotalTransactionCost ?? 0);
         }
 
+        public async Task<List<SleeveComponent>> CalculateSleevePerformanceFromTradesAsync(
+            BacktestResult portfolioSummary,
+            Guid sessionId,
+            Guid portfolioBacktestRunId)
+        {
+            var sleeveComponents = new List<SleeveComponent>();
+
+            if (portfolioSummary.Trades == null || !portfolioSummary.Trades.Any())
+            {
+                _logger.LogWarning("No trades found in portfolio summary for RunId {RunId}.", portfolioBacktestRunId);
+                return sleeveComponents;
+            }
+
+            var tradesBySymbol = portfolioSummary.Trades
+                .Where(t => t.ExitDate.HasValue && t.ProfitLoss.HasValue)
+                .GroupBy(t => t.Symbol);
+
+            foreach (var symbolGroup in tradesBySymbol)
+            {
+                var symbol = symbolGroup.Key;
+                var trades = symbolGroup.ToList();
+
+                var sleeveResult = new BacktestResult
+                {
+                    Trades = trades,
+                    Configuration = portfolioSummary.Configuration
+                };
+
+                await CalculatePerformanceMetrics(sleeveResult, 0);
+
+                var sleeveComponent = new SleeveComponent
+                {
+                    SleeveComponentId = Guid.NewGuid(),
+                    RunId = portfolioBacktestRunId,
+                    SessionId = sessionId,
+                    Symbol = symbol,
+                    ProfitLoss = (decimal?)sleeveResult.TotalProfitLoss, 
+                    SharpeRatio = (decimal?)sleeveResult.SharpeRatio,
+                    TotalTrades = sleeveResult.TotalTrades,
+                    WinRate = (decimal?)sleeveResult.WinRate,
+                };
+                sleeveComponents.Add(sleeveComponent);
+            }
+
+            _logger.LogInformation("Calculated performance for {Count} unique symbols from trades in RunId {RunId}",
+                sleeveComponents.Count, portfolioBacktestRunId);
+
+            return sleeveComponents;
+        }
+
         private double CalculateSharpeRatio(List<KeyValuePair<DateTime, double>> equityCurve, double riskFreeRate = 0.0)
         {
             if (equityCurve == null || equityCurve.Count < 2)
@@ -168,7 +218,6 @@ namespace Temperance.Services.BackTesting.Implementations
                 return 0.0;
             }
 
-            // 1. Calculate periodic (daily) returns from the equity curve
             var returns = new List<double>();
             for (int i = 1; i < equityCurve.Count; i++)
             {
@@ -185,25 +234,17 @@ namespace Temperance.Services.BackTesting.Implementations
                 return 0.0;
             }
 
-            // 2. Calculate the average and standard deviation of returns
             double averageReturn = returns.Average();
             double stdDev = MathNet.Numerics.Statistics.Statistics.StandardDeviation(returns);
 
             if (stdDev == 0)
-            {
-                // If there's no volatility, the Sharpe Ratio is undefined or can be considered zero
-                // if the excess return is also zero, or infinite if it's positive. We return 0 for simplicity.
                 return 0.0;
-            }
 
-            // 3. Determine the annualization factor
-            // This is a robust way to handle different timeframes (intraday, daily, etc.)
             TimeSpan totalTimeSpan = equityCurve.Last().Key - equityCurve.First().Key;
-            int tradingDays = (int)Math.Max(1, totalTimeSpan.TotalDays); // Avoid division by zero
-            double periodsPerYear = (returns.Count / (double)tradingDays) * 252; // Assume 252 trading days/year
+            int tradingDays = (int)Math.Max(1, totalTimeSpan.TotalDays); 
+            double periodsPerYear = (returns.Count / (double)tradingDays) * 252; 
 
-            // 4. Calculate and Annualize the Sharpe Ratio
-            double excessReturn = averageReturn - (riskFreeRate / periodsPerYear); // Adjust risk-free rate to the period
+            double excessReturn = averageReturn - (riskFreeRate / periodsPerYear); 
             double sharpeRatio = excessReturn / stdDev;
             double annualizedSharpeRatio = sharpeRatio * Math.Sqrt(periodsPerYear);
 
