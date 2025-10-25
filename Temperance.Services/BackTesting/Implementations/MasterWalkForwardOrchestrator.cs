@@ -88,7 +88,10 @@ namespace Temperance.Services.BackTesting.Implementations
                 return;
             }
 
-            var fullUniverse = optimizationResults.Select(r => r.Symbol).ToList();
+            var fullUniverse = optimizationResults
+                .OrderByDescending(x => x.TotalReturns)
+                .Select(r => r.Symbol)
+                .ToList();
 
             int activeSleeveSize = 50; 
             var activeUniverse = fullUniverse.Take(activeSleeveSize).ToList();
@@ -114,6 +117,7 @@ namespace Temperance.Services.BackTesting.Implementations
                 IsOptimizationDispatched = false,
                 CreatedAt = DateTime.UtcNow
             };
+
             await _walkForwardRepository.CreateCycleTracker(cycleTracker);
 
             _logger.LogInformation("Enqueuing Active and Shadow backtests for CycleTrackerId {CycleTrackerId}.", cycleTracker.CycleTrackerId);

@@ -77,6 +77,7 @@ namespace Temperance.Services.BackTesting.Orchestration.Implementations
                         EndDate = oosEndDate,
                         InitialCapital = session.CurrentCapital,
                         Symbols = activeUniverse,
+                        Intervals = new List<string> { "60min" },
                         StrategyName = session.StrategyName,
                         PortfolioParameters = sleeveParameters,
                         MaxParallelism = 16,

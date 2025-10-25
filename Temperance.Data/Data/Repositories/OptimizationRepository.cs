@@ -29,7 +29,8 @@ namespace Temperance.Data.Data.Repositories
         {
             const string sql = @"
                 SELECT 
-                    Symbol
+                    Symbol,
+                    TotalReturns -- This column is required for ranking 
                     --,InSampleSharpe -- This column is required for ranking
                 FROM [Ludus].[StrategyOptimizedParameters]
                 WHERE StrategyName = @strategyName
@@ -53,8 +54,8 @@ namespace Temperance.Data.Data.Repositories
             const string sql = @"
                 SELECT 
                     Symbol,
-                    OptimizedParametersJson
-                    --,InSampleSharpe -- This column is required for ranking
+                    OptimizedParametersJson,
+                    TotalReturns
                 FROM [Ludus].[StrategyOptimizedParameters]
                 WHERE StrategyName = @strategyName
                   AND Interval = @interval
