@@ -42,6 +42,7 @@ namespace Temperance.Services.BackTesting.Implementations
             _logger.LogInformation("In-Sample Period: {StartDate:yyyy-MM-dd} to {EndDate:yyyy-MM-dd}", inSampleStartDate, inSampleEndDate);
 
             var universe = await _securitiesService.GetUniverseAsOfDateAsync(inSampleStartDate);
+            universe = universe.Where(x => x == "AAPL").Select(x => x).ToList();
             if(!universe.Any())
             {
                 _logger.LogError("No securities found for the initial universe. Aborting.");

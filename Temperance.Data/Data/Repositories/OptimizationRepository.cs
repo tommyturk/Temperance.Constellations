@@ -18,20 +18,20 @@ namespace Temperance.Data.Data.Repositories
                 SELECT *
                 FROM [TradingBotDb].[Conductor].[OptimizationJobs]
                 WHERE SessionId = @SessionId
-                  AND InSampleEndDate = @InSampleEndDate;"; 
+                  AND InSampleEndDate = @InSampleEndDate;";
 
             using var connection = new SqlConnection(_connectionString);
             var results = await connection.QueryAsync<OptimizationJob>(query, new { SessionId = sessionId, InSampleEndDate = inSampleEndDate });
             return results.ToList();
         }
 
-        public async Task<IEnumerable<OptimizationResultDto>> GetOptimizationResultsByWindowAsync(string strategyName, string interval, DateTime startDate, DateTime endDate)
+        public async Task<IEnumerable<OptimizationResultDto>> GetOptimizationResultsByWindowAsync(
+            string strategyName, string interval, DateTime startDate, DateTime endDate)
         {
             const string sql = @"
                 SELECT 
                     Symbol,
-                    TotalReturns -- This column is required for ranking 
-                    --,InSampleSharpe -- This column is required for ranking
+                    Metrics 
                 FROM [Ludus].[StrategyOptimizedParameters]
                 WHERE StrategyName = @strategyName
                   AND Interval = @interval
@@ -40,13 +40,39 @@ namespace Temperance.Data.Data.Repositories
             ";
 
             await using var connection = new SqlConnection(_connectionString);
-            return await connection.QueryAsync<OptimizationResultDto>(sql, new
+
+            var results = await connection.QueryAsync<dynamic>(sql, new
             {
                 strategyName,
                 interval,
                 startDate,
                 endDate
             });
+
+            var optimizationResults = new List<OptimizationResultDto>();
+
+            foreach (var row in results)
+            {
+                string metricsJson = row.Metrics as string;
+
+                if (!string.IsNullOrEmpty(metricsJson))
+                {
+                    var metrics = JsonSerializer.Deserialize<OptimizationMetrics>(
+                        metricsJson,
+                        new JsonSerializerOptions { PropertyNameCaseInsensitive = true }
+                    );
+
+                    var optimizationResult = new OptimizationResultDto
+                    {
+                        Symbol = row.Symbol,
+                        Metrics = metrics
+                    };
+
+                    optimizationResults.Add(optimizationResult);
+                }
+            }
+
+            return optimizationResults;
         }
 
         public async Task<Dictionary<string, Dictionary<string, object>>> GetOptimizationResultsBySymbolsAsync(string strategyName, string interval, DateTime startDate, DateTime endDate, List<string> symbols)
@@ -54,8 +80,7 @@ namespace Temperance.Data.Data.Repositories
             const string sql = @"
                 SELECT 
                     Symbol,
-                    OptimizedParametersJson,
-                    TotalReturns
+                    OptimizedParametersJson
                 FROM [Ludus].[StrategyOptimizedParameters]
                 WHERE StrategyName = @strategyName
                   AND Interval = @interval

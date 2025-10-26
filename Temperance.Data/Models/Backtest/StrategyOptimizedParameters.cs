@@ -7,6 +7,7 @@
         public string Symbol { get; set; }
         public string Interval { get; set; }
         public string OptimizedParametersJson { get; set; }
+        public string Metrics { get; set; }
         public DateTime CreatedAt { get; set; }
         public DateTime StartDate { get; set; }
         public DateTime EndDate { get; set; }

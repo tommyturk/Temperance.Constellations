@@ -89,14 +89,19 @@ namespace Temperance.Services.BackTesting.Implementations
             }
 
             var fullUniverse = optimizationResults
-                .OrderByDescending(x => x.TotalReturns)
+                .OrderByDescending(x => x.Metrics.SharpeRatio)
                 .Select(r => r.Symbol)
                 .ToList();
 
             int activeSleeveSize = 50; 
             var activeUniverse = fullUniverse.Take(activeSleeveSize).ToList();
             var shadowUniverse = fullUniverse.Skip(activeSleeveSize).ToList();
-
+            // please print the top 10 securities symbol and sharpe ratio into logger
+            _logger.LogInformation("Top 10 Optimization Results (Symbol : SharpeRatio): {Results}",
+                string.Join(", ", optimizationResults
+                    .OrderByDescending(x => x.Metrics.SharpeRatio)
+                    .Take(10)
+                    .Select(r => $"{r.Symbol} : {r.Metrics.SharpeRatio:F2}")));
             _logger.LogInformation("Active Sleeve (Top {Count}): {Symbols}", activeUniverse.Count, string.Join(",", activeUniverse.Take(5)) + "...");
             _logger.LogInformation("Shadow Sleeve ({Count})", shadowUniverse.Count);
 

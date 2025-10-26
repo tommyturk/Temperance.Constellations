@@ -3,6 +3,6 @@
     public class OptimizationResultDto
     {
         public string Symbol { get; set; }
-        public double? TotalReturns { get; set; } 
+        public OptimizationMetrics Metrics {get;set;}
     }
 }
