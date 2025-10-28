@@ -1,4 +1,5 @@
-﻿using Temperance.Data.Models.Backtest;
+﻿using System.Collections.Generic;
+using Temperance.Data.Models.Backtest;
 
 namespace Temperance.Conductor.Repository.Interfaces
 {
@@ -21,6 +22,7 @@ namespace Temperance.Conductor.Repository.Interfaces
         Task UpdateSessionCapitalAsync(Guid sessionId, double? finalCapital);
         Task<BacktestRun> GetLatestRunForSessionAsync(Guid sessionId);
         Task<StrategyOptimizedParameters> GetOptimizedParametersForSymbol(Guid sessionId, string symbol, DateTime dateTime);
+        Task<List<CycleTracker>> GetCycleTrackersForSession(Guid sessionId);
     }
 }
 

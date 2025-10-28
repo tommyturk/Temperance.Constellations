@@ -54,7 +54,7 @@ namespace Temperance.Services.BackTesting.Implementations
                 return;
             }
 
-            var oosStartDate = inSampleEndDate.AddDays(1);
+            var oosStartDate = inSampleEndDate.Date.AddDays(1);
 
             if (oosStartDate > session.EndDate)
             {
@@ -63,22 +63,37 @@ namespace Temperance.Services.BackTesting.Implementations
                 return;
             }
 
-            var oosEndDate = oosStartDate.AddMonths(OosCycleMonths).AddDays(-1);
+            var oosEndDate = oosStartDate.Date.AddMonths(OosCycleMonths).AddDays(-1);
             if (oosEndDate > session.EndDate)
                 oosEndDate = session.EndDate;
 
-            var inSampleStartDate = inSampleEndDate.AddYears(-session.OptimizationWindowYears).AddDays(1);
             var strategyName = session.StrategyName;
             var interval = "60min";
 
+            var existingCycles = await _walkForwardRepository.GetCycleTrackersForSession(sessionId);
+
+            DateTime inSampleStartDate;
+            if (existingCycles == null || !existingCycles.Any())
+            {
+                _logger.LogInformation($"This is the FIRST OOS cycle (Train) for session {sessionId}. Calculating IS start date based on session start date.");
+                inSampleStartDate = inSampleEndDate.Date.AddYears(-session.OptimizationWindowYears).AddDays(1);
+            }
+            else
+            {
+                _logger.LogInformation("This is a subsequent OOS cycle (FineTune) for session {SessionId}. {Count} previous cycles found.",
+                    existingCycles.Count(), sessionId);
+
+                inSampleStartDate = inSampleEndDate.Date.AddMonths(-OosCycleMonths).AddDays(1);
+            }
+
             _logger.LogInformation("Fetching optimization results for {Strategy} on {Interval} from {IS_Start} to {IS_End}",
-                strategyName, interval, inSampleStartDate, inSampleEndDate);
+                    strategyName, interval, inSampleStartDate, inSampleEndDate);
 
             var optimizationResults = await _optimizationRepository.GetOptimizationResultsByWindowAsync(
                     strategyName,
                     interval,
                     inSampleStartDate,
-                    inSampleEndDate
+                    inSampleEndDate   
                 );
 
             if (optimizationResults == null || !optimizationResults.Any())
@@ -96,7 +111,6 @@ namespace Temperance.Services.BackTesting.Implementations
             int activeSleeveSize = 50; 
             var activeUniverse = fullUniverse.Take(activeSleeveSize).ToList();
             var shadowUniverse = fullUniverse.Skip(activeSleeveSize).ToList();
-            // please print the top 10 securities symbol and sharpe ratio into logger
             _logger.LogInformation("Top 10 Optimization Results (Symbol : SharpeRatio): {Results}",
                 string.Join(", ", optimizationResults
                     .OrderByDescending(x => x.Metrics.SharpeRatio)
@@ -109,14 +123,11 @@ namespace Temperance.Services.BackTesting.Implementations
             {
                 CycleTrackerId = Guid.NewGuid(),
                 SessionId = sessionId,
-
-                CycleStartDate = inSampleEndDate,
+                CycleStartDate = oosStartDate,
                 OosStartDate = oosStartDate,
                 OosEndDate = oosEndDate,
-
                 PortfolioBacktestRunId = Guid.NewGuid(), 
                 ShadowBacktestRunId = Guid.NewGuid(),    
-
                 IsPortfolioBacktestComplete = false,
                 IsShadowBacktestComplete = false,
                 IsOptimizationDispatched = false,
@@ -184,52 +195,97 @@ namespace Temperance.Services.BackTesting.Implementations
                 return;
             }
 
+            //end of the backtest for this period.
+            DateTime completedOosEndDate = tracker.OosEndDate.Date;
+
+
+            int fineTuneWindowMonths = 6; 
+            // shouldnt this be negative? the next insample period should be a fine-tune on 6months of the already traded period
+            // So I can get parameters for the next 6months of trading.
+            DateTime nextInSampleEndDate = completedOosEndDate;
+
+            if (nextInSampleEndDate > session.EndDate.Date)
+            {
+                nextInSampleEndDate = session.EndDate.Date; 
+                _logger.LogInformation("Adjusting next IS end date ({AdjustedDate}) to session end date ({SessionEndDate}).", nextInSampleEndDate, session.EndDate.Date);
+            }
+
+            // I dont want to train on 2 years worth of data. I want to fine-tune on the last 6months of traded data.
+            DateTime nextInSampleStartDate = nextInSampleEndDate.AddMonths(-fineTuneWindowMonths).AddDays(1); // e.g., 2017-12-30 - 2 years + 1 day = 2016-01-01
+
+            if (nextInSampleEndDate.AddDays(1) > session.EndDate.Date)
+            {
+                _logger.LogInformation("Walk-forward session {SessionId} complete. The OOS period ending {OosEndDate} was the final one.",
+                    session.SessionId, completedOosEndDate);
+                await _walkForwardRepository.UpdateSessionStatusAsync(session.SessionId, "Completed");
+                return;
+            }
+
+            if (nextInSampleStartDate >= nextInSampleEndDate)
+            {
+                _logger.LogError("Invalid date logic calculated for next IS period. Start: {IS_Start}, End: {IS_End}.",
+                    nextInSampleStartDate, nextInSampleEndDate);
+                return;
+            }
+
             var previousRun = await _walkForwardRepository.GetLatestRunForSessionAsync(tracker.SessionId);
             List<string> fullUniverse;
             var optimizationMode = Data.Models.Backtest.OptimizationMode.Train;
             int activeSleeveSize = 50;
 
             if (previousRun == null)
+            {
+                _logger.LogWarning("No previous run found for session {SessionId}, using full securities list for optimization.", tracker.SessionId);
                 fullUniverse = await _securitiesOverviewService.GetSecurities();
+            }
             else
             {
-                var activeSleevePerformance = await _performanceRepository.GetSleeveComponentsAsync(previousRun.RunId);
-                var shadowSleevePerformance = await _performanceRepository.GetShadowPerformanceAsync(previousRun.RunId);
+                var activeSleevePerformance = await _performanceRepository.GetSleeveComponentsAsync(tracker.PortfolioBacktestRunId);
+                var shadowSleevePerformance = await _performanceRepository.GetShadowPerformanceAsync(tracker.ShadowBacktestRunId);
 
-                var projectedActive = activeSleevePerformance
-                    .Select(p => new { p.Symbol, p.SharpeRatio });
-                var projectedShadow = shadowSleevePerformance
-                    .Select(p => new { p.Symbol, p.SharpeRatio });
+                if (!activeSleevePerformance.Any() && !shadowSleevePerformance.Any())
+                {
+                    _logger.LogWarning("No performance data found for completed cycle {CycleTrackerId}. Falling back to full securities list.", cycleTrackerId);
+                    fullUniverse = await _securitiesOverviewService.GetSecurities();
+                }
+                else
+                {
+                    var projectedActive = activeSleevePerformance.Select(p => new { p.Symbol, p.SharpeRatio });
+                    var projectedShadow = shadowSleevePerformance.Select(p => new { p.Symbol, p.SharpeRatio });
 
-                var combinedPerformance = projectedActive
-                    .Concat(projectedShadow);
+                    var combinedPerformance = projectedActive.Concat(projectedShadow);
 
-                fullUniverse = combinedPerformance
-                    .OrderByDescending(p => p.SharpeRatio)
-                    .Select(p => p.Symbol)
-                    .Distinct()
-                    .ToList();
+                    fullUniverse = combinedPerformance
+                        .OrderByDescending(p => p.SharpeRatio ?? 0m) 
+                        .Select(p => p.Symbol)
+                        .Distinct()
+                        .ToList();
 
-                activeSleeveSize = Math.Max(activeSleeveSize, activeSleevePerformance.Count());
-                optimizationMode = Data.Models.Backtest.OptimizationMode.FineTune;
+                    _logger.LogInformation("Universe for next optimization derived from {ActiveCount} active and {ShadowCount} shadow results from Cycle {CycleTrackerId}.",
+                        projectedActive.Count(), projectedShadow.Count(), cycleTrackerId);
+
+                    activeSleeveSize = Math.Max(activeSleeveSize, activeSleevePerformance.Count());
+                    optimizationMode = Data.Models.Backtest.OptimizationMode.FineTune;
+                }
             }
             var activeUniverse = fullUniverse.Take(activeSleeveSize).ToList();
 
-            var inSampleStartDate = tracker.CycleStartDate.AddYears(-session.OptimizationWindowYears);
-            var inSampleEndDate = tracker.CycleStartDate.AddDays(-1);
-            _logger.LogInformation("PHASE 2: Dispatching Optimization Phase for CycleTrackerId: {CycleTrackerId}", cycleTrackerId);
+            _logger.LogInformation("PHASE 1 (Next Cycle): Dispatching Optimization for CycleTrackerId: {CycleTrackerId}. IS Start: {IS_Start}, IS End: {IS_End}",
+                cycleTrackerId, nextInSampleStartDate, nextInSampleEndDate);
+
             var batchRequest = new OptimizationBatchRequest
             {
                 SessionId = session.SessionId,
                 StrategyName = session.StrategyName,
-                Mode = Data.Models.Backtest.OptimizationMode.FineTune,
-                InSampleStartDate = inSampleStartDate,
-                InSampleEndDate = inSampleEndDate,
+                Mode = optimizationMode, 
+                InSampleStartDate = nextInSampleStartDate,
+                InSampleEndDate = nextInSampleEndDate,
                 Symbols = activeUniverse,
                 Interval = "60min",
             };
             await _conductorClient.DispatchOptimizationBatchAsync(batchRequest);
-            _logger.LogInformation("PHASE 2: Batch dispatch request sent to Conductor for optimization. This job is now complete.");
+
+            _logger.LogInformation("PHASE 1 (Next Cycle): Batch dispatch request sent to Ludus for optimization. Cycle {CycleTrackerId} processing complete for this phase.", cycleTrackerId);
         }
     }
 }

@@ -17,14 +17,7 @@ namespace Temperance.Data.Repositories.Securities.Implementations
             _connectionString = connectionString;
             _logger = logger;
 
-            if (string.IsNullOrWhiteSpace(_connectionString))
-                _logger.LogCritical("FATAL: SecuritiesOverviewRepository created with a NULL or EMPTY connection string!");
-            else
-            {
-                var builder = new SqlConnectionStringBuilder(_connectionString);
-                _logger.LogInformation("SecuritiesOverviewRepository instance created.");
-                _logger.LogInformation("Attempting to connect to SERVER: [{Server}], DATABASE: [{Database}]", builder.DataSource, builder.InitialCatalog);
-            }
+            var builder = new SqlConnectionStringBuilder(_connectionString);
         }
 
         public async Task<List<string>> GetSecurities()
@@ -56,17 +49,14 @@ namespace Temperance.Data.Repositories.Securities.Implementations
             }
             else
             {
-                _logger.LogInformation("Streaming from database: Attempting to connect with connection string: {ConnectionString}", _connectionString);
                 await using var connection = new SqlConnection(_connectionString);
 
                 try
                 {
                     await connection.OpenAsync(cancellationToken);
-                    _logger.LogInformation("Database connection opened successfully.");
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogCritical(ex, "FATAL: Failed to open database connection. The backtest cannot proceed.");
                     yield break;
                 }
 
@@ -100,17 +90,17 @@ namespace Temperance.Data.Repositories.Securities.Implementations
         {
             using var connection = new SqlConnection(_connectionString);
 
-            if(symbols == null || !symbols.Any())
+            if (symbols == null || !symbols.Any())
                 symbols = (await connection.QueryAsync<string>("SELECT DISTINCT Symbol FROM [TradingBotDb].[Financials].[SecuritiesOverview] WHERE MarketCapitalization > 10000000000")).ToList();
 
-            if(intervals == null || !intervals.Any())
+            if (intervals == null || !intervals.Any())
                 intervals = new List<string>() { "1min", "5min", "15min", "60min", "1d" };
 
             List<SymbolCoverageBacktestModel> backtestModel = new List<SymbolCoverageBacktestModel>();
 
-            foreach(var symbol in symbols)
+            foreach (var symbol in symbols)
             {
-                foreach(var interval in intervals)
+                foreach (var interval in intervals)
                 {
                     var backtestItem = new SymbolCoverageBacktestModel()
                     {
@@ -324,7 +314,7 @@ namespace Temperance.Data.Repositories.Securities.Implementations
             var securityId = await connection.ExecuteScalarAsync<int>(query, new { Symbol = symbol });
 
             if (securityId == 0)
-                {
+            {
                 var insertQuery = @"
                     INSERT INTO [TradingBotDb].[Financials].[Securities] (Symbol) 
                     VALUES (@Symbol); 

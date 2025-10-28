@@ -297,5 +297,19 @@ namespace Temperance.Data.Data.Repositories.WalkForward.Implementations
             using var connection = new SqlConnection(_connectionString);
             await connection.ExecuteAsync(sql, new { CycleTrackerId = cycleTrackerId });
         }
+
+        public async Task<List<CycleTracker>> GetCycleTrackersForSession(Guid sessionId)
+        {
+            const string sql = @"
+                SELECT *
+                FROM [Constellations].[CycleTrackers]
+                WHERE SessionId = @SessionId
+                ORDER BY CycleStartDate DESC;";
+
+            using var connection = new SqlConnection(_connectionString);
+            var result = await connection.QueryAsync<CycleTracker>(sql, new { SessionId = sessionId } );
+
+            return result.ToList();
+        }
     }
 }
