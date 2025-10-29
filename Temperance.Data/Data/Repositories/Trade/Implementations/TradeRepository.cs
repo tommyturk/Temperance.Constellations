@@ -112,9 +112,9 @@ namespace Temperance.Data.Data.Repositories.Trade.Implementations
         {
             const string sql = @"
             INSERT INTO [TradingBotDb].[Constellations].[BacktestRuns] 
-                (RunId, SessionId, StrategyName, ParametersJson, SymbolsJson, IntervalsJson, StartDate, EndDate, InitialCapital, Status, StartTime)
+                (RunId, SessionId, StrategyName, SymbolsJson, IntervalsJson, StartDate, EndDate, InitialCapital, Status, StartTime)
             VALUES 
-                (@RunId, @SessionId, @StrategyName, @ParametersJson, @SymbolsJson, @IntervalsJson, @StartDate, @EndDate, @InitialCapital, 'Queued', @StartTime);";
+                (@RunId, @SessionId, @StrategyName, @SymbolsJson, @IntervalsJson, @StartDate, @EndDate, @InitialCapital, 'Queued', @StartTime);";
             try
             {
                 using var connection = CreateConnection();
@@ -123,7 +123,6 @@ namespace Temperance.Data.Data.Repositories.Trade.Implementations
                     RunId = runId,
                     config.SessionId,
                     config.StrategyName,
-                    ParametersJson = JsonSerializer.Serialize(config.StrategyParameters),
                     SymbolsJson = JsonSerializer.Serialize(config.Symbols),
                     IntervalsJson = JsonSerializer.Serialize(config.Intervals),
                     config.StartDate,

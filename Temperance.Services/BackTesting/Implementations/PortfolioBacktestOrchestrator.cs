@@ -1,5 +1,6 @@
 ﻿using Hangfire;
 using Microsoft.Extensions.Logging;
+using System.ComponentModel.DataAnnotations;
 using Temperance.Conductor.Repository.Interfaces;
 using Temperance.Data.Data.Repositories;
 using Temperance.Data.Models.Backtest;
@@ -72,13 +73,13 @@ namespace Temperance.Services.BackTesting.Orchestration.Implementations
                     var config = new BacktestConfiguration
                     {
                         RunId = portfolioBacktestRunId,
+                        StrategyName = session.StrategyName,
                         SessionId = session.SessionId,
                         StartDate = oosStartDate,
                         EndDate = oosEndDate,
                         InitialCapital = session.CurrentCapital,
                         Symbols = activeUniverse,
                         Intervals = new List<string> { "60min" },
-                        StrategyName = session.StrategyName,
                         PortfolioParameters = sleeveParameters,
                         MaxParallelism = 16,
                     };
@@ -95,10 +96,13 @@ namespace Temperance.Services.BackTesting.Orchestration.Implementations
                         portfolioSummary,
                         sessionId,
                         portfolioBacktestRunId);
-                    
 
                     if (sleeveComponents.Any())
+                    {
                         await _performanceRepository.SaveSleeveComponentsAsync(sleeveComponents);
+                        var profitLoss = sleeveComponents.Sum(s => s.ProfitLoss) ?? 0;
+                        await _walkForwardRepository.UpdateCurrentCapital(sessionId, profitLoss);
+                    }
                 }
             }
             catch (Exception ex)

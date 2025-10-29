@@ -311,5 +311,17 @@ namespace Temperance.Data.Data.Repositories.WalkForward.Implementations
 
             return result.ToList();
         }
+
+        public async Task UpdateCurrentCapital(Guid sessionId, decimal profitLoss)
+        {
+            const string sql = @"
+                UPDATE [Constellations].[WalkForwardSessions]
+                SET CurrentCapital = ISNULL(CurrentCapital, 0) + @ProfitLoss
+                WHERE SessionId = @SessionId;";
+
+            using var connection = new SqlConnection(_connectionString);
+            await connection.ExecuteAsync(sql, new { ProfitLoss = profitLoss, SessionId = sessionId });
+            return;
+        }
     }
 }

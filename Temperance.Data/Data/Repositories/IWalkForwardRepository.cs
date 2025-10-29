@@ -23,6 +23,7 @@ namespace Temperance.Conductor.Repository.Interfaces
         Task<BacktestRun> GetLatestRunForSessionAsync(Guid sessionId);
         Task<StrategyOptimizedParameters> GetOptimizedParametersForSymbol(Guid sessionId, string symbol, DateTime dateTime);
         Task<List<CycleTracker>> GetCycleTrackersForSession(Guid sessionId);
+        Task UpdateCurrentCapital(Guid sessionId, decimal profitLoss);
     }
 }
 

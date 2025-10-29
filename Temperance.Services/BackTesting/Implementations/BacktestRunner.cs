@@ -204,7 +204,7 @@ namespace Temperance.Services.BackTesting.Implementations
                 result.OptimizationResultId = config.OptimizationResultId;
 
                 await _performanceCalculator.CalculatePerformanceMetrics(result, config.InitialCapital);
-                //await _tradesService.UpdateBacktestPerformanceMetrics(runId, result, config.InitialCapital);
+                await _tradesService.UpdateBacktestPerformanceMetrics(runId, result, config.InitialCapital);
                 //await _tradesService.UpdateBacktestRunStatusAsync(runId, "Completed");
             }
             catch (Exception ex)
@@ -252,6 +252,9 @@ namespace Temperance.Services.BackTesting.Implementations
             var direction = (signal == SignalDecision.Buy) ? PositionDirection.Long : PositionDirection.Short;
             double totalEntryCost = await transactionCostService.GetSpreadCost(rawEntryPrice, quantity, sleeve.Symbol, sleeve.Interval, currentBar.Timestamp);
             double totalCashOutlay = (quantity * rawEntryPrice) + totalEntryCost;
+            double commissionCost = await transactionCostService.CalculateCommissionCost(rawEntryPrice, quantity, sleeve.Symbol, sleeve.Interval, currentBar.Timestamp);
+            double slippageCost = await transactionCostService.CalculateSlippageCost(rawEntryPrice, quantity, direction, sleeve.Symbol, sleeve.Interval, currentBar.Timestamp);
+            double otherTransactionCost = await transactionCostService.CalculateOtherCost(rawEntryPrice, quantity, sleeve.Symbol, sleeve.Interval, currentBar.Timestamp);
 
             if (!await _portfolioManager.CanOpenPosition(totalCashOutlay))
             {
@@ -262,6 +265,23 @@ namespace Temperance.Services.BackTesting.Implementations
 
             var newOrExistingPosition = await _portfolioManager.OpenPosition(sleeve.Symbol,
                 sleeve.Interval, direction, quantity, rawEntryPrice, currentBar.Timestamp, totalEntryCost);
+
+            double initialMae = 0.0;
+            double initialMfe = 0.0;
+
+            if (direction == PositionDirection.Long)
+            {
+                initialMae = rawEntryPrice - currentBar.LowPrice;
+                initialMfe = currentBar.HighPrice - rawEntryPrice;
+            }
+            else
+            {
+                initialMae = currentBar.HighPrice - rawEntryPrice;
+                initialMfe = rawEntryPrice - currentBar.LowPrice;
+            }
+
+            initialMae = Math.Max(0, initialMae);
+            initialMfe = Math.Max(0, initialMfe);
 
             var activeTrade = new TradeSummary
             {
@@ -275,7 +295,13 @@ namespace Temperance.Services.BackTesting.Implementations
                 Symbol = sleeve.Symbol,
                 Interval = sleeve.Interval,
                 TotalTransactionCost = totalEntryCost,
-                EntryReason = sleeve.Strategy.GetEntryReason(in currentBar, dataWindow, indicators)
+                CommissionCost = commissionCost,
+                SlippageCost = slippageCost,
+                OtherTransactionCost = otherTransactionCost,
+                MaxAdverseExcursion = initialMae,
+                MaxFavorableExcursion = initialMfe,
+                GrossProfitLoss = 0,
+                HoldingPeriodMinutes = 0,
             };
 
             if (newOrExistingPosition == null)

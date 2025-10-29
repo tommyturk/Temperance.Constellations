@@ -1,12 +1,5 @@
 ﻿using MathNet.Numerics.Statistics;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Security.AccessControl;
-using System.Text;
-using System.Threading.Tasks;
 using Temperance.Data.Models.HistoricalPriceData;
-using Temperance.Data.Models.Strategy;
 using Temperance.Data.Models.Trading;
 using Temperance.Utilities.Helpers;
 

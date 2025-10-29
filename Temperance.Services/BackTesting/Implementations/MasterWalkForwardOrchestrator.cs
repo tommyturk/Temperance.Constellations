@@ -71,20 +71,12 @@ namespace Temperance.Services.BackTesting.Implementations
             var interval = "60min";
 
             var existingCycles = await _walkForwardRepository.GetCycleTrackersForSession(sessionId);
-
             DateTime inSampleStartDate;
-            if (existingCycles == null || !existingCycles.Any())
-            {
-                _logger.LogInformation($"This is the FIRST OOS cycle (Train) for session {sessionId}. Calculating IS start date based on session start date.");
-                inSampleStartDate = inSampleEndDate.Date.AddYears(-session.OptimizationWindowYears).AddDays(1);
-            }
-            else
-            {
-                _logger.LogInformation("This is a subsequent OOS cycle (FineTune) for session {SessionId}. {Count} previous cycles found.",
-                    existingCycles.Count(), sessionId);
 
+            if (existingCycles == null || !existingCycles.Any())
+                inSampleStartDate = inSampleEndDate.AddYears(-session.OptimizationWindowYears).AddDays(1);
+            else
                 inSampleStartDate = inSampleEndDate.Date.AddMonths(-OosCycleMonths).AddDays(1);
-            }
 
             _logger.LogInformation("Fetching optimization results for {Strategy} on {Interval} from {IS_Start} to {IS_End}",
                     strategyName, interval, inSampleStartDate, inSampleEndDate);
@@ -95,6 +87,7 @@ namespace Temperance.Services.BackTesting.Implementations
                     inSampleStartDate,
                     inSampleEndDate   
                 );
+
 
             if (optimizationResults == null || !optimizationResults.Any())
             {

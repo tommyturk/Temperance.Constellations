@@ -68,7 +68,7 @@ namespace Temperance.Services.BackTesting.Implementations
                 result.TotalReturn = 0;
                 result.MaxDrawdown = 0;
                 result.WinRate = 0;
-                result.EquityCurve = new List<KeyValuePair<DateTime, double>> { new(result.Configuration?.StartDate ?? DateTime.MinValue, initialCapital) };
+                result.EquityCurve = new List<KeyValuePair<DateTime, double>> { new ( result.Configuration?.StartDate ?? DateTime.MinValue, initialCapital ) };
                 result.TotalTrades = 0;
                 result.WinningTrades = 0;
                 result.LosingTrades = 0;
