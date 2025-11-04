@@ -188,13 +188,9 @@ namespace Temperance.Services.BackTesting.Implementations
                 return;
             }
 
-            //end of the backtest for this period.
             DateTime completedOosEndDate = tracker.OosEndDate.Date;
 
-
             int fineTuneWindowMonths = 6; 
-            // shouldnt this be negative? the next insample period should be a fine-tune on 6months of the already traded period
-            // So I can get parameters for the next 6months of trading.
             DateTime nextInSampleEndDate = completedOosEndDate;
 
             if (nextInSampleEndDate > session.EndDate.Date)
@@ -203,8 +199,7 @@ namespace Temperance.Services.BackTesting.Implementations
                 _logger.LogInformation("Adjusting next IS end date ({AdjustedDate}) to session end date ({SessionEndDate}).", nextInSampleEndDate, session.EndDate.Date);
             }
 
-            // I dont want to train on 2 years worth of data. I want to fine-tune on the last 6months of traded data.
-            DateTime nextInSampleStartDate = nextInSampleEndDate.AddMonths(-fineTuneWindowMonths).AddDays(1); // e.g., 2017-12-30 - 2 years + 1 day = 2016-01-01
+            DateTime nextInSampleStartDate = nextInSampleEndDate.AddMonths(-fineTuneWindowMonths).AddDays(1);
 
             if (nextInSampleEndDate.AddDays(1) > session.EndDate.Date)
             {

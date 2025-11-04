@@ -2,7 +2,6 @@
 using Temperance.Data.Models.MarketHealth;
 using Temperance.Data.Models.Trading;
 using Temperance.Utilities.Helpers;
-using System.Collections.Generic;
 
 namespace Temperance.Services.Trading.Strategies.Momentum
 {
@@ -152,7 +151,7 @@ namespace Temperance.Services.Trading.Strategies.Momentum
         public bool ShouldTakePartialProfit(Position position, in HistoricalPriceModel currentBar, Dictionary<string, double> currentIndicatorValues) => false;
         public double GetAtrMultiplier() => 0;
         public double GetStdDevMultiplier() => 0;
-        public double[] CalculateRSI(double[] prices, int period) => System.Array.Empty<double>();
+        public double[] CalculateRSI(double[] prices, int period) => Array.Empty<double>();
 
         public TradeSummary ClosePosition(TradeSummary activeTrade, HistoricalPriceModel currentBar, SignalDecision exitSignal)
         {

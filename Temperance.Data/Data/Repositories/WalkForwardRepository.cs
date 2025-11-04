@@ -323,5 +323,20 @@ namespace Temperance.Data.Data.Repositories.WalkForward.Implementations
             await connection.ExecuteAsync(sql, new { ProfitLoss = profitLoss, SessionId = sessionId });
             return;
         }
+
+        public async Task<PortfolioState> GetLatestPortfolioStateAsync(Guid sessionId)
+        { 
+            const string query = @"
+                SELECT *
+                FROM [Constellations].[PortfolioStates]
+                WHERE SessionId = @SessionId
+                AND AsOfDate = (
+                    SELECT MAX(AsOfDate)
+                    FROM [Constellations].[PortfolioStates]
+                    WHERE SessionId = @SessionId
+                );";
+            await using var connection = new SqlConnection(_connectionString);
+            return (await connection.QueryAsync<PortfolioState>(query, new { SessionId = sessionId })).ToList();
+        }
     }
 }

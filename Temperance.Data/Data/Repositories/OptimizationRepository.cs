@@ -112,5 +112,61 @@ namespace Temperance.Data.Data.Repositories
 
             return parametersBySymbol;
         }
+
+        public async Task<List<StrategyOptimizedParameters>> GetLatestParametersAsync(
+            string strategyName,
+            List<string> symbols,
+            string interval,
+            DateTime pointInTime)
+        {
+            const string sql = @"
+                ;WITH RankedParameters AS (
+                    SELECT
+                        [Id],
+                        [StrategyName],
+                        [Symbol],
+                        [Interval],
+                        [OptimizedParametersJson],
+                        [CreatedAt],
+                        -- 1. Create a ranked list for each symbol, ordered by most recent
+                        ROW_NUMBER() OVER(
+                            PARTITION BY [Symbol] 
+                            ORDER BY [CreatedAt] DESC
+                        ) AS RowNum
+                    FROM 
+                        [Ludus].[StrategyOptimizedParameters]
+                    WHERE
+                        -- 2. Filter by the inputs
+                        [StrategyName] = @StrategyName
+                        AND [Interval] = @Interval
+                        AND [Symbol] IN @Symbols
+                        -- 3. This is the crucial Point-in-Time (PIT) check
+                        AND [CreatedAt] < @PointInTime 
+                )
+                -- 4. Select only the #1 (most recent) row for each symbol
+                SELECT
+                    [Id],
+                    [StrategyName],
+                    [Symbol],
+                    [Interval],
+                    [OptimizedParametersJson],
+                    [CreatedAt]
+                FROM 
+                    RankedParameters
+                WHERE 
+                    RowNum = 1;
+                ";
+            using (var connection = new SqlConnection(_connectionString))
+            {
+                var results = await connection.QueryAsync<StrategyOptimizedParameters>(sql, new
+                {
+                    StrategyName = strategyName,
+                    Symbols = symbols,
+                    Interval = interval,
+                    PointInTime = pointInTime
+                });
+                return results.ToList();
+            }
+        }
     }
 }
