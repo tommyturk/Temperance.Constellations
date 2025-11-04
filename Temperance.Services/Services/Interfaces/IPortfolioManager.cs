@@ -1,4 +1,6 @@
-﻿using Temperance.Data.Models.Trading;
+﻿using Temperance.Data.Models.Backtest;
+using Temperance.Data.Models.HistoricalPriceData;
+using Temperance.Data.Models.Trading;
 
 namespace Temperance.Services.Services.Interfaces
 {
@@ -30,5 +32,15 @@ namespace Temperance.Services.Services.Interfaces
         double exitPriceB,
         DateTime exitTimestamp,
         double totalExitTransactionCost);
+
+        /// <summary>
+        /// Updates the Mark-to-Market (MTM) value of all open positions.
+        /// </summary>
+        Task UpdateMarketPricesAsync(DateTime timestamp, Dictionary<string, HistoricalPriceModel> currentPrices);
+
+        /// <summary>
+        /// Gets a snapshot of the portfolio's current cash and open positions.
+        /// </summary>
+        PortfolioState GetPortfolioState();
     }
 }

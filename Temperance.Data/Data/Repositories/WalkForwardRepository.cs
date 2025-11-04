@@ -336,7 +336,15 @@ namespace Temperance.Data.Data.Repositories.WalkForward.Implementations
                     WHERE SessionId = @SessionId
                 );";
             await using var connection = new SqlConnection(_connectionString);
-            return (await connection.QueryAsync<PortfolioState>(query, new { SessionId = sessionId })).ToList();
+            var result = await connection.QuerySingleOrDefaultAsync<PortfolioState>(query, new { SessionId = sessionId });
+
+            return result;
+        }
+
+        public async Task SaveCycleResultsAsync(Guid sessionId, Guid cycleRunId, BacktestResult cycleResult, PortfolioState portfolioState)
+        {
+
+
         }
     }
 }

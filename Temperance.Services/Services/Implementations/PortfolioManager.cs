@@ -1,5 +1,8 @@
 ﻿using Microsoft.Extensions.Logging;
+using Newtonsoft.Json;
 using System.Collections.Concurrent;
+using Temperance.Data.Models.Backtest;
+using Temperance.Data.Models.HistoricalPriceData;
 using Temperance.Data.Models.Trading;
 using Temperance.Services.Services.Interfaces;
 
@@ -398,6 +401,42 @@ namespace Temperance.Services.Services.Implementations
             }
             _completedTradesHistory.Clear();
             _logger.LogInformation("PortfolioManager state hydrated with {Cash:C} cash and {PositionCount} open positions.", cash, openPositions.Count());
+        }
+
+        public Task UpdateMarketPricesAsync(DateTime timestamp, Dictionary<string, HistoricalPriceModel> currentPrices)
+        {
+            foreach (var position in _openPositions.Values)
+            {
+                if (currentPrices.TryGetValue(position.Symbol, out var bar))
+                {
+                    // 1. Get the current price from the bar
+                    double currentPrice = bar.ClosePrice;
+
+                    // 2. Update the *only* property that needs to be set.
+                    // Your model calculates the rest automatically.
+                    position.CurrentMarketValue = currentPrice * position.Quantity;
+                }
+                // If no price is found, we hold the last known value,
+                // so no 'else' block is needed.
+            }
+
+            // You can optionally update the portfolio's total equity here
+            // _totalEquity = _cash + _openPositions.Values.Sum(p => p.UnrealizedPnL + p.CostBasis);
+            // Or, more simply, if UnrealizedPnL is correct:
+            // _totalEquity = _currentCash + _openPositions.Values.Sum(p => p.CurrentMarketValue);
+
+            return Task.CompletedTask;
+        }
+
+        public PortfolioState GetPortfolioState()
+        {
+            return new PortfolioState
+            {
+                SessionId = _sessionId, 
+                Cash = _currentCash, 
+                OpenPositionsJson = JsonConvert.SerializeObject(_openPositions.Values),
+                AsOfDate = DateTime.UtcNow
+            };
         }
     }
 }

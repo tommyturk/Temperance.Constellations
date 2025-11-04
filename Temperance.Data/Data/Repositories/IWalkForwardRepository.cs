@@ -1,13 +1,10 @@
-﻿using System.Collections.Generic;
-using Temperance.Data.Models.Backtest;
+﻿using Temperance.Data.Models.Backtest;
 
 namespace Temperance.Conductor.Repository.Interfaces
 {
     public interface IWalkForwardRepository
     {
         Task<WalkForwardSession> GetSessionAsync(Guid sessionId);
-
-            string interval, DateTime oosStartDate);
         Task UpdateSessionStatusAsync(Guid sessionId, string status);
         Task<IEnumerable<WalkForwardSleeve>> GetSleevesByBatchAsync(Guid sessionId, DateTime tradingPeriodStartDate);
         Task SetActiveSleeveAsync(Guid sessionId, DateTime tradingPeriodStartDate, IEnumerable<string> symbols);
@@ -26,8 +23,17 @@ namespace Temperance.Conductor.Repository.Interfaces
         Task<StrategyOptimizedParameters> GetOptimizedParametersForSymbol(Guid sessionId, string symbol, DateTime dateTime);
         Task<List<CycleTracker>> GetCycleTrackersForSession(Guid sessionId);
         Task UpdateCurrentCapital(Guid sessionId, decimal profitLoss);
-
         Task<PortfolioState?> GetLatestPortfolioStateAsync(Guid sessionId);
+
+        /// <summary>
+        /// Saves the results of a single walk-forward cycle and the portfolio's state at the end of it.
+        /// </summary>
+        Task SaveCycleResultsAsync(Guid sessionId, Guid cycleRunId, BacktestResult cycleResult, PortfolioState portfolioState);
+        
+        /// <summary>
+        /// Saves a failure record for a specific walk-forward cycle.
+        /// </summary>
+        Task SaveCycleFailureAsync(Guid sessionId, Guid cycleRunId, string errorMessage);
     }
 }
 

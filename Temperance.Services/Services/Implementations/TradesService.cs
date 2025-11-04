@@ -21,6 +21,11 @@ namespace TradingApp.src.Core.Services.Implementations
             _logger = logger;
         }
 
+        public async Task<TradeSummary?> GetActiveTradeForPositionAsync(Guid positionId)
+        {
+            return await _tradeRepository.GetActiveTradeByPositionIdAsync(positionId);
+        }
+
         public async Task<int> ExecuteOrderAsync(Order order)
         {
             return await _tradeRepository.ExecuteOrderAsync(order);

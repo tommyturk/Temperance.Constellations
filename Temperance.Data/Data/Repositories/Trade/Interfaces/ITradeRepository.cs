@@ -26,5 +26,6 @@ namespace Temperance.Data.Data.Repositories.Trade.Interfaces
         Task<IEnumerable<WalkForwardSleeve>> GetSleevesForSessionAsync(Guid sessionId, DateTime tradingPeriodStartDate);
         Task<WalkForwardSession?> GetSessionAsync(Guid sessionId);
         Task UpdateSessionCapitalAsync(Guid sessionId, double newCapital);
+        Task<TradeSummary?> GetActiveTradeByPositionIdAsync(Guid positionId);
     }
 }

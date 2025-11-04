@@ -438,5 +438,17 @@ namespace Temperance.Data.Data.Repositories.Trade.Implementations
             using var connection = CreateConnection();
             return await connection.QueryAsync<BacktestRun>(sql, new { sessionId, startDate, endDate });
         }
+
+        public async Task<TradeSummary?> GetActiveTradeByPositionIdAsync(Guid positionId)
+        {
+            const string sql = @"
+                SELECT * FROM [dbo].[Trades] 
+                WHERE PositionId = @PositionId AND ExitDate IS NULL";
+
+            await using (var connection = new SqlConnection(_connectionString))
+            {
+                return await connection.QuerySingleOrDefaultAsync<TradeSummary>(sql, new { PositionId = positionId });
+            }
+        }
     }
 }

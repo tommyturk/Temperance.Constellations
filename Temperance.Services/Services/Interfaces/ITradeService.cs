@@ -26,5 +26,7 @@ namespace TradingApp.src.Core.Services.Interfaces
         Task UpdateSessionCapitalAsync(Guid sessionId, double newCapital);
         Task<IEnumerable<BacktestRun>> GetBacktestRunsForSessionAsync(Guid sessionId, DateTime startDate, DateTime endDate);
         Task SaveSleevesAsync(IEnumerable<WalkForwardSleeve> sleeves);
+
+        Task<TradeSummary?> GetActiveTradeForPositionAsync(Guid positionId);
     }
 }
