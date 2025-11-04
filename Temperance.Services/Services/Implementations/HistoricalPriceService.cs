@@ -189,9 +189,16 @@ namespace TradingApp.src.Core.Services.Implementations
             return false;
         }
 
-        public async Task<List<HistoricalPriceModel>> GetAllHistoricalPrices(List<string> symbols, List<string> intervals)
+        public async Task<List<HistoricalPriceModel>> GetAllHistoricalPrices(List<string> symbols, List<string> intervals, DateTime? startDate = null, DateTime? endDate = null)
         {
-            var task = Task.Run(() => _historicalPricesRepository.GetAllHistoricalPrices(symbols, intervals));
+            var task = Task.Run(() => _historicalPricesRepository.GetAllHistoricalPrices(symbols, intervals, startDate, endDate));
+
+            return task.Result;
+        }
+
+        public async Task<List<HistoricalPriceModel>> GetAllHistoricalPrices(List<string> symbols, List<string> intervals, DateTime oosSampleStartDate)
+        {
+            var task = Task.Run(() => _historicalPricesRepository.GetAllHistoricalPrices(symbols, intervals, oosSampleStartDate));
 
             return task.Result;
         }

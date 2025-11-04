@@ -168,7 +168,7 @@ namespace TradingApp.src.Data.Repositories.HistoricalPrices.Implementations
             }
         }
 
-        public async Task<List<HistoricalPriceModel>> GetAllHistoricalPrices(List<string> symbols, List<string> intervals)
+        public async Task<List<HistoricalPriceModel>> GetAllHistoricalPrices(List<string> symbols, List<string> intervals, DateTime? startDate = null, DateTime? endDate = null)
         {
             await using var connection = CreateConnection();
             var data = new List<HistoricalPriceModel>();
@@ -179,6 +179,11 @@ namespace TradingApp.src.Data.Repositories.HistoricalPrices.Implementations
                     var tableName = _sqlHelper.SanitizeTableName(symbol, interval);
                     await _sqlHelper.EnsureTableExists(tableName);
                     var query = $"SELECT * FROM {tableName}";
+                    if (startDate.HasValue)
+                        query += " WHERE Timestamp >= @StartDate";
+                    if( endDate.HasValue)
+                        query += startDate.HasValue ? " AND Timestamp <= @EndDate" : " WHERE Timestamp <= @EndDate";
+
                     data.AddRange(await connection.QueryAsync<HistoricalPriceModel>(query));
                 }
             }

@@ -346,5 +346,24 @@ namespace Temperance.Data.Data.Repositories.WalkForward.Implementations
 
 
         }
+
+        public async Task SaveCycleFailureAsync(Guid sessionId, Guid cycleId, string errorMessage)
+        {
+            const string sql = @"
+            INSERT INTO [Constellations].[WalkForwardCycleFailures] 
+                (Id, SessionId, CycleId, ErrorMessage, FailedAt)
+            VALUES 
+                (@Id, @SessionId, @CycleId, @ErrorMessage, @FailedAt);";
+
+            using var connection = new SqlConnection(_connectionString);
+            await connection.ExecuteAsync(sql, new
+            {
+                Id = Guid.NewGuid(),
+                SessionId = sessionId,
+                CycleId = cycleId,
+                ErrorMessage = errorMessage,
+                FailedAt = DateTime.UtcNow
+            });
+        }
     }
 }

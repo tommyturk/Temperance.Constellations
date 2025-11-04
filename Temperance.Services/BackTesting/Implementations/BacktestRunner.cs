@@ -179,7 +179,7 @@ namespace Temperance.Services.BackTesting.Implementations
                         {
                             // If we're holding a position from a previous cycle, load its trade record
                             // ** ERROR FIX: This method needs to be added to ITradeService **
-                            sleeve.ActiveTrade = await _tradesService.GetActiveTradeForPositionAsync(sleeve.CurrentPosition.Id);
+                            sleeve.ActiveTrade = await _tradesService.GetActiveTradeForPositionAsync(session.SessionId);
                         }
                         sleeves.Add(sleeve);
                     }
@@ -773,7 +773,7 @@ namespace Temperance.Services.BackTesting.Implementations
 
             _logger.LogInformation("[RunId: {RunId}] Sleeve for {Symbol} [{Interval}] prepared successfully.", runId, symbol, interval);
 
-            return new StrategySleeve(
+            return new BacktestSleeve(
                 Symbol: symbol,
                 Interval: interval,
                 Strategy: strategyInstance,

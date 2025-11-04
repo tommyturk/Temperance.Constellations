@@ -6,7 +6,8 @@ namespace Temperance.Services.Services.Interfaces
     public interface IHistoricalPriceService
     {
         Task<List<HistoricalPriceModel>> GetHistoricalPrices(string symbol, string interval);
-        Task<List<HistoricalPriceModel>> GetAllHistoricalPrices(List<string> symbols, List<string> intervals);
+        Task<List<HistoricalPriceModel>> GetAllHistoricalPrices(List<string> symbols, List<string> intervals, DateTime currentOosStartDate);
+        Task<List<HistoricalPriceModel>> GetAllHistoricalPrices(List<string> symbols, List<string> intervals, DateTime? startdate = null, DateTime? endDate = null);
         Task<List<HistoricalPriceModel>> GetHistoricalPrices(string symbol, string interval, DateTime startDate, DateTime endDate);
         IEnumerable<BackfillStatus> GetActiveBackfills();
         Task<bool> RunBacktestAsync(string symbol, string interval);

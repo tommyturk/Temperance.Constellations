@@ -146,9 +146,9 @@ namespace Temperance.Services.BackTesting.Orchestration.Implementations
             var finalUniverseSymbols = staticParameters.Keys.ToList();
             _logger.LogInformation("Found {Count} symbols with valid parameters for this cycle.", finalUniverseSymbols.Count);
 
-            var oosMarketData = await _historicalPriceService.GetHistoricalPrices(
+            var oosMarketData = await _historicalPriceService.GetAllHistoricalPrices(
                 finalUniverseSymbols, // <-- Was: `symbols`
-                interval,
+                new List<string?>() { interval },
                 currentOosStartDate,
                 currentOosEndDate);
 

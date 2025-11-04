@@ -50,7 +50,7 @@ namespace Temperance.Constellations.Controllers
             _logger.LogInformation("Received 'Begin Backtest' signal from Conductor for SessionId: {SessionId}, OOS Start Date: {OOSStartDate}, OOS End Date: {OOSEndDate}",
                 sessionId, oosStartDate, oosEndDate);
             _backgroundJobClient.Enqueue<IPortfolioBacktestOrchestrator>(orchestrator =>
-                orchestrator.ExecuteBacktestPhase(sessionId, oosStartDate, oosEndDate));
+                orchestrator.ExecuteCycle(sessionId, oosStartDate, oosEndDate));
             return Ok("Portfolio backtest phase enqueued.");
         }
 
