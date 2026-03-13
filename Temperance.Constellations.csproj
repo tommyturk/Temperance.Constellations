@@ -4,38 +4,20 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
   </PropertyGroup>
-  <ItemGroup>
-    <Compile Remove="Temperance.Data\**" />
-    <Compile Remove="Temperance.Services\**" />
-    <Compile Remove="Temperance.Settings\**" />
-    <Compile Remove="Temperance.Utilities\**" />
-    <Content Remove="Temperance.Data\**" />
-    <Content Remove="Temperance.Services\**" />
-    <Content Remove="Temperance.Settings\**" />
-    <Content Remove="Temperance.Utilities\**" />
-    <EmbeddedResource Remove="Temperance.Data\**" />
-    <EmbeddedResource Remove="Temperance.Services\**" />
-    <EmbeddedResource Remove="Temperance.Settings\**" />
-    <EmbeddedResource Remove="Temperance.Utilities\**" />
-    <None Remove="Temperance.Data\**" />
-    <None Remove="Temperance.Services\**" />
-    <None Remove="Temperance.Settings\**" />
-    <None Remove="Temperance.Utilities\**" />
-  </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="Hangfire.AspNetCore" Version="1.8.20" />
     <PackageReference Include="Hangfire.SqlServer" Version="1.8.20" />
     <PackageReference Include="ILGPU.Algorithms" Version="1.5.2" />
+    <PackageReference Include="MathNet.Numerics" Version="5.0.0" />
+    <PackageReference Include="Polly" Version="8.6.6" />
     <PackageReference Include="Swashbuckle.AspNetCore" Version="9.0.3" />
     <PackageReference Include="System.Linq" Version="4.3.0" />
+    <PackageReference Include="Temperance.Ephemeris" Version="1.2.0" />
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="Temperance.Data\Temperance.Data.csproj" />
-    <ProjectReference Include="Temperance.Services\Temperance.Services.csproj" />
-    <ProjectReference Include="Temperance.Settings\Temperance.Settings.csproj" />
-    <ProjectReference Include="Temperance.Utilities\Temperance.Utilities.csproj" />
+    <Folder Include="Models\Securities\SecurityOverview\" />
   </ItemGroup>
 
   <ProjectExtensions><VisualStudio><UserProperties appsettings_1json__JsonSchema="https://www.schemastore.org/azure-iot-edge-deployment-2.0.json" /></VisualStudio></ProjectExtensions>

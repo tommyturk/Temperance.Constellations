@@ -1,6 +1,6 @@
 ﻿using Hangfire;
 using Microsoft.AspNetCore.Mvc;
-using Temperance.Data.Models.Backtest;
+using Temperance.Constellations.Models;
 using Temperance.Services.Services.Implementations;
 
 namespace Temperance.Constellations.Controllers

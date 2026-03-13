@@ -1,7 +1,7 @@
 ﻿using Hangfire;
 using Microsoft.AspNetCore.Mvc;
-using Temperance.Services.BackTesting.Interfaces;
-using TradingApp.src.Core.Services.Interfaces;
+using Temperance.Constellations.Services.Interfaces;
+using Temperance.Constellations.BackTesting.Interfaces;
 
 namespace Temperance.Constellations.Controllers
 {

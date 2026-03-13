@@ -1,12 +1,9 @@
 ﻿using Hangfire;
 using Microsoft.AspNetCore.Mvc;
 using System.Text.Json;
-using Temperance.Data.Models.Backtest;
-using Temperance.Data.Models.Strategy;
-using Temperance.Services.BackTesting.Interfaces;
-using Temperance.Services.Factories.Interfaces;
-using Temperance.Services.Services.Interfaces;
-using TradingApp.src.Core.Services.Interfaces;
+using Temperance.Constellations.Models;
+using Temperance.Constellations.Models.Strategy;
+using Temperance.Constellations.Services.Interfaces;
 
 namespace Temperance.Constellations.Controllers
 {
@@ -15,14 +12,12 @@ namespace Temperance.Constellations.Controllers
     public class BacktestsController : Controller
     {
         private readonly ILogger<BacktestsController> _logger;
-        private readonly IStrategyFactory _strategyFactory;
         private readonly ITradeService _tradeService;
         private readonly IBackgroundJobClient _backgroundJobClient;
 
-        public BacktestsController(IStrategyFactory strategyFactory, ITradeService tradeService, IBackgroundJobClient backgroundJobClient,
+        public BacktestsController(ITradeService tradeService, IBackgroundJobClient backgroundJobClient,
             ILogger<BacktestsController> logger)
         {
-            _strategyFactory = strategyFactory;
             _tradeService = tradeService;
             _backgroundJobClient = backgroundJobClient;
             _logger = logger;

@@ -6,6 +6,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      secrets:
+        - nuget-auth
     ports:
       - "8003:8003"
     networks:
@@ -30,8 +32,10 @@ services:
               count: all
               capabilities: [gpu]
 
-# CORRECTED: This 'networks' block is now a top-level element.
-# This tells Docker Compose HOW to find the network.
+secrets:
+  nuget-auth:
+    file: F:/Temperance/Secrets/secrets.txt
+
 networks:
   temperance_network:
     external: true

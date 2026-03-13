@@ -6,33 +6,27 @@ using ILGPU.Runtime;
 using Microsoft.Extensions.Options;
 using Microsoft.OpenApi.Models;
 using System.Text.Json.Serialization;
-using Temperance.Conductor.Repository.Interfaces;
-using Temperance.Data.Data.Repositories;
-using Temperance.Data.Data.Repositories.BalanceSheet.Implementation;
-using Temperance.Data.Data.Repositories.BalanceSheet.Interface;
-using Temperance.Data.Data.Repositories.HistoricalData.Implementations;
-using Temperance.Data.Data.Repositories.HistoricalData.Interfaces;
-using Temperance.Data.Data.Repositories.Indicator.Implementation;
-using Temperance.Data.Data.Repositories.Indicator.Interfaces;
-using Temperance.Data.Data.Repositories.Securities.Implementations;
-using Temperance.Data.Data.Repositories.Securities.Interfaces;
-using Temperance.Data.Data.Repositories.Trade.Implementations;
-using Temperance.Data.Data.Repositories.Trade.Interfaces;
-using Temperance.Data.Data.Repositories.WalkForward.Implementations;
-using Temperance.Data.Repositories.Securities.Implementations;
+using Temperance.Constellations.Repositories.Interfaces;
+using Temperance.Constellations.Repositories.Interfaces.HistoricalData.Implementations;
+using Temperance.Constellations.Repositories.Interfaces.Trade.Implementations;
+using Temperance.Constellations.Repositories.Interfaces.Trade.Interfaces;
+using Temperance.Constellations.Repositories.Interfaces.Training;
+using Temperance.Constellations.Repositories.Interfaces.WalkForward.Implementations;
+using Temperance.Constellations.Repositories.Implementations;
+using Temperance.Constellations.Services.Implementations;
+using Temperance.Constellations.Services.Interfaces;
+using Temperance.Constellations.Settings;
+using Temperance.Constellations.src.Core.Services.Implementations;
+using Temperance.Constellations.src.Data.Repositories.HistoricalPrices.Implementations;
+using Temperance.Ephemeris.Repositories.Financials.Implementations;
+using Temperance.Ephemeris.Repositories.Financials.Interfaces;
+using Temperance.Ephemeris.Utilities.Helpers;
 using Temperance.Services.BackTesting.Implementations;
-using Temperance.Services.BackTesting.Interfaces;
+using Temperance.Constellations.BackTesting.Interfaces;
 using Temperance.Services.BackTesting.Orchestration.Implementations;
 using Temperance.Services.Factories.Implementations;
 using Temperance.Services.Factories.Interfaces;
 using Temperance.Services.Services.Implementations;
-using Temperance.Services.Services.Interfaces;
-using Temperance.Settings.Settings;
-using Temperance.Utilities.Helpers;
-using TradingApp.src.Core.Services.Implementations;
-using TradingApp.src.Core.Services.Interfaces;
-using TradingApp.src.Data.Repositories.HistoricalPrices.Implementations;
-using TradingApp.src.Data.Repositories.HistoricalPrices.Interfaces;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -80,18 +74,13 @@ builder.Services.AddTransient<IConductorService, ConductorService>();
 builder.Services.AddTransient<ITradeService, TradesService>();
 builder.Services.AddTransient<IQualityFilterService, QualityFilterService>();
 builder.Services.AddTransient<IMarketHealthService, MarketHealthService>();
-builder.Services.AddTransient<IMarketDataService, MarketDataService>();
 builder.Services.AddTransient<IEconomicDataService, EconomicDataService>();
 builder.Services.AddTransient<IMasterWalkForwardOrchestrator, MasterWalkForwardOrchestrator>();
 builder.Services.AddTransient<IInitialTrainingOrchestrator, InitialTrainingOrchestrator>();
 builder.Services.AddTransient<IShadowBacktestOrchestrator, ShadowBacktestOrchestrator>();
 builder.Services.AddTransient<ISingleSecurityBacktester, SingleSecurityBacktester>();
-builder.Services.AddTransient<FilterAndSelectSleevesJob>();
-builder.Services.AddTransient<ISleeveSelectionOrchestrator, SleeveSelectionOrchestrator>();
 builder.Services.AddTransient<IPortfolioBacktestOrchestrator, PortfolioBacktestOrchestrator>();
 builder.Services.AddTransient<IPortfolioBacktestRunner, PortfolioBacktestRunner>();
-builder.Services.AddTransient<IFineTuneOrchestrator, FineTuneOrchestrator>();
-builder.Services.AddTransient<IOptimizationKeyGenerator, OptimizationKeyGenerator>();
 
 builder.Services.AddTransient<IHistoricalDataRepository>(provider =>
 {
@@ -182,6 +171,15 @@ builder.Services.AddSingleton<IPerformanceRepository>(provider =>
     var defaultConnnection = connectionString.DefaultConnection;
     var logger = provider.GetRequiredService<ILogger<PerformanceRepository>>();
     return new PerformanceRepository(defaultConnnection, logger);
+});
+
+builder.Services.AddSingleton<ITrainingRepository>(provider =>
+{
+    var connectionString = provider.GetRequiredService<IOptions<ConnectionStrings>>().Value;
+    var defaultConnnection = connectionString.DefaultConnection;
+
+    var logger = provider.GetRequiredService<ILogger<TrainingRepository>>();
+    return new TrainingRepository(logger, defaultConnnection);
 });
 
 builder.Services.AddSingleton<Accelerator>(sp =>

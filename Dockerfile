@@ -6,13 +6,15 @@ WORKDIR /source
 # Copy solution and all project files first for layer caching.
 # Paths are relative to the build context root (TRADINGBOT.CONDUCTOR).
 # Destinations are relative to WORKDIR (/source).
-COPY Temperance.Constellations.sln .
-COPY Temperance.Constellations.csproj .
-COPY Temperance.Data/Temperance.Data.csproj ./Temperance.Data/
-COPY Temperance.Services/Temperance.Services.csproj ./Temperance.Services/
-COPY Temperance.Utilities/Temperance.Utilities.csproj ./Temperance.Utilities/
-COPY Temperance.Settings/Temperance.Settings.csproj ./Temperance.Settings/
+COPY ["Temperance.Constellations.sln", "."]
+COPY ["Temperance.Constellations.csproj", "."]
+COPY ["nuget.config", "."] 
 
+RUN --mount=type=secret,id=nuget-auth,target=/tmp/nuget_pat_file \
+    /bin/bash -c " \
+    export NUGET_AUTH_TOKEN=$(cat /tmp/nuget_pat_file | tr -d '\n\r') && \
+    dotnet restore \"Temperance.Constellations.sln\" \
+    "
 # Add COPY lines here if you have other referenced projects
 
 # Restore the entire solution - this finds all project references correctly
