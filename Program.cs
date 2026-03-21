@@ -61,7 +61,6 @@ builder.Services.AddControllers()
 
 builder.Services.AddSingleton(sp => sp.GetRequiredService<IOptions<ConductorSettings>>().Value);
 
-builder.Services.AddHttpClient<IAlphaVantageService, AlphaVantageService>();
 builder.Services.AddHttpClient<IConductorClient, ConductorClient>();
 
 builder.Services.AddTransient<IHangfireTestService, HangfireTestService>();
