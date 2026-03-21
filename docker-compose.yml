@@ -1,4 +1,3 @@
-# The 'version' attribute is obsolete and has been removed.
 services:
   temperance-constellations-api:
     image: temperance-constellations:latest
@@ -11,23 +10,26 @@ services:
     ports:
       - "8003:8003"
     networks:
-      - temperance_network # This tells the service to USE the network
+      - temperance_network
     environment:
       ASPNETCORE_URLS: "http://+:8003"
       ASPNETCORE_ENVIRONMENT: "Development"
-      ConnectionStrings__DefaultConnection: "Server=host.docker.internal;Database=TradingBotDb;User ID=developer;Password=K3n5alr1532025!!;Encrypt=False;TrustServerCertificate=True;"
-      ConnectionStrings__DefaultConnectionString: "Server=host.docker.internal;Database=TradingBotDb;User ID=developer;Password=K3n5alr1532025!!;Encrypt=False;TrustServerCertificate=True;"
-      ConnectionStrings__HistoricalPricesConnection: "Server=host.docker.internal;Database=Historical;User ID=developer;Password=K3n5alr1532025!!;Encrypt=False;TrustServerCertificate=True;"
+      # Using interpolation to build the strings
+      ConnectionStrings__DefaultConnection: "Server=${DB_HOST};Database=TradingBotDb;User ID=${DB_USER};Password=${DB_PASSWORD};Encrypt=False;TrustServerCertificate=${DB_TRUST_CERT};"
+      ConnectionStrings__DefaultConnectionString: "Server=${DB_HOST};Database=TradingBotDb;User ID=${DB_USER};Password=${DB_PASSWORD};Encrypt=False;TrustServerCertificate=${DB_TRUST_CERT};"
+      ConnectionStrings__HistoricalPricesConnection: "Server=${DB_HOST};Database=Historical;User ID=${DB_USER};Password=${DB_PASSWORD};Encrypt=False;TrustServerCertificate=${DB_TRUST_CERT};"
+      ConnectionStrings__HangfireConnection: "Server=${DB_HOST};Database=TradingBotDb;User ID=${DB_USER};Password=${DB_PASSWORD};Encrypt=False;TrustServerCertificate=${DB_TRUST_CERT};"
+      
       AlphaVantageSettings__BaseUrl: "https://www.alphavantage.co/query"
-      AlphaVantageSettings__ApiKey: "Q63WJB6QXCD0USO7"
+      AlphaVantageSettings__ApiKey: "${ALPHA_VANTAGE_API_KEY}"
       ConductorSettings__BaseUrl: "http://conductor-api:8002"
-      ConnectionStrings__HangfireConnection: "Server=host.docker.internal;Database=TradingBotDb;User ID=developer;Password=K3n5alr1532025!!;Encrypt=False;TrustServerCertificate=True;"
+    
     restart: unless-stopped
     extra_hosts:
       - "host.docker.internal:host-gateway"
     deploy:
       resources:
-        reservations:
+        切实:
           devices:
             - driver: nvidia
               count: all
@@ -35,7 +37,7 @@ services:
 
 secrets:
   nuget-auth:
-    file: F:/Temperance/Secrets/secrets.txt
+    file: ${SECRETS_FILE_PATH}
 
 networks:
   temperance_network:
