@@ -29,7 +29,7 @@ services:
       - "host.docker.internal:host-gateway"
     deploy:
       resources:
-        切实:
+        reservations:
           devices:
             - driver: nvidia
               count: all
