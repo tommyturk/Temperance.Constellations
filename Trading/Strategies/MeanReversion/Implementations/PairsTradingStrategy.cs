@@ -112,5 +112,15 @@ namespace Temperance.Services.Trading.Strategies.MeanReversion.Implementations
         {
             throw new NotImplementedException();
         }
+
+        public void UpdateParameters(Dictionary<string, object> newParameters)
+        {
+            throw new NotImplementedException();
+        }
+
+        public void UpdateParameters(Dictionary<string, string> newParameters)
+        {
+            throw new NotImplementedException();
+        }
     }
 }

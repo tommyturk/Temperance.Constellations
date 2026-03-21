@@ -13,6 +13,7 @@ namespace Temperance.Constellations.Repositories.Interfaces
         Task<int> LogStrategyAsync(StrategyLog log);
         Task CheckTradeExitsAsync(); 
         Task InitializeBacktestRunAsync(Guid runId, BacktestConfiguration config);
+        Task FinalizeBacktestRunAsync(Guid runId, decimal finalCapital, int totalTrades, decimal sharpe, decimal mdd);
         Task UpdateBacktestRunStatusAsync(Guid runId, string status, DateTime timestamp, string? errorMessage = null);
         Task SaveBacktestTradesAsync(Guid runId, IEnumerable<TradeSummary> trades);
         Task UpdateBacktestRunTotalsAsync(Guid runId, BacktestResult result); 
@@ -29,5 +30,6 @@ namespace Temperance.Constellations.Repositories.Interfaces
         Task<WalkForwardSessionModel?> GetSessionAsync(Guid sessionId);
         Task UpdateSessionCapitalAsync(Guid sessionId, decimal newCapital);
         Task<TradeSummary?> GetActiveTradeByPositionIdAsync(Guid positionId);
+        Task SaveTradesBulkAsync(IEnumerable<TradeSummary> trades);
     }
 }

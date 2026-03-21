@@ -6,23 +6,30 @@ using ILGPU.Runtime;
 using Microsoft.Extensions.Options;
 using Microsoft.OpenApi.Models;
 using System.Text.Json.Serialization;
+using Temperance.Constellations.BackTesting.Interfaces;
+using Temperance.Constellations.Repositories.Implementations;
 using Temperance.Constellations.Repositories.Interfaces;
 using Temperance.Constellations.Repositories.Interfaces.HistoricalData.Implementations;
 using Temperance.Constellations.Repositories.Interfaces.Trade.Implementations;
 using Temperance.Constellations.Repositories.Interfaces.Trade.Interfaces;
 using Temperance.Constellations.Repositories.Interfaces.Training;
 using Temperance.Constellations.Repositories.Interfaces.WalkForward.Implementations;
-using Temperance.Constellations.Repositories.Implementations;
+using Temperance.Constellations.Services;
 using Temperance.Constellations.Services.Implementations;
 using Temperance.Constellations.Services.Interfaces;
 using Temperance.Constellations.Settings;
 using Temperance.Constellations.src.Core.Services.Implementations;
 using Temperance.Constellations.src.Data.Repositories.HistoricalPrices.Implementations;
+using Temperance.Ephemeris.Repositories.Constellations.Implementations;
+using Temperance.Ephemeris.Repositories.Constellations.Interfaces;
 using Temperance.Ephemeris.Repositories.Financials.Implementations;
 using Temperance.Ephemeris.Repositories.Financials.Interfaces;
+using Temperance.Ephemeris.Repositories.Ludus.Implementations;
+using Temperance.Ephemeris.Repositories.Ludus.Interfaces;
 using Temperance.Ephemeris.Utilities.Helpers;
+using Temperance.Hermes.Connection;
+using Temperance.Hermes.Publishing;
 using Temperance.Services.BackTesting.Implementations;
-using Temperance.Constellations.BackTesting.Interfaces;
 using Temperance.Services.BackTesting.Orchestration.Implementations;
 using Temperance.Services.Factories.Implementations;
 using Temperance.Services.Factories.Interfaces;
@@ -79,26 +86,59 @@ builder.Services.AddTransient<IMasterWalkForwardOrchestrator, MasterWalkForwardO
 builder.Services.AddTransient<IInitialTrainingOrchestrator, InitialTrainingOrchestrator>();
 builder.Services.AddTransient<IShadowBacktestOrchestrator, ShadowBacktestOrchestrator>();
 builder.Services.AddTransient<ISingleSecurityBacktester, SingleSecurityBacktester>();
-builder.Services.AddTransient<IPortfolioBacktestOrchestrator, PortfolioBacktestOrchestrator>();
+//builder.Services.AddTransient<IPortfolioBacktestOrchestrator, PortfolioBacktestOrchestrator>();
 builder.Services.AddTransient<IPortfolioBacktestRunner, PortfolioBacktestRunner>();
+// =========================================================================
+// CONSTELLATIONS PHASE 3: THE AIRTIGHT REGISTRY
+// =========================================================================
 
+// 1. Map the Interfaces to the Implementations (Crucial for MasterBacktestRunner)
+builder.Services.AddScoped<IWalkForwardSleeveRepository, WalkForwardSleeveRepository>();
+builder.Services.AddScoped<IShadowPerformanceRepository, ShadowPerformanceRepository>();
+builder.Services.AddScoped<IStrategyOptimizedParametersRepository, StrategyOptimizedParametersRepository>();
+
+// 2. Repositories requiring SQL Helper (Manual Factory)
+builder.Services.AddScoped<IWalkForwardSessionRepository>(provider =>
+{
+    var options = provider.GetRequiredService<IOptions<ConnectionStrings>>().Value;
+    var sqlHelper = provider.GetRequiredService<ISqlHelper>();
+    return new WalkForwardSessionRepository(options.DefaultConnectionString, sqlHelper);
+});
+
+builder.Services.AddScoped<ICycleTrackerRepository>(provider =>
+{
+    var options = provider.GetRequiredService<IOptions<ConnectionStrings>>().Value;
+    var sqlHelper = provider.GetRequiredService<ISqlHelper>();
+    return new CycleTrackerRepository(options.DefaultConnectionString, sqlHelper);
+});
+
+// 3. Hermes/Nuncio Messaging (Outbound Only)
+// Note: RabbitMqPublisher needs IRabbitMqConnectionFactory to be born.
+builder.Services.AddSingleton<IRabbitMqConnectionFactory, RabbitMqConnectionFactory>();
+builder.Services.AddSingleton<IMessagePublisher, RabbitMqPublisher>();
+
+// 4. The Orchestrators (The "Big Brains")
+builder.Services.AddScoped<IMasterBacktestRunner, MasterBacktestRunner>();
+builder.Services.AddScoped<IPortfolioCommitteeService, PortfolioCommitteeService>();
+
+// =========================================================================
 builder.Services.AddTransient<IHistoricalDataRepository>(provider =>
 {
     var connectionString = provider.GetRequiredService<IOptions<ConnectionStrings>>().Value;
-    var defaultConnnection = connectionString.DefaultConnection;
+    var defaultConnnection = connectionString.DefaultConnectionString;
     var securitiesOverviewRepository = provider.GetRequiredService<ISecuritiesOverviewRepository>();
     return new HistoricalDataRepository(defaultConnnection, securitiesOverviewRepository);
 });
 builder.Services.AddTransient<IOptimizationRepository>(provider =>
 {
     var connectionString = provider.GetRequiredService<IOptions<ConnectionStrings>>().Value;
-    var defaultConnnection = connectionString.DefaultConnection;
+    var defaultConnnection = connectionString.DefaultConnectionString;
     return new OptimizationRepository(defaultConnnection);
 });
 builder.Services.AddScoped<ISecuritiesOverviewRepository>(provider =>
 {
     var connectionStrings = provider.GetRequiredService<IOptions<ConnectionStrings>>().Value;
-    var cs = connectionStrings.DefaultConnection;
+    var cs = connectionStrings.DefaultConnectionString;
     var logger = provider.GetRequiredService<ILogger<SecuritiesOverviewRepository>>();
     return new SecuritiesOverviewRepository(cs, logger);
 });
@@ -115,29 +155,30 @@ builder.Services.AddTransient<IHistoricalPriceRepository>(provider =>
 builder.Services.AddTransient<IEarningsRepository>(provider =>
 {
     var connectionString = provider.GetRequiredService<IOptions<ConnectionStrings>>().Value;
-    var defaultConnnection = connectionString.DefaultConnection;
+    var defaultConnnection = connectionString.DefaultConnectionString;
     return new EarningsRepository(defaultConnnection);
 });
 
 builder.Services.AddTransient<IBalanceSheetRepository>(provider =>
 {
     var connectionString = provider.GetRequiredService<IOptions<ConnectionStrings>>().Value;
-    var defaultConnnection = connectionString.DefaultConnection;
+    var defaultConnnection = connectionString.DefaultConnectionString;
     return new BalanceSheetRepository(defaultConnnection);
 });
 
-builder.Services.AddTransient<IBacktestRepository>(provider =>
+// Ensure the interface type matches exactly what TradesService wants
+builder.Services.AddTransient<Temperance.Constellations.Repositories.Interfaces.Trade.Interfaces.IBacktestRepository>(provider =>
 {
     var connectionString = provider.GetRequiredService<IOptions<ConnectionStrings>>().Value;
-    var defaultConnnection = connectionString.DefaultConnection;
-    var logger = provider.GetRequiredService<ILogger<BacktestRepository>>();
-    return new BacktestRepository(defaultConnnection, logger);
+    var logger = provider.GetRequiredService<ILogger<Temperance.Constellations.Repositories.Interfaces.Trade.Implementations.BacktestRepository>>();
+    // Verify your BacktestRepository actually implements IBacktestRepository
+    return new Temperance.Constellations.Repositories.Interfaces.Trade.Implementations.BacktestRepository(connectionString.DefaultConnectionString, logger);
 });
 
 builder.Services.AddTransient<ITradeRepository>(provider =>
 {
     var connectionString = provider.GetRequiredService<IOptions<ConnectionStrings>>().Value;
-    var defaultConnnection = connectionString.DefaultConnection;
+    var defaultConnnection = connectionString.DefaultConnectionString;
     var logger = provider.GetRequiredService<ILogger<TradeRepository>>();
     return new TradeRepository(defaultConnnection, logger);
 });
@@ -152,7 +193,7 @@ builder.Services.AddSingleton<ISqlHelper>(provider =>
 builder.Services.AddSingleton<IIndicatorRepository>(provider =>
 {
     var connectionString = provider.GetRequiredService<IOptions<ConnectionStrings>>().Value;
-    var defaultConnnection = connectionString.DefaultConnection;
+    var defaultConnnection = connectionString.DefaultConnectionString;
     var logger = provider.GetRequiredService<ILogger<IndicatorRepository>>();
     return new IndicatorRepository(defaultConnnection, logger);
 });
@@ -160,7 +201,7 @@ builder.Services.AddSingleton<IIndicatorRepository>(provider =>
 builder.Services.AddSingleton<IWalkForwardRepository>(provider =>
 {
     var connectionString = provider.GetRequiredService<IOptions<ConnectionStrings>>().Value;
-    var defaultConnnection = connectionString.DefaultConnection;
+    var defaultConnnection = connectionString.DefaultConnectionString;
     var logger = provider.GetRequiredService<ILogger<WalkForwardRepository>>();
     return new WalkForwardRepository(defaultConnnection, logger);
 });
@@ -168,7 +209,7 @@ builder.Services.AddSingleton<IWalkForwardRepository>(provider =>
 builder.Services.AddSingleton<IPerformanceRepository>(provider =>
 {
    var connectionString = provider.GetRequiredService<IOptions<ConnectionStrings>>().Value;
-    var defaultConnnection = connectionString.DefaultConnection;
+    var defaultConnnection = connectionString.DefaultConnectionString;
     var logger = provider.GetRequiredService<ILogger<PerformanceRepository>>();
     return new PerformanceRepository(defaultConnnection, logger);
 });
@@ -176,7 +217,7 @@ builder.Services.AddSingleton<IPerformanceRepository>(provider =>
 builder.Services.AddSingleton<ITrainingRepository>(provider =>
 {
     var connectionString = provider.GetRequiredService<IOptions<ConnectionStrings>>().Value;
-    var defaultConnnection = connectionString.DefaultConnection;
+    var defaultConnnection = connectionString.DefaultConnectionString;
 
     var logger = provider.GetRequiredService<ILogger<TrainingRepository>>();
     return new TrainingRepository(logger, defaultConnnection);

@@ -191,16 +191,12 @@ namespace Temperance.Constellations.src.Core.Services.Implementations
 
         public async Task<List<PriceModel>> GetAllHistoricalPrices(List<string> symbols, List<string> intervals, DateTime? startDate = null, DateTime? endDate = null)
         {
-            var task = Task.Run(() => _historicalPricesRepository.GetAllHistoricalPrices(symbols, intervals, startDate, endDate));
-
-            return task.Result;
+            return await _historicalPricesRepository.GetAllHistoricalPrices(symbols, intervals, startDate, endDate);
         }
 
         public async Task<List<PriceModel>> GetAllHistoricalPrices(List<string> symbols, List<string> intervals, DateTime oosSampleStartDate)
         {
-            var task = Task.Run(() => _historicalPricesRepository.GetAllHistoricalPrices(symbols, intervals, oosSampleStartDate));
-
-            return task.Result;
+            return await _historicalPricesRepository.GetAllHistoricalPrices(symbols, intervals, oosSampleStartDate);
         }
 
         public async Task<DateTime?> GetMostRecentTimestamp(string symbol, string interval)

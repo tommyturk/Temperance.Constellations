@@ -892,32 +892,6 @@ namespace Temperance.Constellations.Services.Implementations
             return trade;
         }
 
-        private Dictionary<string, decimal> GetIndicatorValuesForTimestamp(string symbol, DateTime timestamp)
-        {
-            var values = new Dictionary<string, decimal>();
-            if (_indicatorCache.TryGetValue(symbol, out var symbolIndicators))
-            {
-                if (symbolIndicators.TryGetValue("TimestampMap", out var timestampMapping))
-                {
-                    // This is a simplified lookup. A more robust implementation would use a direct map.
-                    // For now, we find the index.
-                    var timestamps = symbolIndicators["Timestamps"];
-                    int index = Array.IndexOf(timestamps, (decimal)timestamp.ToOADate());
-                    if (index != -1)
-                    {
-                        foreach (var kvp in symbolIndicators)
-                        {
-                            if (kvp.Key != "Timestamps")
-                            {
-                                values[kvp.Key] = kvp.Value[index];
-                            }
-                        }
-                    }
-                }
-            }
-            return values;
-        }
-
         [AutomaticRetry(Attempts = 1)]
         public async Task RunBacktest(BacktestConfiguration config, Guid runId)
         {

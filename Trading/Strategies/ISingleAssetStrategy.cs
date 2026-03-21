@@ -48,6 +48,8 @@ namespace Temperance.Services.Trading.Strategies
 
 
         bool ShouldTakePartialProfit(Position position, in PriceModel currentBar, Dictionary<string, decimal> currentIndicatorValues);
+
+        void UpdateParameters(Dictionary<string, object> newParameters);
     }
 }
     

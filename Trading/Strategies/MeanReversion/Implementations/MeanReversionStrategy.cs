@@ -1,8 +1,9 @@
-﻿using Temperance.Constellations.Models.Trading;
-using Temperance.Ephemeris.Models.Prices;
-using Temperance.Constellations.Services.Interfaces;
-using Temperance.Ephemeris.Utilities.Helpers;
+﻿using System.Text.Json;
 using Temperance.Constellations.Models.MarketHealth;
+using Temperance.Constellations.Models.Trading;
+using Temperance.Constellations.Services.Interfaces;
+using Temperance.Ephemeris.Models.Prices;
+using Temperance.Ephemeris.Utilities.Helpers;
 
 namespace Temperance.Services.Trading.Strategies.MeanReversion.Implementation
 {
@@ -23,6 +24,7 @@ namespace Temperance.Services.Trading.Strategies.MeanReversion.Implementation
         private int _atrPeriod;
         private decimal _atrMultiplier;
         private int _maxHoldingBars;
+        private int _requiredLookback;
 
         private readonly ITransactionCostService _transactionCostService;
         private readonly ILogger<MeanReversionStrategy> _logger;
@@ -77,7 +79,7 @@ namespace Temperance.Services.Trading.Strategies.MeanReversion.Implementation
             if (currentPosition == null && marketHealth <= MarketHealthScore.Bearish)
                 return SignalDecision.Hold;
 
-            if (historicalDataWindow.Count < GetRequiredLookbackPeriod()) return SignalDecision.Hold;
+            if (historicalDataWindow != null && historicalDataWindow.Count < GetRequiredLookbackPeriod()) return SignalDecision.Hold;
 
             decimal lowerBollingerBand = currentIndicatorValues["LowerBand"];
             decimal upperBollingerBand = currentIndicatorValues["UpperBand"];
@@ -96,11 +98,25 @@ namespace Temperance.Services.Trading.Strategies.MeanReversion.Implementation
 
         public bool ShouldTakePartialProfit(Position position, in PriceModel currentBar, Dictionary<string, decimal> currentIndicatorValues)
         {
-            decimal middleBollingerBand = (currentIndicatorValues["UpperBand"] + currentIndicatorValues["LowerBand"]) / 2;
+            // We only take partial profit if we haven't already scaled out
+            // (Assuming your Position model tracks if a partial exit has occurred)
+            if (position.Quantity <= (position.Quantity / 2)) return false;
 
-            if(position.Direction == PositionDirection.Long && currentBar.HighPrice >= middleBollingerBand) return true;
+            decimal middleBollingerBand = currentIndicatorValues["SMA"];
 
-            if(position.Direction == PositionDirection.Short && currentBar.LowPrice <= middleBollingerBand) return true;
+            // LONG: If the wick (High) touches the SMA, sell half to lock in the "quick" reversion.
+            if (position.Direction == PositionDirection.Long && currentBar.HighPrice >= middleBollingerBand)
+            {
+                _logger.LogInformation("Partial Profit Target (SMA) touched for {Symbol}. Scaling out.", position.Symbol);
+                return true;
+            }
+
+            // SHORT: If the wick (Low) touches the SMA, cover half.
+            if (position.Direction == PositionDirection.Short && currentBar.LowPrice <= middleBollingerBand)
+            {
+                _logger.LogInformation("Partial Profit Target (SMA) touched for {Symbol}. Scaling out.", position.Symbol);
+                return true;
+            }
 
             return false;
         }
@@ -292,24 +308,36 @@ namespace Temperance.Services.Trading.Strategies.MeanReversion.Implementation
             return "Unknown Entry Signal";
         }
 
-        public string GetExitReason(
-            in PriceModel currentBar,
-            IReadOnlyList<PriceModel> historicalDataWindow,
-            Dictionary<string, decimal> currentIndicatorValues)
+        public string GetExitReason(Position position, in PriceModel currentBar, IReadOnlyList<PriceModel> historicalDataWindow, Dictionary<string, decimal> currentIndicatorValues)
         {
-            // Calculate the SMA for the exit condition
-            var smaWindow = historicalDataWindow.Skip(Math.Max(0, historicalDataWindow.Count - _movingAveragePeriod));
-            decimal simpleMovingAverage = smaWindow.Average(b => b.ClosePrice);
+            // --- Layer 1: Protective Stop-Loss ---
+            if (position.Direction == PositionDirection.Long && currentBar.LowPrice <= position.StopLossPrice)
+            {
+                return $"ATR Stop-Loss hit at {currentBar.LowPrice:F2}";
+            }
+            if (position.Direction == PositionDirection.Short && currentBar.HighPrice >= position.StopLossPrice)
+            {
+                return $"ATR Stop-Loss hit at {currentBar.HighPrice:F2}";
+            }
 
-            if (currentBar.ClosePrice >= simpleMovingAverage)
+            // --- Layer 2: Full Reversion Target (End of Bar Confirmation) ---
+            decimal movingAverage = currentIndicatorValues["SMA"];
+            if (position.Direction == PositionDirection.Long && currentBar.ClosePrice >= movingAverage)
             {
-                return $"Price ({currentBar.ClosePrice:F2}) reverted to or above mean ({simpleMovingAverage:F2}).";
+                return $"Full Reversion Confirmed at SMA ({movingAverage:F2})";
             }
-            if (currentBar.ClosePrice <= simpleMovingAverage)
+            if (position.Direction == PositionDirection.Short && currentBar.ClosePrice <= movingAverage)
             {
-                return $"Price ({currentBar.ClosePrice:F2}) reverted to or below mean ({simpleMovingAverage:F2}).";
+                return $"Full Reversion Confirmed at SMA ({movingAverage:F2})";
             }
-            return "Signal Reversal";
+
+            // --- Layer 3: Time Stop ---
+            if (position.BarsHeld >= _maxHoldingBars)
+            {
+                return $"Time Stop hit after {position.BarsHeld} bars";
+            }
+
+            return "Hold";
         }
 
         public string GetEntryReason(PriceModel currentBar, List<PriceModel> dataWindow, Dictionary<string, decimal> currentIndicatorValues)
@@ -329,44 +357,53 @@ namespace Temperance.Services.Trading.Strategies.MeanReversion.Implementation
             return "No specific entry signal reason";
         }
 
-        public string GetExitReason(Position position, in PriceModel currentBar, IReadOnlyList<PriceModel> historicalDataWindow, Dictionary<string, decimal> currentIndicatorValues)
+      
+        // Add this private field to cache the lookback so the engine doesn't have to calculate it on every bar
+
+        public void UpdateParameters(Dictionary<string, object> newParameters)
         {
-            // --- Layer 1: Protective Stop-Loss (Thesis is Wrong) ---
-            if (position.Direction == PositionDirection.Long && currentBar.LowPrice <= position.StopLossPrice)
+            if (newParameters == null || newParameters.Count == 0) return;
+
+            T ExtractValue<T>(string key, Func<JsonElement, T> elementExtractor, Func<object, T> fallbackExtractor, T currentVal)
             {
-                return $"ATR Stop-Loss hit at {currentBar.LowPrice:F2}";
-            }
-            if (position.Direction == PositionDirection.Short && currentBar.HighPrice >= position.StopLossPrice)
-            {
-                return $"ATR Stop-Loss hit at {currentBar.HighPrice:F2}";
+                if (newParameters.TryGetValue(key, out var obj))
+                {
+                    if (obj is JsonElement element)
+                    {
+                        try { return elementExtractor(element); }
+                        catch { return currentVal; }
+                    }
+                    try { return fallbackExtractor(obj); }
+                    catch { return currentVal; }
+                }
+                return currentVal;
             }
 
-            // --- Layer 2: Profit Target at the Mean (Thesis is Correct) ---
-            decimal movingAverage = currentIndicatorValues["SMA"];
-            if (position.Direction == PositionDirection.Long && currentBar.HighPrice >= movingAverage)
-            {
-                return $"Profit Target hit at SMA ({movingAverage:F2})";
-            }
-            if (position.Direction == PositionDirection.Short && currentBar.LowPrice <= movingAverage)
-            {
-                return $"Profit Target hit at SMA ({movingAverage:F2})";
-            }
+            // --- Core Indicators (Updated to match Debugger Keys) ---
+            _movingAveragePeriod = ExtractValue("MovingAveragePeriod", e => e.GetInt32(), o => Convert.ToInt32(o), _movingAveragePeriod);
+            _stdDevMultiplier = ExtractValue("StdDevMultiplier", e => e.GetDecimal(), o => Convert.ToDecimal(o), _stdDevMultiplier);
+            _rsiPeriod = ExtractValue("RSIPeriod", e => e.GetInt32(), o => Convert.ToInt32(o), _rsiPeriod);
+            _rsiOversoldThreshold = ExtractValue("RSIOversold", e => e.GetDecimal(), o => Convert.ToDecimal(o), _rsiOversoldThreshold);
+            _rsiOverboughtThreshold = ExtractValue("RSIOverbought", e => e.GetDecimal(), o => Convert.ToDecimal(o), _rsiOverboughtThreshold);
 
-            // --- Layer 3: Time-Based Stop (Thesis has Expired) ---
-            if (position.BarsHeld >= _maxHoldingBars)
-            {
-                return $"Time Stop hit after {position.BarsHeld} bars";
-            }
+            // --- Risk & Sizing ---
+            _minimumAverageDailyVolume = ExtractValue("MinimumAverageDailyVolume", e => e.GetDecimal(), o => Convert.ToDecimal(o), _minimumAverageDailyVolume);
+            _maxPyramidEntries = ExtractValue("MaxPyramidEntries", e => e.GetInt32(), o => Convert.ToInt32(o), _maxPyramidEntries);
+            _initialEntryScale = ExtractValue("InitialEntryScale", e => e.GetDecimal(), o => Convert.ToDecimal(o), _initialEntryScale);
+            _stopLossPercentage = ExtractValue("StopLossPercentage", e => e.GetDecimal(), o => Convert.ToDecimal(o), _stopLossPercentage);
 
-            // --- Final Check: Signal Reversal ---
-            var exitSignal = GenerateSignal(in currentBar, position, historicalDataWindow, currentIndicatorValues, MarketHealthScore.Neutral);
-            if ((position.Direction == PositionDirection.Long && exitSignal == SignalDecision.Sell) ||
-                (position.Direction == PositionDirection.Short && exitSignal == SignalDecision.Buy))
-            {
-                return "Signal Reversal";
-            }
+            // --- Volatility & Time Stops ---
+            _atrPeriod = ExtractValue("AtrPeriod", e => e.GetInt32(), o => Convert.ToInt32(o), _atrPeriod);
+            _atrMultiplier = ExtractValue("AtrMultiplier", e => e.GetDecimal(), o => Convert.ToDecimal(o), _atrMultiplier);
+            _maxHoldingBars = ExtractValue("MaxHoldingBars", e => e.GetInt32(), o => Convert.ToInt32(o), _maxHoldingBars);
 
-            return "Hold"; // No exit condition met
+            // --- CRITICAL: Recalculate the Lookback Requirement ---
+            _requiredLookback = Math.Max(Math.Max(_movingAveragePeriod, _rsiPeriod), _atrPeriod) + 1;
+        }
+
+        public void UpdateParameters(Dictionary<string, string> newParameters)
+        {
+            throw new NotImplementedException();
         }
     }
 }

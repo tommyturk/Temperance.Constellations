@@ -1,5 +1,6 @@
 ﻿using Temperance.Constellations.Models;
 using Temperance.Constellations.Models.Trading;
+using Temperance.Ephemeris.Models.Constellations;
 using Temperance.Ephemeris.Models.Prices;
 
 namespace Temperance.Constellations.Services.Interfaces
@@ -41,6 +42,8 @@ namespace Temperance.Constellations.Services.Interfaces
         /// <summary>
         /// Gets a snapshot of the portfolio's current cash and open positions.
         /// </summary>
-        PortfolioState GetPortfolioState();
+        PortfolioStateModel GetPortfolioState();
+        PortfolioStateModel GetPortfolioState(Dictionary<string, decimal> currentPrices);
+        bool HasOpenPosition(string symbol);
     }
 }

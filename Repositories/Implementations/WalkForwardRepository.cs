@@ -206,7 +206,7 @@ namespace Temperance.Constellations.Repositories.Interfaces.WalkForward.Implemen
             return result;
         }
 
-        public async Task SaveCycleResultsAsync(Guid sessionId, Guid cycleRunId, BacktestResult cycleResult, PortfolioState portfolioState)
+        public async Task SaveCycleResultsAsync(Guid sessionId, Guid cycleRunId, BacktestResult cycleResult, PortfolioStateModel portfolioState)
         {
 
 

@@ -31,5 +31,7 @@ namespace Temperance.Constellations.Services.Interfaces
         Task SaveSleevesAsync(IEnumerable<WalkForwardSleeve> sleeves);
 
         Task<TradeSummary?> GetActiveTradeForPositionAsync(Guid positionId);
+
+        Task SaveTradesBulkAsync(IEnumerable<TradeSummary> trades);
     }
 }

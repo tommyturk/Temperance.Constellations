@@ -22,7 +22,7 @@ namespace Temperance.Constellations.Repositories.Interfaces
         /// <summary>
         /// Saves the results of a single walk-forward cycle and the portfolio's state at the end of it.
         /// </summary>
-        Task SaveCycleResultsAsync(Guid sessionId, Guid cycleRunId, BacktestResult cycleResult, PortfolioState portfolioState);
+        Task SaveCycleResultsAsync(Guid sessionId, Guid cycleRunId, BacktestResult cycleResult, PortfolioStateModel portfolioState);
         
         /// <summary>
         /// Saves a failure record for a specific walk-forward cycle.

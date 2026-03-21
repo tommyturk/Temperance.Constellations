@@ -3,6 +3,7 @@
     <TargetFramework>net9.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
+    <UserSecretsId>391fff5f-c2b0-4410-a905-5443e26192b7</UserSecretsId>
   </PropertyGroup>
 
   <ItemGroup>
@@ -13,7 +14,8 @@
     <PackageReference Include="Polly" Version="8.6.6" />
     <PackageReference Include="Swashbuckle.AspNetCore" Version="9.0.3" />
     <PackageReference Include="System.Linq" Version="4.3.0" />
-    <PackageReference Include="Temperance.Ephemeris" Version="1.2.0" />
+    <PackageReference Include="Temperance.Ephemeris" Version="1.4.1" />
+    <PackageReference Include="Temperance.Hermes" Version="1.1.4" />
   </ItemGroup>
 
   <ItemGroup>

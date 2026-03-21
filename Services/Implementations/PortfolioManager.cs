@@ -5,6 +5,7 @@ using Temperance.Constellations.Models.Trading;
 using Temperance.Ephemeris.Models.Prices;
 using Temperance.Ephemeris.Models.Trading;
 using Temperance.Constellations.Services.Interfaces;
+using Temperance.Ephemeris.Models.Constellations;
 
 namespace Temperance.Services.Services.Implementations
 {
@@ -428,15 +429,55 @@ namespace Temperance.Services.Services.Implementations
             return Task.CompletedTask;
         }
 
-        public PortfolioState GetPortfolioState()
+        public PortfolioStateModel GetPortfolioState()
         {
-            return new PortfolioState
+            return new PortfolioStateModel
             {
                 SessionId = _sessionId, 
                 Cash = _currentCash, 
                 OpenPositionsJson = JsonConvert.SerializeObject(_openPositions.Values),
-                AsOfDate = DateTime.UtcNow
+                AsOfDate = DateTime.UtcNow,
             };
+        }
+
+        public PortfolioStateModel GetPortfolioState(Dictionary<string, decimal> currentPrices)
+        {
+            decimal totalUnrealizedPnL = 0;
+            decimal marketValueOfPositions = 0;
+
+            foreach (var position in _openPositions.Values)
+            {
+                if (currentPrices.TryGetValue(position.Symbol, out var currentPrice))
+                {
+                    var pnl = (currentPrice - position.EntryPrice) * position.Quantity;
+                    totalUnrealizedPnL += pnl;
+
+                    marketValueOfPositions += (currentPrice * position.Quantity);
+                }
+                else
+                {
+                    marketValueOfPositions += (position.EntryPrice * position.Quantity);
+                    _logger.LogWarning("No current price found for {Symbol} during state snapshot.", position.Symbol);
+                }
+            }
+
+            return new PortfolioStateModel
+            {
+                SessionId = _sessionId,
+                Cash = _currentCash,
+                OpenPositionsJson = JsonConvert.SerializeObject(_openPositions.Values),
+                AsOfDate = DateTime.UtcNow,
+
+                UnrealizedPnL = totalUnrealizedPnL,
+
+                TotalEquity = _currentCash + marketValueOfPositions
+            };
+        }
+
+
+        public bool HasOpenPosition(string symbol)
+        {
+            return _openPositions.Values.Any(p => p.Symbol == symbol);
         }
     }
 }

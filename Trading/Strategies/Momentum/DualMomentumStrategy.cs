@@ -54,5 +54,15 @@ namespace Temperance.Services.Trading.Strategies.Momentum
             var safeAssetMomentum = CalculateMomentum(safeAssetData);
             return winnerMomentum > safeAssetMomentum;
         }
+
+        public void UpdateParameters(Dictionary<string, object> newParameters)
+        {
+            throw new NotImplementedException();
+        }
+
+        public void UpdateParameters(Dictionary<string, string> newParameters)
+        {
+            throw new NotImplementedException();
+        }
     }
 }

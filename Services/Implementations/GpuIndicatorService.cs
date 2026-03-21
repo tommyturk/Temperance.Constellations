@@ -1,169 +1,215 @@
 ﻿using ILGPU;
 using ILGPU.Algorithms;
 using ILGPU.Runtime;
-using ILGPU.Runtime.Cuda;
-using Temperance.Ephemeris.Models.Prices;
+using Microsoft.Extensions.Logging;
+using System.Collections.Generic;
 using Temperance.Constellations.Services.Interfaces;
+using Temperance.Ephemeris.Models.Prices;
+
 namespace Temperance.Services.Services.Implementations
 {
-    public class GpuIndicatorService : IGpuIndicatorService
+    public class GpuIndicatorService : IGpuIndicatorService, IDisposable
     {
-        private readonly Context _context;
         private readonly Accelerator _accelerator;
         private readonly ILogger<GpuIndicatorService> _logger;
+
         public GpuIndicatorService(ILogger<GpuIndicatorService> logger, Accelerator accelerator)
         {
-            _context = Context.Create(builder => builder.Cuda());
-            //_accelerator = _context.GetPreferredDevice(preferCPU: false).CreateAccelerator(_context);
             _accelerator = accelerator;
             _logger = logger;
         }
 
-        public async Task<Dictionary<string, decimal[]>> CalculateIndicatorsAsync(IReadOnlyList<PriceModel> historicalWindow, 
-            int strategyMinimumLookback, int atrPeriod, decimal stdDevMultiplier, decimal[] rsi)
+        // --- NEW BULK METHOD ---
+        public async Task<Dictionary<DateTime, Dictionary<string, decimal>>> CalculateBulkIndicatorsAsync(
+            List<PriceModel> prices,
+            Dictionary<string, object> parameters)
         {
-            var highPrices = historicalWindow.Select(p => p.HighPrice).ToArray();
-            var lowPrices = historicalWindow.Select(p => p.LowPrice).ToArray();
-            var closePrices = historicalWindow.Select(p => p.ClosePrice).ToArray();
+            if (prices == null || prices.Count == 0) return new();
 
-            var movingAverage = CalculateSma(closePrices, strategyMinimumLookback);
-            var standardDeviation = CalculateStdDev(closePrices, strategyMinimumLookback);
-            var atr = CalculateAtr(highPrices, lowPrices, closePrices, atrPeriod);
-            var upperBand = movingAverage.Zip(standardDeviation, (m, s) => m + (stdDevMultiplier * s)).ToArray();  
-            var lowerBand = movingAverage.Zip(standardDeviation, (m, s) => m - (stdDevMultiplier * s)).ToArray();
-
-            return new Dictionary<string, decimal[]>
+            // The "Swiss Army Knife" of parsers
+            T Parse<T>(T defaultValue, params string[] keys)
             {
-                { "SMA", movingAverage }, { "ATR", atr }, { "UpperBand", upperBand }, { "LowerBand", lowerBand },
-                { "RSI", rsi }
-            };
-        }
+                foreach (var key in keys)
+                {
+                    if (!parameters.TryGetValue(key, out var val) || val == null) continue;
 
-        public decimal[] CalculateAtr(decimal[] high, decimal[] low, decimal[] close, int period)
-        {
-            if (_accelerator == null) throw new InvalidOperationException("GPU Accelerator not found");
-            if (high.Length <= period) return new decimal[high.Length];
+                    if (val is System.Text.Json.JsonElement element)
+                    {
+                        if (typeof(T) == typeof(int)) return (T)(object)element.GetInt32();
+                        if (typeof(T) == typeof(double)) return (T)(object)element.GetDouble();
+                        if (typeof(T) == typeof(decimal)) return (T)(object)element.GetDecimal();
+                    }
 
-            using var highBuffer = _accelerator.Allocate1D(high);
-            using var lowBuffer = _accelerator.Allocate1D(low);
-            using var closeBuffer = _accelerator.Allocate1D(close);
-            using var trueRangeBuffer = _accelerator.Allocate1D<decimal>(high.Length);
+                    try { return (T)Convert.ChangeType(val, typeof(T)); }
+                    catch { /* try next key */ }
+                }
+                return defaultValue;
+            }
 
-            var loadedKernel = _accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<decimal>, ArrayView<decimal>, ArrayView<decimal>, ArrayView<decimal>>(TrueRangeKernel);
-            loadedKernel(high.Length, highBuffer.View, lowBuffer.View, closeBuffer.View, trueRangeBuffer.View);
+            // --- MAPPING YOUR CPO KEYS TO GPU VARIABLES ---
+
+            // MaPeriod: checks "MovingAveragePeriod" then falls back to "MaPeriod"
+            int maPeriod = Parse(20, "MovingAveragePeriod", "MaPeriod");
+
+            // StdDevMult: checks "StdDevMultiplier"
+            double stdDevMult = Parse(2.0, "StdDevMultiplier");
+
+            // RsiPeriod: checks "RSIPeriod" (Note the casing!)
+            int rsiPeriod = Parse(14, "RSIPeriod", "RsiPeriod");
+
+            // AtrPeriod: checks "AtrPeriod"
+            int atrPeriod = Parse(14, "AtrPeriod");
+
+            // Other params from your list (in case you need them later)
+            double rsiOversold = Parse(30.0, "RSIOversold");
+            double rsiOverbought = Parse(70.0, "RSIOverbought");
+            double atrMult = Parse(2.5, "AtrMultiplier");
+            int n = prices.Count;
+            var timestamps = prices.Select(p => p.Timestamp).ToList();
+
+            var highD = prices.Select(p => (double)p.HighPrice).ToArray();
+            var lowD = prices.Select(p => (double)p.LowPrice).ToArray();
+            var closeD = prices.Select(p => (double)p.ClosePrice).ToArray();
+
+            using var closeBuffer = _accelerator.Allocate1D(closeD);
+            using var highBuffer = _accelerator.Allocate1D(highD);
+            using var lowBuffer = _accelerator.Allocate1D(lowD);
+            using var smaBuffer = _accelerator.Allocate1D<double>(n);
+            using var stdDevBuffer = _accelerator.Allocate1D<double>(n);
+            using var trBuffer = _accelerator.Allocate1D<double>(n);
+            using var rsiBuffer = _accelerator.Allocate1D<double>(n);
+
+            var smaKernel = _accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<double>, ArrayView<double>, int>(SmaKernel);
+            var stdDevKernel = _accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<double>, ArrayView<double>, int>(StdDevKernel);
+            var trKernel = _accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<double>, ArrayView<double>, ArrayView<double>, ArrayView<double>>(TrueRangeKernel);
+            var rsiKernel = _accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<double>, ArrayView<double>, int>(RsiKernel);
+
+            smaKernel(n, closeBuffer.View, smaBuffer.View, maPeriod);
+            stdDevKernel(n, closeBuffer.View, stdDevBuffer.View, maPeriod);
+            trKernel(n, highBuffer.View, lowBuffer.View, closeBuffer.View, trBuffer.View);
+            rsiKernel(n, closeBuffer.View, rsiBuffer.View, rsiPeriod);
+
             _accelerator.Synchronize();
 
-            var trueRanges = trueRangeBuffer.GetAsArray1D();
+            var sma = smaBuffer.GetAsArray1D();
+            var stdDev = stdDevBuffer.GetAsArray1D();
+            var tr = trBuffer.GetAsArray1D();
+            var rsi = rsiBuffer.GetAsArray1D();
+            var atr = CalculateAtrSmoothing(tr, atrPeriod);
 
-            var atr = new decimal[high.Length];
-
-            decimal initialAtrSum = 0.0m;
-            for (int i = 1; i <= period; i++)
+            var results = new Dictionary<DateTime, Dictionary<string, decimal>>();
+            for (int i = 0; i < n; i++)
             {
-                initialAtrSum += trueRanges[i];
+                results[timestamps[i]] = new Dictionary<string, decimal>
+                {
+                    { "SMA", (decimal)sma[i] },
+                    { "RSI", (decimal)rsi[i] },
+                    { "ATR", (decimal)atr[i] },
+                    { "UpperBand", (decimal)(sma[i] + (stdDevMult * stdDev[i])) },
+                    { "LowerBand", (decimal)(sma[i] - (stdDevMult * stdDev[i])) }
+                };
             }
-            atr[period] = initialAtrSum / period;
-
-            for (int i = period + 1; i < high.Length; i++)
-            {
-                atr[i] = ((atr[i - 1] * (period - 1)) + trueRanges[i]) / period;
-            }
-
-            return atr;
+            return results;
         }
 
-        private static void TrueRangeKernel(Index1D index,
-                                    ArrayView<decimal> high,
-                                    ArrayView<decimal> low,
-                                    ArrayView<decimal> close,
-                                    ArrayView<decimal> output)
-        {
-            if (index == 0)
-            {
-                output[index] = 0;
-                return;
-            }
-            double highLow = (double)(high[index] - low[index]);
-            double highPrevClose = XMath.Abs((double)(high[index] - close[index - 1]));
-            double lowPrevClose = XMath.Abs((double)(low[index] - close[index - 1]));
-            output[index] = (decimal)XMath.Max(highLow, XMath.Max(highPrevClose, lowPrevClose));
-        }
+        // --- INTERFACE MANDATED METHODS (NOW PUBLIC) ---
 
         public decimal[] CalculateSma(decimal[] prices, int period)
         {
-            var output = new decimal[prices.Length];
-
-            using var priceBuffer = _accelerator.Allocate1D(prices);
-            using var outputBuffer = _accelerator.Allocate1D<decimal>(prices.Length);
-
-            var loadedKernel = _accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<decimal>, ArrayView<decimal>, int>(SmaKernel);
-
-            loadedKernel(prices.Length, priceBuffer.View, outputBuffer.View, period);
-
+            var pricesD = Array.ConvertAll(prices, p => (double)p);
+            using var pBuffer = _accelerator.Allocate1D(pricesD);
+            using var oBuffer = _accelerator.Allocate1D<double>(prices.Length);
+            var kernel = _accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<double>, ArrayView<double>, int>(SmaKernel);
+            kernel((int)prices.Length, pBuffer.View, oBuffer.View, period);
             _accelerator.Synchronize();
-            return outputBuffer.GetAsArray1D();
+            return Array.ConvertAll(oBuffer.GetAsArray1D(), d => (decimal)d);
         }
 
         public decimal[] CalculateStdDev(decimal[] prices, int period)
         {
-            if (_accelerator == null) throw new InvalidOperationException("GPU accelerator is not initialized.");
-            if (prices == null || prices.Length < period) return new decimal[prices.Length];
-
-            var pricesAsDouble = Array.ConvertAll(prices, p => (decimal)p);
-
-            using var priceBuffer = _accelerator.Allocate1D(pricesAsDouble);
-            using var outputBuffer = _accelerator.Allocate1D<decimal>(prices.Length);
-
-            var loadedKernel = _accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<decimal>, ArrayView<decimal>, int>(StdDevKernel);
-            loadedKernel(prices.Length, priceBuffer.View, outputBuffer.View, period);
+            var pricesD = Array.ConvertAll(prices, p => (double)p);
+            using var pBuffer = _accelerator.Allocate1D(pricesD);
+            using var oBuffer = _accelerator.Allocate1D<double>(prices.Length);
+            var kernel = _accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<double>, ArrayView<double>, int>(StdDevKernel);
+            kernel((int)prices.Length, pBuffer.View, oBuffer.View, period);
             _accelerator.Synchronize();
-            var resultAsDouble = outputBuffer.GetAsArray1D();
-            return Array.ConvertAll(resultAsDouble, d => (decimal)d);
+            return Array.ConvertAll(oBuffer.GetAsArray1D(), d => (decimal)d);
         }
 
-        
-
-        private static void StdDevKernel(Index1D index, ArrayView<decimal> prices, ArrayView<decimal> output, int period)
+        public decimal[] CalculateAtr(decimal[] high, decimal[] low, decimal[] close, int period)
         {
-            if (index < period - 1)
-            {
-                output[index] = 0;
-                return;
-            }
-            decimal sum = 0.0m;
-            for (int i = 0; i < period; i++)
-            {
-                sum += prices[index - i];
-            }
-            decimal mean = sum / period;
-            decimal sumOfSquares = 0.0m;
-            for (int i = 0; i < period; i++)
-            {
-                decimal deviation = prices[index - i] - mean;
-                sumOfSquares += deviation * deviation;
-            }
+            var hD = Array.ConvertAll(high, p => (double)p);
+            var lD = Array.ConvertAll(low, p => (double)p);
+            var cD = Array.ConvertAll(close, p => (double)p);
+            using var hB = _accelerator.Allocate1D(hD);
+            using var lB = _accelerator.Allocate1D(lD);
+            using var cB = _accelerator.Allocate1D(cD);
+            using var trB = _accelerator.Allocate1D<double>(high.Length);
 
-            decimal variance = sumOfSquares / (period - 1);
+            var kernel = _accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<double>, ArrayView<double>, ArrayView<double>, ArrayView<double>>(TrueRangeKernel);
+            kernel((int)high.Length, hB.View, lB.View, cB.View, trB.View);
+            _accelerator.Synchronize();
 
-            output[index] = (decimal)Math.Sqrt((double)variance);
+            return Array.ConvertAll(CalculateAtrSmoothing(trB.GetAsArray1D(), period), d => (decimal)d);
         }
 
-        private static void SmaKernel(Index1D index, ArrayView<decimal> prices, ArrayView<decimal> output, int period)
+        // --- INTERNAL LOGIC & KERNELS ---
+
+        private double[] CalculateAtrSmoothing(double[] trueRanges, int period)
+        {
+            int n = trueRanges.Length;
+            double[] atr = new double[n];
+            if (n <= period) return atr; 
+            double sum = 0;
+            for (int i = 1; i <= period; i++) sum += trueRanges[i];
+            atr[period] = sum / period;
+            for (int i = period + 1; i < n; i++) atr[i] = (atr[i - 1] * (period - 1) + trueRanges[i]) / period;
+            return atr;
+        }
+
+        private static void SmaKernel(Index1D index, ArrayView<double> prices, ArrayView<double> output, int period)
         {
             if (index < period - 1) return;
-
-            decimal sum = 0;
-            for (int i = 0; i < period; i++)
-            {
-                sum += prices[index - i];
-            }
+            double sum = 0;
+            for (int i = 0; i < period; i++) sum += prices[index - i];
             output[index] = sum / period;
         }
 
-        public void Dispose()
+        private static void StdDevKernel(Index1D index, ArrayView<double> prices, ArrayView<double> output, int period)
         {
-            _accelerator.Dispose();
-            _context.Dispose();
+            if (index < period - 1) return;
+            double sum = 0;
+            for (int i = 0; i < period; i++) sum += prices[index - i];
+            double mean = sum / period;
+            double sumSq = 0;
+            for (int i = 0; i < period; i++)
+            {
+                double diff = prices[index - i] - mean;
+                sumSq += diff * diff;
+            }
+            output[index] = XMath.Sqrt(sumSq / (period - 1));
         }
+
+        private static void RsiKernel(Index1D index, ArrayView<double> prices, ArrayView<double> output, int period)
+        {
+            if (index < period) return;
+            double gains = 0, losses = 0;
+            for (int i = 0; i < period; i++)
+            {
+                double diff = prices[index - i] - prices[index - i - 1];
+                if (diff > 0) gains += diff; else losses -= diff;
+            }
+            output[index] = (gains + losses == 0) ? 50 : 100 * (gains / period) / ((gains / period) + (losses / period));
+        }
+
+        private static void TrueRangeKernel(Index1D index, ArrayView<double> high, ArrayView<double> low, ArrayView<double> close, ArrayView<double> output)
+        {
+            if (index == 0) { output[index] = 0; return; }
+            output[index] = XMath.Max(high[index] - low[index],
+                           XMath.Max(XMath.Abs(high[index] - close[index - 1]),
+                                     XMath.Abs(low[index] - close[index - 1])));
+        }
+
+        public void Dispose() { _accelerator?.Dispose(); }
     }
 }

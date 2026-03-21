@@ -157,5 +157,15 @@ namespace Temperance.Services.Trading.Strategies.Momentum
         {
             return activeTrade;
         }
+
+        public void UpdateParameters(Dictionary<string, object> newParameters)
+        {
+            throw new NotImplementedException();
+        }
+
+        public void UpdateParameters(Dictionary<string, string> newParameters)
+        {
+            throw new NotImplementedException();
+        }
     }
 }

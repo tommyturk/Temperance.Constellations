@@ -2,8 +2,11 @@
 using Microsoft.Data.SqlClient;
 using System.Data;
 using Temperance.Constellations.Repositories.Interfaces;
+using Temperance.Ephemeris.Definitions;
 using Temperance.Ephemeris.Models.Prices;
+using Temperance.Ephemeris.Utilities.Constants;
 using Temperance.Ephemeris.Utilities.Helpers;
+using Temperance.Services.BackTesting.Implementations;
 
 namespace Temperance.Constellations.src.Data.Repositories.HistoricalPrices.Implementations
 {
@@ -25,8 +28,8 @@ namespace Temperance.Constellations.src.Data.Repositories.HistoricalPrices.Imple
         public async Task<List<PriceModel>> GetSecurityHistoricalPrices(string symbol, string interval)
         {
             await using var connection = CreateConnection();
-            var tableName = _sqlHelper.SanitizeTableName(symbol, interval);
-            await _sqlHelper.EnsureTableExists(tableName);
+            var tableName = _sqlHelper.SanitizeTableName(SchemaConstants.Prices, symbol, interval);
+            await _sqlHelper.EnsureTableExists(tableName, interval, new PriceTableDefinition());
 
             string query = $"SELECT * FROM {tableName} WHERE Symbol = @Symbol AND TimeInterval = @TimeInterval ORDER BY [Timestamp]";
             var prices = await connection.QueryAsync<PriceModel>(query, new { Symbol = symbol, TimeInterval = interval });
@@ -36,8 +39,8 @@ namespace Temperance.Constellations.src.Data.Repositories.HistoricalPrices.Imple
         public async Task<DateTime?> GetMostRecentTimestamp(string symbol, string interval)
         {
             await using var connection = CreateConnection();
-            var tableName = _sqlHelper.SanitizeTableName(symbol, interval);
-            await _sqlHelper.EnsureTableExists(tableName);
+            var tableName = _sqlHelper.SanitizeTableName(SchemaConstants.Prices, symbol, interval);
+            await _sqlHelper.EnsureTableExists(tableName, interval, new PriceTableDefinition());
 
             var query = $"SELECT TOP 1 Timestamp FROM {tableName} WHERE Symbol = @Symbol AND TimeInterval = @TimeInterval ORDER BY Timestamp DESC";
             return await connection.QueryFirstOrDefaultAsync<DateTime?>(query, new { Symbol = symbol, TimeInterval = interval });
@@ -65,8 +68,8 @@ namespace Temperance.Constellations.src.Data.Repositories.HistoricalPrices.Imple
             if (securityId == 0 || !prices.Any()) return false;
 
             var symbol = prices.First().Symbol;
-            var tableName = _sqlHelper.SanitizeTableName(symbol, timeInterval);
-            await _sqlHelper.EnsureTableExists(tableName);
+            var tableName = _sqlHelper.SanitizeTableName(SchemaConstants.Prices, symbol, timeInterval);
+            await _sqlHelper.EnsureTableExists(tableName, timeInterval, new PriceTableDefinition());
 
             await using var connection = CreateConnection();
             await connection.OpenAsync();
@@ -117,7 +120,7 @@ namespace Temperance.Constellations.src.Data.Repositories.HistoricalPrices.Imple
 
         public async Task<List<PriceModel>> GetHistoricalPrices(string symbol, string interval)
         {
-            var tableName = _sqlHelper.SanitizeTableName(symbol, interval);
+            var tableName = _sqlHelper.SanitizeTableName(SchemaConstants.Prices, symbol, interval);
             string sql = $@"
                 SELECT [OpenPrice] AS OpenPrice, [HighPrice] AS HighPrice, [LowPrice] AS LowPrice, [ClosePrice] AS ClosePrice, [Volume] AS Volume, [Timestamp] AS Timestamp
                 FROM {tableName}
@@ -145,7 +148,7 @@ namespace Temperance.Constellations.src.Data.Repositories.HistoricalPrices.Imple
         {
             await using var connection = CreateConnection();
             var parameters = new { Symbol = symbol, TimeInterval = timeInterval, StartDate = startDate, EndDate = endDate };
-            var tableName = _sqlHelper.SanitizeTableName(symbol, timeInterval);
+            var tableName = _sqlHelper.SanitizeTableName(SchemaConstants.Prices, symbol, timeInterval);
             var query = $"SELECT * FROM {tableName} WHERE Symbol = @Symbol AND TimeInterval = @TimeInterval AND Timestamp >= @StartDate AND Timestamp <= @EndDate";
             var result = await connection.QueryAsync<PriceModel>(query, parameters);
             return result.ToList();
@@ -154,12 +157,28 @@ namespace Temperance.Constellations.src.Data.Repositories.HistoricalPrices.Imple
         public async Task<List<PriceModel>> GetHistoricalPrices(string symbol, string interval, DateTime startDate, DateTime endDate)
         {
             await using var connection = CreateConnection();
-            var tableName = _sqlHelper.SanitizeTableName(symbol, interval);
+
+            var tableName = $"Historical.[Prices].[{symbol}_{interval}]";
+
             try
             {
-                return (await connection.QueryAsync<PriceModel>(
-                    $"SELECT * FROM {tableName} WHERE Timestamp >= @StartDate AND Timestamp <= @EndDate ORDER BY Timestamp",
-                    new { StartDate = startDate, EndDate = endDate })).ToList();
+
+                var query = $@"
+                    SELECT 
+                        [SecurityID], [Symbol], [Timestamp], [OpenPrice], 
+                        [HighPrice], [LowPrice], [ClosePrice], [Volume], [TimeInterval]
+                    FROM {tableName} 
+                    WHERE [Timestamp] >= @StartDate 
+                      AND [Timestamp] <= @EndDate 
+                    ORDER BY [Timestamp]";
+
+                var results = await connection.QueryAsync<PriceModel>(query, new
+                {
+                    StartDate = startDate,
+                    EndDate = endDate
+                });
+
+                return results.ToList();
             }
             catch (SqlException ex) when (ex.Number == 208)
             {
@@ -175,15 +194,20 @@ namespace Temperance.Constellations.src.Data.Repositories.HistoricalPrices.Imple
             {
                 foreach (var interval in intervals)
                 {
-                    var tableName = _sqlHelper.SanitizeTableName(symbol, interval);
-                    await _sqlHelper.EnsureTableExists(tableName);
+                    var tableName = _sqlHelper.SanitizeTableName(SchemaConstants.Prices, symbol, interval);
+                    await _sqlHelper.EnsureTableExists(tableName, interval, new PriceTableDefinition());
                     var query = $"SELECT * FROM {tableName}";
                     if (startDate.HasValue)
                         query += " WHERE Timestamp >= @StartDate";
                     if( endDate.HasValue)
                         query += startDate.HasValue ? " AND Timestamp <= @EndDate" : " WHERE Timestamp <= @EndDate";
 
-                    data.AddRange(await connection.QueryAsync<PriceModel>(query));
+                    var results = await connection.QueryAsync<PriceModel>(query, new
+                    {
+                        StartDate = startDate,
+                        EndDate = endDate
+                    });
+                    data.AddRange(results);
                 }
             }
             return data.ToList();
@@ -192,8 +216,8 @@ namespace Temperance.Constellations.src.Data.Repositories.HistoricalPrices.Imple
         public async Task<bool> CheckIfBackfillExists(string symbol, string interval)
         {
             await using var connection = CreateConnection();
-            var tableName = _sqlHelper.SanitizeTableName(symbol, interval);
-            await _sqlHelper.EnsureTableExists(tableName);
+            var tableName = _sqlHelper.SanitizeTableName(SchemaConstants.Prices, symbol, interval);
+            await _sqlHelper.EnsureTableExists(tableName, interval, new PriceTableDefinition());
 
             var query = $"SELECT CASE WHEN (SELECT COUNT(DISTINCT YEAR([Timestamp])) FROM {tableName}) > 20 THEN CAST(1 AS BIT) ELSE CAST(0 AS BIT) END AS Result;";
             return await connection.QueryFirstOrDefaultAsync<bool>(query);
@@ -202,8 +226,8 @@ namespace Temperance.Constellations.src.Data.Repositories.HistoricalPrices.Imple
         public async Task<bool> DeleteHistoricalPrices(string symbol, string interval)
         {
             await using var connection = CreateConnection();
-            var tableName = _sqlHelper.SanitizeTableName(symbol, interval);
-            await _sqlHelper.EnsureTableExists(tableName);
+            var tableName = _sqlHelper.SanitizeTableName(SchemaConstants.Prices, symbol, interval);
+            await _sqlHelper.EnsureTableExists(tableName, interval, new PriceTableDefinition());
             var query = $"DROP TABLE {tableName}";
             return await connection.ExecuteAsync(query) > 0;
         }

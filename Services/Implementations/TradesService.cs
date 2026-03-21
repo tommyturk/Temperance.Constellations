@@ -34,9 +34,9 @@ namespace Temperance.Constellations.Services.Implementations
             return await _tradeRepository.ExecuteOrderAsync(order);
         }
 
-        public Task<int> LogStrategyAsync(StrategyLog log)
+        public async Task<int> LogStrategyAsync(StrategyLog log)
         {
-            return _tradeRepository.LogStrategyAsync(log);
+            return await _tradeRepository.LogStrategyAsync(log);
         }
 
         public async Task<int> SaveTradeAsync(Trade trade)
@@ -56,13 +56,12 @@ namespace Temperance.Constellations.Services.Implementations
 
         public async Task InitializeBacktestRunAsync(BacktestConfiguration config, Guid runId)
         {
-            _logger.LogInformation("Service request to initialize backtest run {RunId}", runId);
             await _tradeRepository.InitializeBacktestRunAsync(runId, config);
         }
 
-        public Task<(decimal Cash, List<Models.Trading.Position> OpenPositions)?> GetLatestPortfolioStateAsync(Guid sessionId)
+        public async Task<(decimal Cash, List<Models.Trading.Position> OpenPositions)?> GetLatestPortfolioStateAsync(Guid sessionId)
         {
-            return _tradeRepository.GetLatestPortfolioStateAsync(sessionId);
+            return await _tradeRepository.GetLatestPortfolioStateAsync(sessionId);
         }
 
         public async Task InitializePairBacktestRunAsync(PairsBacktestConfiguration config, Guid runId)
@@ -87,7 +86,6 @@ namespace Temperance.Constellations.Services.Implementations
 
         public async Task UpdateBacktestRunStatusAsync(Guid runId, string status, string? errorMessage = null)
         {
-            _logger.LogInformation($"Service request to update status for backtest run {runId} to {status}");
             await _tradeRepository.UpdateBacktestRunStatusAsync(runId, status, DateTime.UtcNow, errorMessage);
         }
 
@@ -134,29 +132,34 @@ namespace Temperance.Constellations.Services.Implementations
             throw new NotImplementedException();
         }
 
-        public Task<IEnumerable<WalkForwardSleeve>> GetSleevesForSessionAsync(Guid sessionId, DateTime tradingPeriodStartDate)
+        public async Task<IEnumerable<WalkForwardSleeve>> GetSleevesForSessionAsync(Guid sessionId, DateTime tradingPeriodStartDate)
         {
-            return _tradeRepository.GetSleevesForSessionAsync(sessionId, tradingPeriodStartDate);
+            return await _tradeRepository.GetSleevesForSessionAsync(sessionId, tradingPeriodStartDate);
         }
 
-        public Task<WalkForwardSessionModel?> GetSessionAsync(Guid sessionId)
+        public async Task<WalkForwardSessionModel?> GetSessionAsync(Guid sessionId)
         {
-            return _tradeRepository.GetSessionAsync(sessionId);
+            return await _tradeRepository.GetSessionAsync(sessionId);
         }
 
-        public Task UpdateSessionCapitalAsync(Guid sessionId, decimal newCapital)
+        public async Task UpdateSessionCapitalAsync(Guid sessionId, decimal newCapital)
         {
-            return _tradeRepository.UpdateSessionCapitalAsync(sessionId, newCapital);
+            await _tradeRepository.UpdateSessionCapitalAsync(sessionId, newCapital);
         }
 
-        public Task<IEnumerable<BacktestRunModel>> GetBacktestRunsForSessionAsync(Guid sessionId, DateTime startDate, DateTime endDate)
+        public async Task<IEnumerable<BacktestRunModel>> GetBacktestRunsForSessionAsync(Guid sessionId, DateTime startDate, DateTime endDate)
         {
-            return _tradeRepository.GetBacktestRunsForSessionAsync(sessionId, startDate, endDate);
+            return await _tradeRepository.GetBacktestRunsForSessionAsync(sessionId, startDate, endDate);
         }
 
-        public Task SaveSleevesAsync(IEnumerable<WalkForwardSleeve> sleeves)
+        public async Task SaveSleevesAsync(IEnumerable<WalkForwardSleeve> sleeves)
         {
-            return _tradeRepository.SaveSleevesAsync(sleeves);
+            await _tradeRepository.SaveSleevesAsync(sleeves);
+        }
+
+        public async Task SaveTradesBulkAsync(IEnumerable<TradeSummary> trades)
+        {
+            await _tradeRepository.SaveTradesBulkAsync(trades);
         }
     }
 }

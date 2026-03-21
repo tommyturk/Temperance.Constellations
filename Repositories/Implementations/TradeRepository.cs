@@ -114,9 +114,14 @@ namespace Temperance.Constellations.Repositories.Implementations
         {
             const string sql = @"
             INSERT INTO [TradingBotDb].[Constellations].[BacktestRuns] 
-                (RunId, SessionId, StrategyName, SymbolsJson, IntervalsJson, StartDate, EndDate, InitialCapital, Status, StartTime)
+                (RunId, SessionId, StrategyName, SymbolsJson, IntervalsJson, 
+                 StartDate, EndDate, InitialCapital, 
+                 Status, StartTime, TotalTrades, SharpeRatio, MaxDrawdown)
             VALUES 
-                (@RunId, @SessionId, @StrategyName, @SymbolsJson, @IntervalsJson, @StartDate, @EndDate, @InitialCapital, 'Queued', @StartTime);";
+                (@RunId, @SessionId, @StrategyName, @SymbolsJson, @IntervalsJson, 
+                 @StartDate, @EndDate, @InitialCapital, 
+                 'Running', @StartTime, 0, 0, 0);";
+
             try
             {
                 using var connection = CreateConnection();
@@ -132,13 +137,37 @@ namespace Temperance.Constellations.Repositories.Implementations
                     config.InitialCapital,
                     StartTime = DateTime.UtcNow
                 });
-                _logger.LogInformation("Initialized backtest run {RunId} for Session {SessionId} in database.", runId, config.SessionId);
+                _logger.LogInformation("Initialized backtest run {RunId} in database.", runId);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Failed to initialize backtest run {RunId} in database.", runId);
+                _logger.LogError(ex, "Failed to initialize backtest run {RunId}.", runId);
                 throw;
             }
+        }
+
+        public async Task FinalizeBacktestRunAsync(Guid runId, decimal finalCapital, int totalTrades, decimal sharpe, decimal mdd)
+        {
+            const string sql = @"
+                UPDATE [TradingBotDb].[Constellations].[BacktestRuns]
+                SET Status = 'Completed',
+                    EndTime = @EndTime,
+                    CurrentCapital = @FinalCapital,
+                    TotalTrades = @TotalTrades,
+                    SharpeRatio = @Sharpe,
+                    MaxDrawdown = @MDD
+                WHERE RunId = @RunId;";
+
+            using var connection = CreateConnection();
+            await connection.ExecuteAsync(sql, new
+            {
+                RunId = runId,
+                EndTime = DateTime.UtcNow,
+                FinalCapital = finalCapital,
+                TotalTrades = totalTrades,
+                Sharpe = sharpe,
+                MDD = mdd
+            });
         }
 
         public async Task UpdateBacktestRunStatusAsync(Guid runId, string status, DateTime timestamp, string? errorMessage = null)
@@ -451,6 +480,73 @@ namespace Temperance.Constellations.Repositories.Implementations
             {
                 return await connection.QuerySingleOrDefaultAsync<TradeSummary>(sql, new { PositionId = positionId });
             }
+        }
+
+        public async Task SaveTradesBulkAsync(IEnumerable<TradeSummary> trades)
+        {
+            foreach (var trade in trades)
+            {
+                trade.CreatedDate = DateTime.UtcNow;
+            }
+
+            const string sql = @"
+                INSERT INTO [TradingBotDb].[Constellations].[BacktestTrades]
+                (
+                    [Id]
+                    ,[RunId]
+                    ,[Symbol]
+                    ,[Interval]
+                    ,[StrategyName]
+                    ,[EntryDate]
+                    ,[ExitDate]
+                    ,[EntryPrice]
+                    ,[ExitPrice]
+                    ,[Quantity]
+                    ,[Direction]
+                    ,[ProfitLoss]
+                    ,[CreatedDate]
+                    ,[CommissionCost]
+                    ,[SlippageCost]
+                    ,[OtherTransactionCost]
+                    ,[TotalTransactionCost]
+                    ,[GrossProfitLoss]
+                    ,[HoldingPeriodMinutes]
+                    ,[MaxAdverseExcursion]
+                    ,[MaxFavorableExcursion]
+                    ,[EntryReason]
+                    ,[ExitReason]
+                )
+                VALUES
+                (
+                    @Id
+                    ,@RunId
+                    ,@Symbol
+                    ,@Interval
+                    ,@StrategyName
+                    ,@EntryDate
+                    ,@ExitDate
+                    ,@EntryPrice
+                    ,@ExitPrice
+                    ,@Quantity
+                    ,@Direction
+                    ,@ProfitLoss
+                    ,@CreatedDate
+                    ,@CommissionCost
+                    ,@SlippageCost
+                    ,@OtherTransactionCost
+                    ,@TotalTransactionCost
+                    ,@GrossProfitLoss
+                    ,@HoldingPeriodMinutes
+                    ,@MaxAdverseExcursion
+                    ,@MaxFavorableExcursion
+                    ,@EntryReason
+                    ,@ExitReason
+                );";
+
+            using var connection = new SqlConnection(_connectionString);
+
+            // Dapper iterates over the 'trades' collection and executes this safely for each one.
+            await connection.ExecuteAsync(sql, trades);
         }
     }
 }
