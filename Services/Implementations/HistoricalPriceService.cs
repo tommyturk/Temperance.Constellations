@@ -10,118 +10,115 @@ namespace Temperance.Constellations.src.Core.Services.Implementations
     public class HistoricalPriceService : IHistoricalPriceService
     {
         private readonly IHistoricalPriceRepository _historicalPricesRepository;
-        private readonly IAlphaVantageService _alphaVantageService;
         private readonly ISecuritiesOverviewService _securitiesOverviewService;
         private readonly ConcurrentDictionary<string, (Task task, CancellationTokenSource cts, BackfillStatus status)> _activeBackfills = new();
 
         public HistoricalPriceService(
             IHistoricalPriceRepository historicalPricesRepository,
-            IAlphaVantageService alphaVantageService,
             ISecuritiesOverviewService securitiesOverviewService)
         {
             _historicalPricesRepository = historicalPricesRepository;
-            _alphaVantageService = alphaVantageService;
             _securitiesOverviewService = securitiesOverviewService;
         }
 
-        public async Task<bool> RunBacktestAsync(string symbol, string interval)
-        {
-            bool checkIfBackfillExists = await _historicalPricesRepository.CheckIfBackfillExists(symbol, interval);
-            if (checkIfBackfillExists)
-                return checkIfBackfillExists;
+        //public async Task<bool> RunBacktestAsync(string symbol, string interval)
+        //{
+        //    bool checkIfBackfillExists = await _historicalPricesRepository.CheckIfBackfillExists(symbol, interval);
+        //    if (checkIfBackfillExists)
+        //        return checkIfBackfillExists;
 
-            Console.WriteLine("Active Back Fills: ", _activeBackfills);
+        //    Console.WriteLine("Active Back Fills: ", _activeBackfills);
 
-            var cts = new CancellationTokenSource();
-            var status = new BackfillStatus
-            {
-                Symbol = symbol,
-                Interval = interval,
-                Status = BackfillState.Running,
-                StartTime = DateTime.UtcNow,
-                ProgressPercentage = 0
-            };
+        //    var cts = new CancellationTokenSource();
+        //    var status = new BackfillStatus
+        //    {
+        //        Symbol = symbol,
+        //        Interval = interval,
+        //        Status = BackfillState.Running,
+        //        StartTime = DateTime.UtcNow,
+        //        ProgressPercentage = 0
+        //    };
 
-            var task = Task.Run(() => RunBacktestInternalAsync(symbol, interval, cts.Token, status), cts.Token);
+        //    var task = Task.Run(() => RunBacktestInternalAsync(symbol, interval, cts.Token, status), cts.Token);
 
-            return true;
-        }
+        //    return true;
+        //}
 
-        public async Task RunBacktestInternalAsync(string symbol, string interval, CancellationToken ct, BackfillStatus status)
-        {
-            var semaphore = new SemaphoreSlim(1, 1);
+        //public async Task RunBacktestInternalAsync(string symbol, string interval, CancellationToken ct, BackfillStatus status)
+        //{
+        //    var semaphore = new SemaphoreSlim(1, 1);
 
-            try
-            {
-                var securityId = await _securitiesOverviewService.GetSecurityId(symbol);
-                var existingData = await _historicalPricesRepository.GetSecurityHistoricalPrices(symbol, interval);
+        //    try
+        //    {
+        //        var securityId = await _securitiesOverviewService.GetSecurityId(symbol);
+        //        var existingData = await _historicalPricesRepository.GetSecurityHistoricalPrices(symbol, interval);
 
-                var totalYears = 25;
-                var monthsProcessed = 0;
-                var totalMonths = totalYears * 12;
-                var policy = Policy.Handle<Exception>()
-                                   .WaitAndRetryAsync(3, retryAttempt => TimeSpan.FromSeconds(Math.Pow(2, retryAttempt)));
+        //        var totalYears = 25;
+        //        var monthsProcessed = 0;
+        //        var totalMonths = totalYears * 12;
+        //        var policy = Policy.Handle<Exception>()
+        //                           .WaitAndRetryAsync(3, retryAttempt => TimeSpan.FromSeconds(Math.Pow(2, retryAttempt)));
 
-                var tasks = new List<Task>();
+        //        var tasks = new List<Task>();
 
-                for (int year = DateTime.UtcNow.Year - totalYears; year <= DateTime.UtcNow.Year; year++)
-                {
-                    if (ct.IsCancellationRequested)
-                        break;
+        //        for (int year = DateTime.UtcNow.Year - totalYears; year <= DateTime.UtcNow.Year; year++)
+        //        {
+        //            if (ct.IsCancellationRequested)
+        //                break;
 
-                    for (int month = 1; month <= 12; month++)
-                    {
-                        var localYear = year;
-                        var localMonth = month;
+        //            for (int month = 1; month <= 12; month++)
+        //            {
+        //                var localYear = year;
+        //                var localMonth = month;
 
-                        if (existingData.Any(d => d.Timestamp.Year == localYear && d.Timestamp.Month == localMonth))
-                            continue;
+        //                if (existingData.Any(d => d.Timestamp.Year == localYear && d.Timestamp.Month == localMonth))
+        //                    continue;
 
-                        tasks.Add(Task.Run(async () =>
-                        {
-                            await semaphore.WaitAsync(ct);
-                            try
-                            {
-                                await policy.ExecuteAsync(async () =>
-                                {
-                                    var data = await _alphaVantageService.GetIntradayDataBatch(symbol, interval, $"{localYear}-{localMonth:D2}");
-                                    if (data != null)
-                                    {
-                                        await _historicalPricesRepository.UpdateHistoricalPrices(data, symbol, interval);
-                                    }
-                                });
+        //                tasks.Add(Task.Run(async () =>
+        //                {
+        //                    await semaphore.WaitAsync(ct);
+        //                    try
+        //                    {
+        //                        await policy.ExecuteAsync(async () =>
+        //                        {
+        //                            var data = await _alphaVantageService.GetIntradayDataBatch(symbol, interval, $"{localYear}-{localMonth:D2}");
+        //                            if (data != null)
+        //                            {
+        //                                await _historicalPricesRepository.UpdateHistoricalPrices(data, symbol, interval);
+        //                            }
+        //                        });
 
-                                Interlocked.Increment(ref monthsProcessed);
-                                status.ProgressPercentage = (double)monthsProcessed / totalMonths * 100;
+        //                        Interlocked.Increment(ref monthsProcessed);
+        //                        status.ProgressPercentage = (double)monthsProcessed / totalMonths * 100;
 
-                                await Task.Delay(TimeSpan.FromSeconds(12), ct);
-                            }
-                            finally
-                            {
-                                semaphore.Release();
-                            }
-                        }, ct));
-                    }
-                }
+        //                        await Task.Delay(TimeSpan.FromSeconds(12), ct);
+        //                    }
+        //                    finally
+        //                    {
+        //                        semaphore.Release();
+        //                    }
+        //                }, ct));
+        //            }
+        //        }
 
-                await Task.WhenAll(tasks);
+        //        await Task.WhenAll(tasks);
 
-                status.Status = BackfillState.Completed;
-            }
-            catch (OperationCanceledException)
-            {
-                status.Status = BackfillState.Cancelled;
-            }
-            catch (Exception ex)
-            {
-                status.Status = BackfillState.Failed;
-                status.ErrorMessage = ex.Message;
-            }
-            finally
-            {
-                status.EndTime = DateTime.UtcNow;
-            }
-        }
+        //        status.Status = BackfillState.Completed;
+        //    }
+        //    catch (OperationCanceledException)
+        //    {
+        //        status.Status = BackfillState.Cancelled;
+        //    }
+        //    catch (Exception ex)
+        //    {
+        //        status.Status = BackfillState.Failed;
+        //        status.ErrorMessage = ex.Message;
+        //    }
+        //    finally
+        //    {
+        //        status.EndTime = DateTime.UtcNow;
+        //    }
+        //}
 
         public async Task<List<PriceModel>> GetHistoricalPrices(string symbol, string interval)
         {
@@ -142,7 +139,7 @@ namespace Temperance.Constellations.src.Core.Services.Implementations
             var existingData = await _historicalPricesRepository.GetHistoricalPricesForMonth(symbol, interval, startDate, endDate);
             if (existingData.Any(d => d.Timestamp.Year == year && d.Timestamp.Month == month))
                 return false;
-            var data = await _alphaVantageService.GetIntradayDataBatch(symbol, interval, $"{year}-{month:D2}");
+            var data = await _historicalPricesRepository.GetHistoricalPricesForMonth(symbol, interval, startDate, endDate);
             if (data != null)
             {
                 await _historicalPricesRepository.UpdateHistoricalPrices(data, symbol, interval);
@@ -206,7 +203,7 @@ namespace Temperance.Constellations.src.Core.Services.Implementations
 
         public async Task<List<PriceModel>> GetIntradayData(string symbol, string interval, DateTime? lastSavedTimestamp)
         {
-            var data = await _alphaVantageService.GetIntradayData(symbol, interval);
+            var data = await _historicalPricesRepository.GetSecurityHistoricalPrices(symbol, interval);
 
             if (lastSavedTimestamp.HasValue)
             {

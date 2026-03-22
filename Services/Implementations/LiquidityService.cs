@@ -1,19 +1,17 @@
-﻿using Microsoft.Extensions.Logging;
-using Temperance.Constellations.Models.HistoricalPriceData;
+﻿using Temperance.Constellations.Services.Interfaces;
 using Temperance.Ephemeris.Models.Prices;
-using Temperance.Constellations.Services.Interfaces;
 
 namespace Temperance.Services.Services.Implementations
 {
     public class LiquidityService : ILiquidityService
     {
-        private readonly IHistoricalPriceService _historicalPriceService;
         private readonly ILogger<LiquidityService> _logger;
+        private readonly IHistoricalPriceService _historicalPriceService;
 
-        public LiquidityService(IHistoricalPriceService historicalPriceService, ILogger<LiquidityService> logger)
+        public LiquidityService(ILogger<LiquidityService> logger, IHistoricalPriceService historicalPriceService)
         {
-            _historicalPriceService = historicalPriceService;
             _logger = logger;
+            _historicalPriceService = historicalPriceService;
         }
 
         public bool IsSymbolLiquidAtTime(string symbol, string interval, long minAverageVolume, DateTime currentTimestamp, int rollingLookbackBars,
@@ -52,35 +50,35 @@ namespace Temperance.Services.Services.Implementations
             return averageVolume >= minAverageVolume;
         }
 
-        public async Task<bool> ISymbolLiquidForPeriod(string symbol, string interval, long minADV, DateTime startDate, DateTime endDate)
-        {
-            try
-            {
-                var historicalPrices = await _historicalPriceService.GetHistoricalPrices(symbol, interval);
-                if (historicalPrices == null || !historicalPrices.Any())
-                {
-                    _logger.LogWarning("No historical prices found for symbol {Symbol} during the period {StartDate} to {EndDate}.", symbol);
-                    return false;
-                }
+        //public async Task<bool> ISymbolLiquidForPeriod(string symbol, string interval, long minADV, DateTime startDate, DateTime endDate)
+        //{
+        //    try
+        //    {
+        //        var historicalPrices = await _historicalPriceService.GetAllHistoricalPrices(symbol, interval);
+        //        if (historicalPrices == null || !historicalPrices.Any())
+        //        {
+        //            _logger.LogWarning("No historical prices found for symbol {Symbol} during the period {StartDate} to {EndDate}.", symbol);
+        //            return false;
+        //        }
 
-                long totalVolumeInPeriod = historicalPrices.Sum(x => x.Volume);
-                var totalDaysInPeriod = historicalPrices.Select(x => x.Timestamp).Distinct().Count();
-                if (totalDaysInPeriod == 0)
-                {
-                    _logger.LogWarning("No trading days found for symbol {Symbol} during the period {StartDate} to {EndDate}.", symbol);
-                    return false;
-                }
+        //        long totalVolumeInPeriod = historicalPrices.Sum(x => x.Volume);
+        //        var totalDaysInPeriod = historicalPrices.Select(x => x.Timestamp).Distinct().Count();
+        //        if (totalDaysInPeriod == 0)
+        //        {
+        //            _logger.LogWarning("No trading days found for symbol {Symbol} during the period {StartDate} to {EndDate}.", symbol);
+        //            return false;
+        //        }
 
-                double averageDailyVolume = (double)totalVolumeInPeriod / totalDaysInPeriod;
-                bool isLiquid = averageDailyVolume >= minADV;
+        //        double averageDailyVolume = (double)totalVolumeInPeriod / totalDaysInPeriod;
+        //        bool isLiquid = averageDailyVolume >= minADV;
 
-                return isLiquid;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error checking liquidity for symbol {Symbol} during the period {StartDate} to {EndDate}.", symbol);
-                return false;
-            }
-        }
+        //        return isLiquid;
+        //    }
+        //    catch (Exception ex)
+        //    {
+        //        _logger.LogError(ex, "Error checking liquidity for symbol {Symbol} during the period {StartDate} to {EndDate}.", symbol);
+        //        return false;
+        //    }
+        //}
     }
 }

@@ -210,11 +210,31 @@ namespace Temperance.Constellations.Services
                     .Distinct()
                     .OrderBy(t => t)
                     .ToList();
+
+                DateTime? lastParameterUpdate = null;
+                var currentWeeklyMetrics = new Dictionary<string, decimal>();
                 // =========================================================================
                 // INNER LOOP: THE TIME ENGINE (Executes the Strategy)
                 // =========================================================================
                 foreach (var timestamp in masterTimeline)
                 {
+                    if (lastParameterUpdate == null || timestamp.Date >= lastParameterUpdate.Value.AddDays(7))
+                    {
+                        foreach (var symbol in allSymbols)
+                        {
+                            // Now returns the tuple with the parsed Sharpe
+                            var result = GetActiveCpoForDate(allCpoParameters, symbol, timestamp);
+
+                            if (result.Cpo != null && strategyPool.TryGetValue(symbol, out var strategy))
+                            {
+                                strategy.UpdateParameters(result.Cpo.ParsedParmeters);
+                                currentWeeklyMetrics[symbol] = result.Sharpe; // Store for the sizer
+                            }
+                        }
+                        lastParameterUpdate = timestamp.Date;
+                        _logger.LogInformation("--- Weekly Brain Sync: {Date} ---", timestamp.ToShortDateString());
+                    }
+
                     var currentPrices = new Dictionary<string, PriceModel>();
                     foreach (var symbol in allSymbols)
                     {
@@ -259,11 +279,13 @@ namespace Temperance.Constellations.Services
 
                         var strategy = strategyPool[symbol];
                         var currentMarketHealth = await _marketHealthService.GetCurrentMarketHealth(timestamp);
-
+                        currentWeeklyMetrics.TryGetValue(symbol, out decimal weeklySharpe);
                         var signal = strategy.GenerateSignal(in currentBar, null, null, indicators, currentMarketHealth);
                         if (signal != SignalDecision.Hold)
                         {
-                            await TryOpenPositionAsync(strategy, symbol, currentBar, signal, portfolioRunId, session.InitialCapital, session.Interval, null, indicators, currentMarketHealth);
+                            await TryOpenPositionAsync(strategy, symbol, currentBar, signal, portfolioRunId,
+                               session.InitialCapital, session.Interval, indicators,
+                               currentMarketHealth, weeklySharpe);
                         }
                     }
                 }
@@ -333,23 +355,45 @@ namespace Temperance.Constellations.Services
             Guid runId,
             decimal initialCapital,
             string interval,
-            List<PriceModel> dataWindow,
             Dictionary<string, decimal> indicators,
-            MarketHealthScore healthScore)
+            MarketHealthScore healthScore,
+            decimal sharpeKelly)
         {
             decimal rawEntryPrice = currentBar.ClosePrice;
+            decimal atr = indicators["ATR"];
 
-            // Logic for Kelly Fraction / Allocation. (Can be pulled from Committee sizing later)
-            decimal allocationAmount = strategy.GetAllocationAmount(in currentBar, dataWindow, indicators, initialCapital * 0.02m, _portfolioManager.GetTotalEquity(), 0.01m, 1, healthScore);
+            // 1. CARVER COST FILTER (The "Is it worth it?" Check)
+            bool isViable = _transactionCostService.IsTradeEconomicallyViable(
+                symbol,
+                rawEntryPrice,
+                atr,
+                signal,
+                interval,
+                currentBar.Timestamp);
+
+            if (!isViable) return null; // Skip trade: High cost vs Low volatility
+
+            // 2. KELLY/CARVER SIZING
+            // 2% hard cap per trade of initial capital, but sized by volatility
+            decimal maxTradeCap = initialCapital * 0.05m;
+            decimal allocationAmount = strategy.GetAllocationAmount(
+                in currentBar,
+                null,
+                indicators,
+                maxTradeCap,
+                _portfolioManager.GetTotalEquity(),
+                sharpeKelly,
+                1,
+                healthScore);
 
             int quantity = (int)Math.Floor(allocationAmount / rawEntryPrice);
             if (quantity <= 0) return null;
 
             var direction = (signal == SignalDecision.Buy) ? PositionDirection.Long : PositionDirection.Short;
 
-            // Apply Realistic Execution Costs
-            decimal effectiveEntryPrice = await _transactionCostService.CalculateEntryCost(rawEntryPrice, signal, symbol, interval, currentBar.Timestamp);
-            decimal totalEntryCost = await _transactionCostService.GetSpreadCost(rawEntryPrice, quantity, symbol, interval, currentBar.Timestamp);
+            // 3. TRANSACTION COST CALCULATION
+            decimal effectiveEntryPrice = _transactionCostService.CalculateEntryCost(rawEntryPrice, signal, symbol, interval, currentBar.Timestamp);
+            decimal totalEntryCost = _transactionCostService.GetSpreadCost(rawEntryPrice, quantity, symbol, interval, currentBar.Timestamp);
             decimal totalCashOutlay = (quantity * rawEntryPrice) + totalEntryCost;
 
             if (await _portfolioManager.CanOpenPosition(totalCashOutlay))
@@ -368,7 +412,7 @@ namespace Temperance.Constellations.Services
                     Symbol = symbol,
                     Interval = interval,
                     TotalTransactionCost = totalEntryCost,
-                    EntryReason = strategy.GetEntryReason(in currentBar, dataWindow, indicators)
+                    EntryReason = strategy.GetEntryReason(in currentBar, null, indicators)
                 };
             }
             return null;
@@ -387,10 +431,10 @@ namespace Temperance.Constellations.Services
             SignalDecision exitSignal = position.Direction == PositionDirection.Long ? SignalDecision.Sell : SignalDecision.Buy;
 
             // 1. Calculate Implicit Costs (Slippage) -> Alters the price
-            decimal effectiveExitPrice = await _transactionCostService.CalculateEntryCost(rawExitPrice, exitSignal, position.Symbol, interval, currentBar.Timestamp);
+            decimal effectiveExitPrice = _transactionCostService.CalculateEntryCost(rawExitPrice, exitSignal, position.Symbol, interval, currentBar.Timestamp);
 
             // 2. Calculate Explicit Costs (Commissions/Spread) -> Hard cash deduction
-            decimal totalExitCost = await _transactionCostService.GetSpreadCost(rawExitPrice, position.Quantity, position.Symbol, interval, currentBar.Timestamp);
+            decimal totalExitCost = _transactionCostService.GetSpreadCost(rawExitPrice, position.Quantity, position.Symbol, interval, currentBar.Timestamp);
 
             // 3. Gross PnL (Using the slippage-adjusted prices)
             decimal grossPnL = position.Direction == PositionDirection.Long
@@ -494,6 +538,42 @@ namespace Temperance.Constellations.Services
             indicators["LowerBand"] = sma - (2.0m * stdDev);
 
             return indicators;
+        }
+
+        private (StrategyOptimizedParameterModel Cpo, decimal Sharpe) GetActiveCpoForDate(
+            Dictionary<string, List<StrategyOptimizedParameterModel>> allCpos,
+            string symbol,
+            DateTime date)
+        {
+            if (allCpos == null || !allCpos.TryGetValue(symbol, out var cpos))
+                return (null, 0m);
+
+            var activeCpo = cpos
+                .Where(c => c.EndDate <= date)
+                .OrderByDescending(c => c.EndDate)
+                .FirstOrDefault();
+
+            if (activeCpo == null) return (null, 0m);
+
+            decimal sharpe = 0.5m; // Default to a neutral Sharpe if parsing fails
+
+            if (!string.IsNullOrWhiteSpace(activeCpo.Metrics))
+            {
+                try
+                {
+                    using var doc = JsonDocument.Parse(activeCpo.Metrics);
+                    if (doc.RootElement.TryGetProperty("SharpeRatio", out var srProp))
+                    {
+                        sharpe = srProp.GetDecimal();
+                    }
+                }
+                catch
+                {
+                    _logger.LogWarning("Could not parse SharpeRatio for {Symbol} at {Date}. Using default 0.5.", symbol, date);
+                }
+            }
+
+            return (activeCpo, sharpe);
         }
     }
 }

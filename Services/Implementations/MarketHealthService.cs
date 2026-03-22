@@ -21,7 +21,7 @@ namespace Temperance.Services.Services.Implementations
         {
             int totalScore = 0;
 
-            var spyHistory = await _historicalPriceService.GetHistoricalPrices("SPY", "1d", currentDate.AddYears(-2), currentDate);
+            var spyHistory = await _historicalPriceService.GetAllHistoricalPrices(new List<string>() { "SPY" }, new List<string>() { "1d" }, currentDate.AddYears(-2), currentDate);
             if(spyHistory.Count > 200)
             {
                 var spy200ma = spyHistory.TakeLast(200).Average(p => p.ClosePrice);

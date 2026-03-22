@@ -9,6 +9,6 @@ namespace Temperance.Constellations.Services.Interfaces
             ReadOnlySpan<PriceModel> fullHistoricalData);
         bool IsSymbolLiquidAtTime(string symbol, string interval, long minAverageVolume, DateTime currentTimestamp, int rollingLookbackBars,
             IReadOnlyList<PriceModel> fullHistoricalData);
-        Task<bool> ISymbolLiquidForPeriod(string symbol, string interval, long minADV, DateTime startDate, DateTime endDate);
+        //Task<bool> ISymbolLiquidForPeriod(string symbol, string interval, long minADV, DateTime startDate, DateTime endDate);
     }
 }

@@ -84,6 +84,19 @@ namespace Temperance.Services.Trading.Strategies.MeanReversion.Implementation
             decimal lowerBollingerBand = currentIndicatorValues["LowerBand"];
             decimal upperBollingerBand = currentIndicatorValues["UpperBand"];
             decimal currentRsi = currentIndicatorValues["RSI"];
+            decimal atr = currentIndicatorValues["ATR"];
+
+            // NEW: The Carver Viability Filter
+            // We check this BEFORE the RSI/BB signals to save CPU and kill churn
+            bool canAffordToTrade = _transactionCostService.IsTradeEconomicallyViable(
+                currentBar.Symbol,
+                currentBar.ClosePrice,
+                atr,
+                SignalDecision.Buy, // We test for a Buy viability
+                "60min",
+                currentBar.Timestamp);
+
+            if (!canAffordToTrade) return SignalDecision.Hold;
 
             if (currentBar.ClosePrice < lowerBollingerBand && currentRsi < _rsiOversoldThreshold) return SignalDecision.Buy;
             if (currentBar.ClosePrice > upperBollingerBand && currentRsi > _rsiOverboughtThreshold) return SignalDecision.Sell;
@@ -141,75 +154,78 @@ namespace Temperance.Services.Trading.Strategies.MeanReversion.Implementation
             return activeTrade;
         }
 
-        public decimal GetAllocationAmount(in PriceModel currentBar, IReadOnlyList<PriceModel> historicalDataWindow,
-            Dictionary<string, decimal> currentIndicatorValues, decimal maxTradeAllocationInitialCapital, decimal currentTotalEquity,
-            decimal kellyHalfFraction, int currentPyramidEntries, MarketHealthScore marketHealthScore)
+        public decimal GetAllocationAmount(
+            in PriceModel currentBar,
+            IReadOnlyList<PriceModel> historicalDataWindow,
+            Dictionary<string, decimal> currentIndicatorValues,
+            decimal maxTradeAllocationInitialCapital,
+            decimal currentTotalEquity,
+            decimal kellyHalfFraction, // The "Historical Edge" from Ludus
+            int currentPyramidEntries,
+            MarketHealthScore marketHealthScore)
         {
-            var signal = GenerateSignal(in currentBar, null, historicalDataWindow, currentIndicatorValues, marketHealthScore);
-            if (signal == SignalDecision.Hold) return 0;
+            // --- 1. THE VOLATILITY FLOOR (Carver's North Star) ---
+            // We target an annual volatility (Speed Limit) based on our Half-Kelly fraction.
+            // If Kelly is high, we target 25% vol. If Kelly is low, we target 10%.
+            decimal annualVolTarget = Math.Clamp(kellyHalfFraction, 0.10m, 0.25m);
+            decimal dailyPortfolioRiskTarget = (currentTotalEquity * annualVolTarget) / 16.0m;
 
-            decimal atrValue = currentIndicatorValues.TryGetValue("ATR", out var atr) ? atr : 0;
+            // --- 2. THE INSTRUMENT WIGGLE (ATR) ---
+            // How much does this specific stock "move" in dollars per day?
+            decimal atr = currentIndicatorValues.TryGetValue("ATR", out var a) ? a : currentBar.ClosePrice * 0.02m;
+            if (atr <= 0) return 0;
 
-            const decimal MIN_VOLATILITY_AS_PRICE_PCT = 0.001m;
-            decimal minimumRiskFromPrice = currentBar.ClosePrice * MIN_VOLATILITY_AS_PRICE_PCT;
-
-            decimal effectiveAtr = Math.Max(atrValue, minimumRiskFromPrice);
-
-            if (effectiveAtr <= 0) 
+            // --- 3. THE ENVIRONMENT MULTIPLIER (MarketHealth) ---
+            // Carver doesn't stop trading in bad markets, but he "Downshifts."
+            decimal marketMultiplier = marketHealthScore switch
             {
-                _logger.LogError("Effective ATR is zero or negative even after applying floor for {Symbol} at {Timestamp}. Price: {Price}",
-                    currentBar.Symbol, currentBar.Timestamp, currentBar.ClosePrice);
-                return 0;
-            }
-
-            const decimal BASE_PORTFOLIO_RISK_PER_TRADE = 0.01m;
-
-            decimal marketHealthMultiplier = marketHealthScore switch
-            {
-                MarketHealthScore.StronglyBullish => 1.2m,
-                MarketHealthScore.Bullish => 1.0m,
-                MarketHealthScore.Neutral => 0.75m,
-                _ => 0.0m
+                MarketHealthScore.StronglyBullish => 1.25m, // "Aggressive"
+                MarketHealthScore.Bullish => 1.00m, // "Normal"
+                MarketHealthScore.Neutral => 0.50m, // "Caution"
+                MarketHealthScore.Bearish => 0.25m, // "Defensive"
+                MarketHealthScore.StronglyBearish => 0.00m, // "Stop"
+                _ => 0.00m
             };
 
-            if (marketHealthMultiplier <= 0) return 0;
+            if (marketMultiplier <= 0) return 0;
 
-            decimal rsiScalingFactor = 0.5m;
+            // --- 4. THE CONVICTION SCALING (RSI Forecast) ---
+            // A Carver 'Forecast' scales the bet based on signal strength.
+            // If RSI is at 30 (entry), that's a 1.0x bet. If RSI is at 10, it's a 2.0x bet.
             decimal currentRsi = currentIndicatorValues["RSI"];
-            if (signal == SignalDecision.Buy)
+            decimal rsiConviction = 1.0m;
+
+            if (currentRsi < _rsiOversoldThreshold)
             {
-                decimal dist = Math.Max(0, _rsiOversoldThreshold - currentRsi);
-                rsiScalingFactor = 0.5m + (0.5m * Math.Min(1.0m, dist / _rsiOversoldThreshold));
-            }
-            else if (signal == SignalDecision.Sell)
-            {
-                decimal dist = Math.Max(0, currentRsi - _rsiOverboughtThreshold);
-                rsiScalingFactor = 0.5m + (0.5m * Math.Min(1.0m, dist / (100.0m - _rsiOverboughtThreshold)));
+                // Calculate how "Deep" the oversold condition is.
+                decimal oversoldDepth = (_rsiOversoldThreshold - currentRsi) / _rsiOversoldThreshold;
+                rsiConviction = 1.0m + (oversoldDepth * 2.0m); // Max 3.0x multiplier for extreme RSI
             }
 
-            decimal adjustedRiskPercentage = BASE_PORTFOLIO_RISK_PER_TRADE * marketHealthMultiplier * rsiScalingFactor;
-            decimal effectiveKellyFraction = Math.Max(0.005m, kellyHalfFraction);
-            adjustedRiskPercentage = Math.Min(adjustedRiskPercentage, effectiveKellyFraction);
-            decimal finalDollarRisk = currentTotalEquity * adjustedRiskPercentage;
+            // --- 5. THE DIVERSIFICATION MULTIPLIER (IDM) ---
+            // Since you hold multiple symbols, they provide an "Internal Diversification Multiplier."
+            const decimal IDM = 1.4m;
+            const decimal TARGET_ASSETS = 20.0m; // Aim for 20 diversified positions
 
-            decimal riskPerShare = _atrMultiplier * effectiveAtr; 
-            if (riskPerShare <= 0) return 0;
+            // --- 6. THE FINAL CALCULATION ---
+            // Base Carver Size: (Daily Risk / Assets) / ATR
+            decimal dollarRiskPerAsset = (dailyPortfolioRiskTarget * IDM) / TARGET_ASSETS;
 
-            int quantity = (int)Math.Floor(finalDollarRisk / riskPerShare);
-            if (quantity <= 0) return 0;
+            // Final Sizing: (Base Size) * (Market Environment) * (Signal Conviction)
+            int targetQuantity = (int)Math.Floor((dollarRiskPerAsset / atr) * marketMultiplier * rsiConviction);
 
-            decimal allocationAmount = quantity * currentBar.ClosePrice;
-            allocationAmount = Math.Min(allocationAmount, maxTradeAllocationInitialCapital);
+            decimal finalAllocation = targetQuantity * currentBar.ClosePrice;
 
-            if (currentPyramidEntries == 1)
-            {
-                return allocationAmount * _initialEntryScale;
-            }
-            else
-            {
-                int divisor = _maxPyramidEntries - 1 > 0 ? _maxPyramidEntries - 1 : 1;
-                return allocationAmount * (1.0m - _initialEntryScale) / divisor;
-            }
+            // --- 7. THE SAFETY GATES ---
+            // A. Never exceed the Max Cap per trade (e.g., 10% of total equity)
+            decimal maxCap = currentTotalEquity * 0.10m;
+            finalAllocation = Math.Min(finalAllocation, maxCap);
+
+            // B. Liquidity Check: Never trade more than 1% of the average daily volume
+            decimal avgVolumeValue = _minimumAverageDailyVolume * currentBar.ClosePrice;
+            finalAllocation = Math.Min(finalAllocation, avgVolumeValue * 0.01m);
+
+            return finalAllocation;
         }
 
         //protected decimal CalculateStopLoss(Position position)
