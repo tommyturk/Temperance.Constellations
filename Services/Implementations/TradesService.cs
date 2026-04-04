@@ -161,5 +161,10 @@ namespace Temperance.Constellations.Services.Implementations
         {
             await _tradeRepository.SaveTradesBulkAsync(trades);
         }
+
+        public async Task<IEnumerable<TradeSummary>> GetTradesByRunIdAsync(Guid lastActiveRunId)
+        {
+            return await _tradeRepository.GetTradesByRunIdAsync(lastActiveRunId);
+        }
     }
 }

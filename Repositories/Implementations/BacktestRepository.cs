@@ -28,7 +28,11 @@ namespace Temperance.Constellations.Repositories.Interfaces.Trade.Implementation
                     WinRate = @WinRate,
                     ErrorMessage = @ErrorMessage,
                     OptimizationResultId = @OptimizationResultId,
-                    SharpeRatio = @SharpeRatio
+                    SharpeRatio = @SharpeRatio,
+                    EndingCash = @EndingCash,
+                    AllocatedCapital = @AllocatedCapital,
+                    UnrealizedProfitLoss = @UnrealizedProfitLoss,
+                    OpenTradesCount = @OpenTradesCount
                 WHERE RunId = @RunId;";
 
             try
@@ -44,7 +48,11 @@ namespace Temperance.Constellations.Repositories.Interfaces.Trade.Implementation
                     result.WinRate,
                     result.ErrorMessage,
                     result.OptimizationResultId,
-                    result.SharpeRatio
+                    result.SharpeRatio,
+                    result.EndingCash,
+                    result.AllocatedCapital,
+                    result.UnrealizedProfitLoss,
+                    result.OpenTradesCount
                 };
                 int affectedRows = await connection.ExecuteAsync(query, parameters);
                 _logger.LogInformation("Updated performance metrics for backtest run {RunId}.", runId);

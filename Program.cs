@@ -3,6 +3,7 @@ using Hangfire.SqlServer;
 using ILGPU;
 using ILGPU.Algorithms;
 using ILGPU.Runtime;
+using MathNet.Numerics;
 using Microsoft.Extensions.Options;
 using Microsoft.OpenApi.Models;
 using System.Text.Json.Serialization;
@@ -24,6 +25,8 @@ using Temperance.Ephemeris.Repositories.Financials.Implementations;
 using Temperance.Ephemeris.Repositories.Financials.Interfaces;
 using Temperance.Ephemeris.Repositories.Ludus.Implementations;
 using Temperance.Ephemeris.Repositories.Ludus.Interfaces;
+using Temperance.Ephemeris.Services.Financials.Implementation;
+using Temperance.Ephemeris.Services.Financials.Interfaces;
 using Temperance.Ephemeris.Utilities.Helpers;
 using Temperance.Hermes.Connection;
 using Temperance.Hermes.Publishing;
@@ -68,6 +71,8 @@ builder.Services.AddTransient<ITransactionCostService, TransactionCostService>()
 builder.Services.AddTransient<ILiquidityService, LiquidityService>();
 builder.Services.AddTransient<IGpuIndicatorService, GpuIndicatorService>();
 builder.Services.AddScoped<IPortfolioManager, PortfolioManager>();
+builder.Services.AddScoped<IShadowPortfolioManager, ShadowPortfolioManager>(); 
+builder.Services.AddScoped<ISecurityMasterService, SecurityMasterService>();
 builder.Services.AddScoped<ISecuritiesOverviewService, SecuritiesOverviewService>();
 builder.Services.AddTransient<IBalanceSheetService, BalanceSheetService>();
 builder.Services.AddTransient<IPriceService, PriceService>();
@@ -77,6 +82,7 @@ builder.Services.AddTransient<ITradeService, TradesService>();
 builder.Services.AddTransient<IQualityFilterService, QualityFilterService>();
 builder.Services.AddTransient<IMarketHealthService, MarketHealthService>();
 builder.Services.AddTransient<IEconomicDataService, EconomicDataService>();
+builder.Services.AddTransient<ISecuritiesService, SecuritiesService>();
 //builder.Services.AddTransient<IMasterWalkForwardOrchestrator, MasterWalkForwardOrchestrator>();
 builder.Services.AddTransient<IInitialTrainingOrchestrator, InitialTrainingOrchestrator>();
 //builder.Services.AddTransient<ISingleSecurityBacktester, ShadowBacktestOrchestrator>();
@@ -91,7 +97,7 @@ builder.Services.AddTransient<IInitialTrainingOrchestrator, InitialTrainingOrche
 builder.Services.AddScoped<IWalkForwardSleeveRepository, WalkForwardSleeveRepository>();
 builder.Services.AddScoped<IShadowPerformanceRepository, ShadowPerformanceRepository>();
 builder.Services.AddScoped<IStrategyOptimizedParametersRepository, StrategyOptimizedParametersRepository>();
-
+builder.Services.AddScoped<IPortfolioTelemetryRepository, PortfolioTelemetryRepository>();
 // 2. Repositories requiring SQL Helper (Manual Factory)
 builder.Services.AddScoped<IWalkForwardSessionRepository>(provider =>
 {
@@ -99,7 +105,11 @@ builder.Services.AddScoped<IWalkForwardSessionRepository>(provider =>
     var sqlHelper = provider.GetRequiredService<ISqlHelper>();
     return new WalkForwardSessionRepository(options.DefaultConnectionString, sqlHelper);
 });
-
+builder.Services.AddScoped<ISecuritiesRepository>(provider =>
+{
+    var options = provider.GetRequiredService<IOptions<ConnectionStrings>>().Value;
+    return new SecuritiesRepository(options.DefaultConnectionString);
+});
 builder.Services.AddScoped<ICycleTrackerRepository>(provider =>
 {
     var options = provider.GetRequiredService<IOptions<ConnectionStrings>>().Value;
@@ -136,6 +146,14 @@ builder.Services.AddScoped<ISecuritiesOverviewRepository>(provider =>
     var cs = connectionStrings.DefaultConnectionString;
     var logger = provider.GetRequiredService<ILogger<SecuritiesOverviewRepository>>();
     return new SecuritiesOverviewRepository(cs, logger);
+});
+
+builder.Services.AddScoped<ISecurityMasterRepsotory>(provider =>
+{
+    var connectionStrings = provider.GetRequiredService<IOptions<ConnectionStrings>>().Value;
+    var cs = connectionStrings.DefaultConnectionString;
+    var logger = provider.GetRequiredService<ILogger<SecurityMasterRepository>>();
+    return new SecurityMasterRepository(cs);
 });
 
 builder.Services.AddTransient<IHistoricalPriceRepository>(provider =>

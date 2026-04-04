@@ -29,9 +29,10 @@ namespace Temperance.Services.Trading.Strategies
             Dictionary<string, decimal> currentIndicatorValues,
             decimal maxTradeAllocationInitialCapital,
             decimal currentTotalEquity,
-            decimal kellyHalfFraction,
-            int currentPyramidEntries,
-            MarketHealthScore marketHealth);
+            decimal expectedSharpe,
+            int rawMacroScore,      // <-- Updated
+            decimal dynamicIdm,     // <-- Updated
+            int activePortfolioSize);
 
         int GetMaxPyramidEntries();
 

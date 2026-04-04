@@ -19,5 +19,7 @@
         public decimal CurrentMarketValue { get; set; }
         public decimal CostBasis => Quantity * AveragePrice;
         public decimal UnrealizedPnL => CurrentMarketValue - CostBasis;
+        public decimal HighestPriceSinceEntry { get; set; }
+        public decimal LowestPriceSinceEntry { get; set; }
     }
 }

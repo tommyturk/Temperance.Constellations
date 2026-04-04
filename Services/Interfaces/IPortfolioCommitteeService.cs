@@ -9,6 +9,7 @@ namespace Temperance.Constellations.Services.Interfaces
              string strategyName,
              string interval,
              DateTime cycleStartDate,
-             int maxActivePositions);
+             int maxActivePositions,
+             IReadOnlySet<string> allowedUniverse);
     }
 }

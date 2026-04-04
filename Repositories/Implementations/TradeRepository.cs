@@ -515,6 +515,8 @@ namespace Temperance.Constellations.Repositories.Implementations
                     ,[MaxFavorableExcursion]
                     ,[EntryReason]
                     ,[ExitReason]
+                    ,[EntryIndicatorsJson]
+                    ,[ExitIndicatorsJson]
                 )
                 VALUES
                 (
@@ -541,12 +543,22 @@ namespace Temperance.Constellations.Repositories.Implementations
                     ,@MaxFavorableExcursion
                     ,@EntryReason
                     ,@ExitReason
+                    ,@EntryIndicatorsJson
+                    ,@ExitIndicatorsJson
                 );";
 
             using var connection = new SqlConnection(_connectionString);
 
             // Dapper iterates over the 'trades' collection and executes this safely for each one.
             await connection.ExecuteAsync(sql, trades);
+        }
+
+        public async Task<IEnumerable<TradeSummary>> GetTradesByRunIdAsync(Guid runId)
+        {
+            const string sql = "SELECT * FROM [Constellations].[Trades] WHERE RunId = @RunId";
+
+            using var connection = new SqlConnection(_connectionString);
+            return await connection.QueryAsync<TradeSummary>(sql, new { RunId = runId });
         }
     }
 }

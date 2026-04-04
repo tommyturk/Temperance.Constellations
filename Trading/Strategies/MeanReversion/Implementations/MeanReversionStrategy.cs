@@ -4,6 +4,7 @@ using Temperance.Constellations.Models.Trading;
 using Temperance.Constellations.Services.Interfaces;
 using Temperance.Ephemeris.Models.Prices;
 using Temperance.Ephemeris.Utilities.Helpers;
+using Temperance.Constellations.Models.Policy;
 
 namespace Temperance.Services.Trading.Strategies.MeanReversion.Implementation
 {
@@ -25,6 +26,13 @@ namespace Temperance.Services.Trading.Strategies.MeanReversion.Implementation
         private decimal _atrMultiplier;
         private int _maxHoldingBars;
         private int _requiredLookback;
+
+        // --- STRATEGY DNA PARAMETERS ---
+        // How much pain are we willing to endure annually? (e.g., 0.15 = 15%)
+        private readonly decimal TargetAnnualVolatility = 0.15m;
+
+        // The absolute maximum leverage the prime broker allows us to use
+        private readonly decimal MaxLeverageCap = 2.0m;
 
         private readonly ITransactionCostService _transactionCostService;
         private readonly ILogger<MeanReversionStrategy> _logger;
@@ -53,7 +61,7 @@ namespace Temperance.Services.Trading.Strategies.MeanReversion.Implementation
             _movingAveragePeriod = ParameterHelper.GetParameterOrDefault(parameters, "MovingAveragePeriod", 20);
             _rsiPeriod = ParameterHelper.GetParameterOrDefault(parameters, "RSIPeriod", 14);
             _atrPeriod = ParameterHelper.GetParameterOrDefault(parameters, "AtrPeriod", 14);
-            _maxHoldingBars = ParameterHelper.GetParameterOrDefault(parameters, "MaxHoldingBars", 10);
+            _maxHoldingBars = ParameterHelper.GetParameterOrDefault(parameters, "MaxHoldingBars", 14);
             _maxPyramidEntries = ParameterHelper.GetParameterOrDefault(parameters, "MaxPyramidEntries", 1);
 
             _stdDevMultiplier = ParameterHelper.GetParameterOrDefault(parameters, "StdDevMultiplier", 2.0m);
@@ -63,8 +71,6 @@ namespace Temperance.Services.Trading.Strategies.MeanReversion.Implementation
             _atrMultiplier = ParameterHelper.GetParameterOrDefault(parameters, "AtrMultiplier", 2.5m);
             _stopLossPercentage = ParameterHelper.GetParameterOrDefault(parameters, "StopLossPercentage", 0.03m);
             _initialEntryScale = ParameterHelper.GetParameterOrDefault(parameters, "InitialEntryScale", 1.0m);
-
-            _logger.LogInformation($"Initializing {Name} with MA:{_movingAveragePeriod}, SDMult:{_stdDevMultiplier}, RSI:{_rsiPeriod}, RSI Levels:{_rsiOversoldThreshold}/{_rsiOverboughtThreshold}");
         }
 
         public int GetMaxPyramidEntries() => _maxPyramidEntries;
@@ -73,33 +79,77 @@ namespace Temperance.Services.Trading.Strategies.MeanReversion.Implementation
         public decimal GetAtrMultiplier() => _atrMultiplier;
         public decimal GetStdDevMultiplier() => _stdDevMultiplier;
 
-        public SignalDecision GenerateSignal(in PriceModel currentBar, Position? currentPosition, IReadOnlyList<PriceModel> historicalDataWindow, 
-            Dictionary<string, decimal> currentIndicatorValues, MarketHealthScore marketHealth)
+        public SignalDecision GenerateSignal(
+            in PriceModel currentBar,
+            Position? currentPosition,
+            IReadOnlyList<PriceModel>? historicalDataWindow,
+            Dictionary<string, decimal> currentIndicatorValues,
+            MarketHealthScore marketHealth)
         {
-            if (currentPosition == null && marketHealth <= MarketHealthScore.Bearish)
-                return SignalDecision.Hold;
-
-            if (historicalDataWindow != null && historicalDataWindow.Count < GetRequiredLookbackPeriod()) return SignalDecision.Hold;
-
+            // ==============================================================
+            // 1. STRATEGY VITALS
+            // ==============================================================
             decimal lowerBollingerBand = currentIndicatorValues["LowerBand"];
             decimal upperBollingerBand = currentIndicatorValues["UpperBand"];
             decimal currentRsi = currentIndicatorValues["RSI"];
             decimal atr = currentIndicatorValues["ATR"];
 
-            // NEW: The Carver Viability Filter
-            // We check this BEFORE the RSI/BB signals to save CPU and kill churn
+            // Safely extract the previous RSI (defaults to neutral 50 if missing on bar 1)
+            decimal rsiPrev = currentIndicatorValues.TryGetValue("RSI_Prev", out var prev) ? prev : 50m;
+
+            // ==============================================================
+            // 2. ECONOMIC VIABILITY
+            // ==============================================================
             bool canAffordToTrade = _transactionCostService.IsTradeEconomicallyViable(
                 currentBar.Symbol,
                 currentBar.ClosePrice,
                 atr,
-                SignalDecision.Buy, // We test for a Buy viability
+                SignalDecision.Buy,
                 "60min",
                 currentBar.Timestamp);
 
             if (!canAffordToTrade) return SignalDecision.Hold;
 
-            if (currentBar.ClosePrice < lowerBollingerBand && currentRsi < _rsiOversoldThreshold) return SignalDecision.Buy;
-            if (currentBar.ClosePrice > upperBollingerBand && currentRsi > _rsiOverboughtThreshold) return SignalDecision.Sell;
+            // ==============================================================
+            // 3. THE CATASTROPHIC CIRCUIT BREAKER (Macro Veto)
+            // Must be checked BEFORE any buy signals are generated!
+            // ==============================================================
+            if (currentPosition == null && marketHealth <= MarketHealthScore.StronglyBearish)
+            {
+                return SignalDecision.Hold; // Block all new entries
+            }
+
+            // ==============================================================
+            // 4. ENTRY LOGIC: ARMORED LUDUS (v3.2 Spatial Stretch)
+            // ==============================================================
+            bool hasMasterTrend = currentIndicatorValues.TryGetValue("SMA_Long", out decimal longTermTrend) && longTermTrend > 0;
+
+            // The CPO optimized variable (Ludus should optimize this between 0.5 and 2.5)
+            decimal stretchMultiplier = 1.0m;
+
+            // Calculate the 'Capitulation Band'
+            decimal capitulationBand = lowerBollingerBand - (atr * stretchMultiplier);
+
+            // --- LONG ENTRY (Catch the extreme knife, in an uptrend) ---
+            bool isExtremeStretch = currentBar.ClosePrice < capitulationBand;
+            bool isOversoldRSI = currentRsi < _rsiOversoldThreshold;
+
+            if (isExtremeStretch && isOversoldRSI)
+            {
+                if (!hasMasterTrend || currentBar.ClosePrice > longTermTrend)
+                    return SignalDecision.Buy;
+            }
+
+            // --- SHORT ENTRY (Sell the extreme blow-off top) ---
+            decimal euphoriaBand = upperBollingerBand + (atr * stretchMultiplier);
+            bool isExtremeEuphoria = currentBar.ClosePrice > euphoriaBand;
+            bool isOverboughtRSI = currentRsi > _rsiOverboughtThreshold;
+
+            if (isExtremeEuphoria && isOverboughtRSI)
+            {
+                if (!hasMasterTrend || currentBar.ClosePrice < longTermTrend)
+                    return SignalDecision.Sell;
+            }
 
             return SignalDecision.Hold;
         }
@@ -160,70 +210,55 @@ namespace Temperance.Services.Trading.Strategies.MeanReversion.Implementation
             Dictionary<string, decimal> currentIndicatorValues,
             decimal maxTradeAllocationInitialCapital,
             decimal currentTotalEquity,
-            decimal kellyHalfFraction, // The "Historical Edge" from Ludus
-            int currentPyramidEntries,
-            MarketHealthScore marketHealthScore)
+            decimal expectedSharpe,
+            int rawMacroScore,
+            decimal dynamicIdm,
+            int activePortfolioSize)
         {
-            // --- 1. THE VOLATILITY FLOOR (Carver's North Star) ---
-            // We target an annual volatility (Speed Limit) based on our Half-Kelly fraction.
-            // If Kelly is high, we target 25% vol. If Kelly is low, we target 10%.
-            decimal annualVolTarget = Math.Clamp(kellyHalfFraction, 0.10m, 0.25m);
-            decimal dailyPortfolioRiskTarget = (currentTotalEquity * annualVolTarget) / 16.0m;
-
-            // --- 2. THE INSTRUMENT WIGGLE (ATR) ---
-            // How much does this specific stock "move" in dollars per day?
             decimal atr = currentIndicatorValues.TryGetValue("ATR", out var a) ? a : currentBar.ClosePrice * 0.02m;
-            if (atr <= 0) return 0;
+            if (currentBar.ClosePrice <= 0 || atr <= 0) return 0m;
 
-            // --- 3. THE ENVIRONMENT MULTIPLIER (MarketHealth) ---
-            // Carver doesn't stop trading in bad markets, but he "Downshifts."
-            decimal marketMultiplier = marketHealthScore switch
-            {
-                MarketHealthScore.StronglyBullish => 1.25m, // "Aggressive"
-                MarketHealthScore.Bullish => 1.00m, // "Normal"
-                MarketHealthScore.Neutral => 0.50m, // "Caution"
-                MarketHealthScore.Bearish => 0.25m, // "Defensive"
-                MarketHealthScore.StronglyBearish => 0.00m, // "Stop"
-                _ => 0.00m
-            };
+            decimal dailyVolatilityPct = atr / currentBar.ClosePrice;
+            decimal assetAnnualVolatility = dailyVolatilityPct * (decimal)Math.Sqrt(252);
 
-            if (marketMultiplier <= 0) return 0;
+            // =====================================================================
+            // 1. INCREASE RISK TARGET (The "Heat" Dial)
+            // Moving from 0.35 to 0.60 allows the portfolio to be much more aggressive
+            // =====================================================================
+            decimal targetAnnualVolatility = 0.60m;
 
-            // --- 4. THE CONVICTION SCALING (RSI Forecast) ---
-            // A Carver 'Forecast' scales the bet based on signal strength.
-            // If RSI is at 30 (entry), that's a 1.0x bet. If RSI is at 10, it's a 2.0x bet.
+            // We use a "Floor" for IDM to ensure we don't over-dilute when N is large
+            decimal effectiveN = (decimal)activePortfolioSize / Math.Max(1.5m, dynamicIdm);
+            decimal perAssetTargetVol = targetAnnualVolatility / Math.Max(1.0m, effectiveN);
+
+            if (assetAnnualVolatility < 0.01m) assetAnnualVolatility = 0.01m;
+
+            decimal impliedWeight = perAssetTargetVol / assetAnnualVolatility;
+            decimal rawDollarAllocation = currentTotalEquity * impliedWeight;
+
+            // =====================================================================
+            // 2. CONVICTION SCALING (The RSI Stretch)
+            // If we are deep in RSI oversold/overbought, we want to put MORE money to work
+            // =====================================================================
             decimal currentRsi = currentIndicatorValues["RSI"];
-            decimal rsiConviction = 1.0m;
+            decimal convictionBoost = 1.0m;
+            if (currentRsi < 25m) convictionBoost = 1.5m; // Panic Boost
+            if (currentRsi > 75m) convictionBoost = 1.5m; // Euphoria Boost
 
-            if (currentRsi < _rsiOversoldThreshold)
-            {
-                // Calculate how "Deep" the oversold condition is.
-                decimal oversoldDepth = (_rsiOversoldThreshold - currentRsi) / _rsiOversoldThreshold;
-                rsiConviction = 1.0m + (oversoldDepth * 2.0m); // Max 3.0x multiplier for extreme RSI
-            }
+            // =====================================================================
+            // 3. THE ENVIRONMENT MULTIPLIER (Sigmoid)
+            // =====================================================================
+            double score = (double)rawMacroScore;
+            decimal marketMultiplier = (decimal)(1.5 / (1.0 + Math.Exp(-0.5 * score)));
 
-            // --- 5. THE DIVERSIFICATION MULTIPLIER (IDM) ---
-            // Since you hold multiple symbols, they provide an "Internal Diversification Multiplier."
-            const decimal IDM = 1.4m;
-            const decimal TARGET_ASSETS = 20.0m; // Aim for 20 diversified positions
+            if (marketMultiplier <= 0.2m) return 0m;
 
-            // --- 6. THE FINAL CALCULATION ---
-            // Base Carver Size: (Daily Risk / Assets) / ATR
-            decimal dollarRiskPerAsset = (dailyPortfolioRiskTarget * IDM) / TARGET_ASSETS;
+            // Apply conviction and environment
+            decimal finalAllocation = rawDollarAllocation * marketMultiplier * convictionBoost;
 
-            // Final Sizing: (Base Size) * (Market Environment) * (Signal Conviction)
-            int targetQuantity = (int)Math.Floor((dollarRiskPerAsset / atr) * marketMultiplier * rsiConviction);
-
-            decimal finalAllocation = targetQuantity * currentBar.ClosePrice;
-
-            // --- 7. THE SAFETY GATES ---
-            // A. Never exceed the Max Cap per trade (e.g., 10% of total equity)
-            decimal maxCap = currentTotalEquity * 0.10m;
+            // Safety Gates: Hard cap at 15% to prevent one bad ETF from ruining the run
+            decimal maxCap = currentTotalEquity * 0.15m;
             finalAllocation = Math.Min(finalAllocation, maxCap);
-
-            // B. Liquidity Check: Never trade more than 1% of the average daily volume
-            decimal avgVolumeValue = _minimumAverageDailyVolume * currentBar.ClosePrice;
-            finalAllocation = Math.Min(finalAllocation, avgVolumeValue * 0.01m);
 
             return finalAllocation;
         }
@@ -326,32 +361,86 @@ namespace Temperance.Services.Trading.Strategies.MeanReversion.Implementation
 
         public string GetExitReason(Position position, in PriceModel currentBar, IReadOnlyList<PriceModel> historicalDataWindow, Dictionary<string, decimal> currentIndicatorValues)
         {
-            // --- Layer 1: Protective Stop-Loss ---
-            if (position.Direction == PositionDirection.Long && currentBar.LowPrice <= position.StopLossPrice)
+            // ==============================================================
+            // 1. THE 14-BAR TIME STOP (The Guillotine)
+            // ==============================================================
+            var hoursInTrade = (currentBar.Timestamp - position.InitialEntryDate).TotalHours;
+            decimal atr = currentIndicatorValues.TryGetValue("ATR", out var a) ? a : currentBar.ClosePrice * 0.02m;
+            decimal stopDistance = atr * _atrMultiplier;
+
+            if (hoursInTrade >= 14)
             {
-                return $"ATR Stop-Loss hit at {currentBar.LowPrice:F2}";
-            }
-            if (position.Direction == PositionDirection.Short && currentBar.HighPrice >= position.StopLossPrice)
-            {
-                return $"ATR Stop-Loss hit at {currentBar.HighPrice:F2}";
+                return "Time Stop hit after 14 bars";
             }
 
-            // --- Layer 2: Full Reversion Target (End of Bar Confirmation) ---
+            decimal candleBody = Math.Abs(currentBar.ClosePrice - currentBar.OpenPrice);
+            decimal barVelocityInAtr = atr > 0 ? candleBody / atr : 0;
+
+            // If we are in a trade and a catastrophic bar occurs AGAINST our direction, eject immediately.
+            if (barVelocityInAtr >= 3.0m)
+            {
+                if (position.Direction == PositionDirection.Long && currentBar.ClosePrice < currentBar.OpenPrice)
+                {
+                    return $"Velocity Ejector: Catastrophic Bearish Bar ({barVelocityInAtr:F1} ATR)";
+                }
+                if (position.Direction == PositionDirection.Short && currentBar.ClosePrice > currentBar.OpenPrice)
+                {
+                    return $"Velocity Ejector: Catastrophic Bullish Bar ({barVelocityInAtr:F1} ATR)";
+                }
+            }
+
+            // ==============================================================
+            // 2. PROTECTIVE VOLATILITY STOP (ATR)
+            // ==============================================================
+
+            if (position.Direction == PositionDirection.Long)
+            {
+                decimal hardStop = position.AverageEntryPrice - stopDistance;
+                if (currentBar.LowPrice <= hardStop) return $"ATR Stop-Loss Hit ({_atrMultiplier}x)";
+            }
+            else // Short
+            {
+                decimal hardStop = position.AverageEntryPrice + stopDistance;
+                if (currentBar.HighPrice >= hardStop) return $"ATR Stop-Loss Hit ({_atrMultiplier}x)";
+            }
+
+            // ==============================================================
+            // 3. FULL REVERSION TARGET (WITH THE RATCHET)
+            // ==============================================================
             decimal movingAverage = currentIndicatorValues["SMA"];
+            decimal rsi = currentIndicatorValues["RSI"];
+
+            // --- LONG EXITS ---
             if (position.Direction == PositionDirection.Long && currentBar.ClosePrice >= movingAverage)
             {
-                return $"Full Reversion Confirmed at SMA ({movingAverage:F2})";
-            }
-            if (position.Direction == PositionDirection.Short && currentBar.ClosePrice <= movingAverage)
-            {
+                // 1. Momentum is still aggressively ripping. Hold the winner.
+                if (rsi >= 65m) return "Hold";
+
+                // 2. Momentum peaked and is now exhausting. Lock in the fat tail.
+                if (rsi < 65m && rsi >= 55m) return $"Ratchet Exit: Momentum Exhaustion (RSI {rsi:F1})";
+
+                // 3. Standard Reversion
                 return $"Full Reversion Confirmed at SMA ({movingAverage:F2})";
             }
 
-            // --- Layer 3: Time Stop ---
-            if (position.BarsHeld >= _maxHoldingBars)
+            // --- SHORT EXITS ---
+            if (position.Direction == PositionDirection.Short && currentBar.ClosePrice <= movingAverage)
             {
-                return $"Time Stop hit after {position.BarsHeld} bars";
+                // 1. Momentum is still aggressively crashing. Hold the winner.
+                if (rsi <= 35m) return "Hold";
+
+                // 2. Momentum bottomed and is recovering. Lock in the fat tail.
+                if (rsi > 35m && rsi <= 45m) return $"Ratchet Exit: Momentum Exhaustion (RSI {rsi:F1})";
+
+                // 3. Standard Reversion
+                return $"Full Reversion Confirmed at SMA ({movingAverage:F2})";
             }
+
+            // --- DISABLED FOR NAKED BASELINE: Old Bar-Based Time Stop ---
+            // if (position.BarsHeld >= _maxHoldingBars)
+            // {
+            //     return $"Time Stop hit after {position.BarsHeld} bars";
+            // }
 
             return "Hold";
         }
@@ -421,5 +510,46 @@ namespace Temperance.Services.Trading.Strategies.MeanReversion.Implementation
         {
             throw new NotImplementedException();
         }
+
+        public decimal CalculatePositionSize(List<decimal> historicalPrices, decimal currentPortfolioEquity, decimal currentTotalExposure)
+        {
+            // 1. Calculate Daily Returns
+            var dailyReturns = new List<double>();
+            for (int i = 1; i < historicalPrices.Count; i++)
+            {
+                // Log returns are standard for quantitative volatility math
+                double logReturn = Math.Log((double)(historicalPrices[i] / historicalPrices[i - 1]));
+                dailyReturns.Add(logReturn);
+            }
+
+            // 2. Calculate Standard Deviation of Daily Returns
+            double averageReturn = dailyReturns.Average();
+            double sumOfSquaredDifferences = dailyReturns.Sum(r => Math.Pow(r - averageReturn, 2));
+            double dailyVariance = sumOfSquaredDifferences / dailyReturns.Count;
+            double dailyVolatility = Math.Sqrt(dailyVariance);
+
+            // 3. Annualize the Asset Volatility (assume 252 trading days)
+            decimal assetAnnualVolatility = (decimal)(dailyVolatility * Math.Sqrt(252));
+
+            // Prevent divide-by-zero if an asset is frozen
+            if (assetAnnualVolatility == 0) return 0m;
+
+            // 4. THE CARVER EQUATION: Weight = Target Vol / Asset Vol
+            decimal impliedWeight = TargetAnnualVolatility / assetAnnualVolatility;
+
+            // 5. Calculate Raw Dollar Allocation
+            decimal rawDollarAllocation = currentPortfolioEquity * impliedWeight;
+
+            // 6. THE MARGIN GOVERNOR (The Reality Check)
+            // How much room do we actually have left before we hit our leverage ceiling?
+            decimal maxAllowableExposure = currentPortfolioEquity * MaxLeverageCap;
+            decimal availableCapitalSpace = maxAllowableExposure - currentTotalExposure;
+
+            // Return whichever is smaller: what the math wants, or what the broker allows.
+            decimal finalAllocation = Math.Min(rawDollarAllocation, Math.Max(0, availableCapitalSpace));
+
+            return finalAllocation;
+        }
     }
 }
+

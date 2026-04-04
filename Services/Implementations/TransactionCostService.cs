@@ -1,4 +1,5 @@
-﻿using Temperance.Constellations.Models.Trading;
+﻿using Temperance.Constellations.Models.Policy;
+using Temperance.Constellations.Models.Trading;
 using Temperance.Constellations.Services.Interfaces;
 
 namespace Temperance.Services.Services.Implementations
@@ -173,7 +174,7 @@ namespace Temperance.Services.Services.Implementations
 
             // 5. Threshold: 15% is the Institutional "Pain" limit.
             // If costs > 15% of the daily ATR, the Sharpe Ratio will likely be negative.
-            if (costToVolRatio > 0.15m)
+            if (costToVolRatio > TradingEnginePolicy.MAX_TRANSACTION_COST_TO_ATR_RATIO_THRESHOLD)
             {
                 return false;
             }

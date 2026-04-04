@@ -31,5 +31,6 @@ namespace Temperance.Constellations.Repositories.Interfaces
         Task UpdateSessionCapitalAsync(Guid sessionId, decimal newCapital);
         Task<TradeSummary?> GetActiveTradeByPositionIdAsync(Guid positionId);
         Task SaveTradesBulkAsync(IEnumerable<TradeSummary> trades);
+        Task<IEnumerable<TradeSummary>> GetTradesByRunIdAsync(Guid runId);
     }
 }

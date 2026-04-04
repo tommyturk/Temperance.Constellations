@@ -167,5 +167,10 @@ namespace Temperance.Services.Trading.Strategies.Momentum
         {
             throw new NotImplementedException();
         }
+
+        public decimal GetAllocationAmount(in PriceModel currentBar, IReadOnlyList<PriceModel> historicalDataWindow, Dictionary<string, decimal> currentIndicatorValues, decimal maxTradeAllocationInitialCapital, decimal currentTotalEquity, decimal expectedSharpe, int rawMacroScore, decimal dynamicIdm, int activePortfolioSize)
+        {
+            throw new NotImplementedException();
+        }
     }
 }

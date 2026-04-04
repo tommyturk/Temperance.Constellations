@@ -1,4 +1,5 @@
 ﻿using Newtonsoft.Json;
+using System.Collections.Generic;
 using System.Collections.Concurrent;
 using Temperance.Constellations.Models;
 using Temperance.Constellations.Models.Trading;
@@ -12,13 +13,16 @@ namespace Temperance.Services.Services.Implementations
     public class PortfolioManager : IPortfolioManager
     {
         private readonly ILogger<PortfolioManager> _logger;
-        private decimal _initialCapital;
+
+        // --- LOCKS ---
         private readonly object _cashLock = new object();
+        private readonly object _positionLock = new object();
+
         private decimal _currentCash;
+        private Guid _sessionId;
+
         private readonly ConcurrentDictionary<string, Constellations.Models.Trading.Position> _openPositions;
         private readonly ConcurrentBag<TradeSummary> _completedTradesHistory;
-        private decimal _allocatedCapital;
-        private Guid _sessionId;
 
         public PortfolioManager(ILogger<PortfolioManager> logger)
         {
@@ -50,26 +54,37 @@ namespace Temperance.Services.Services.Implementations
 
         public decimal GetTotalEquity()
         {
-            decimal openPositionValue = _openPositions.Values.Sum(p => p.AverageEntryPrice * p.Quantity);
-            return GetAvailableCapital() + openPositionValue;
+            decimal openMarketValue = 0;
+            lock (_positionLock)
+            {
+                openMarketValue = _openPositions.Values.Sum(p => p.CurrentMarketValue);
+            }
+            return GetAvailableCapital() + openMarketValue;
         }
 
         public decimal GetTotalEquity(Dictionary<string, decimal> latestPrices)
         {
             decimal openPositionValue = 0;
-            lock (_cashLock)
+            lock (_positionLock)
             {
                 foreach (var position in _openPositions.Values)
+                {
                     if (latestPrices.TryGetValue(position.Symbol, out decimal currentPrice))
                         openPositionValue += currentPrice * position.Quantity;
                     else
                         openPositionValue += position.AverageEntryPrice * position.Quantity;
+                }
             }
-
             return GetAvailableCapital() + openPositionValue;
         }
 
-        public decimal GetAllocatedCapital() => _allocatedCapital;
+        public decimal GetAllocatedCapital()
+        {
+            lock (_positionLock)
+            {
+                return _openPositions.Values.Sum(p => p.AverageEntryPrice * p.Quantity);
+            }
+        }
 
         public IReadOnlyList<Constellations.Models.Trading.Position> GetOpenPositions() => _openPositions.Values.ToList();
 
@@ -82,112 +97,116 @@ namespace Temperance.Services.Services.Implementations
 
         public void UpdateHoldings(Dictionary<string, decimal> currentPrices)
         {
-            foreach(var position in _openPositions.Values)
-                if (currentPrices.TryGetValue(position.Symbol, out var currentPrice) && currentPrice > 0)
-                    position.CurrentMarketValue = position.Quantity * currentPrice;
+            lock (_positionLock)
+            {
+                foreach (var position in _openPositions.Values)
+                {
+                    if (currentPrices.TryGetValue(position.Symbol, out var currentPrice) && currentPrice > 0)
+                        position.CurrentMarketValue = position.Quantity * currentPrice;
+                }
+            }
+        }
+
+        public Task UpdateMarketPricesAsync(DateTime timestamp, Dictionary<string, PriceModel> currentPrices)
+        {
+            lock (_positionLock)
+            {
+                foreach (var position in _openPositions.Values)
+                {
+                    if (currentPrices.TryGetValue(position.Symbol, out var bar))
+                    {
+                        decimal currentPrice = bar.ClosePrice;
+
+                        if (position.Direction == PositionDirection.Long)
+                        {
+                            position.CurrentMarketValue = currentPrice * position.Quantity;
+                        }
+                        else // SHORT POSITION
+                        {
+                            decimal marginHeld = position.AverageEntryPrice * position.Quantity;
+                            decimal unrealizedPnL = (position.AverageEntryPrice - currentPrice) * position.Quantity;
+                            position.CurrentMarketValue = marginHeld + unrealizedPnL;
+                        }
+                    }
+                }
+            }
+            return Task.CompletedTask;
         }
 
         public Task<Constellations.Models.Trading.Position?> OpenPosition(
-            string symbol,
-            string interval,
-            PositionDirection direction,
-            int quantity,
-            decimal entryPrice,
-            DateTime entryDate,
-            decimal totalEntryCost)
+            string symbol, string interval, PositionDirection direction,
+            int quantity, decimal entryPrice, DateTime entryDate, decimal totalEntryCost)
         {
-            if (_openPositions.TryGetValue(symbol, out var existingPosition))
-            {
-                _logger.LogWarning("Failed to open position for {Symbol} as one already exists. Returning existing position.", symbol);
-                return Task.FromResult<Constellations.Models.Trading.Position?>(existingPosition);
-            }
-
-            decimal totalCashOutlay = (quantity * entryPrice) + totalEntryCost;
-
             lock (_cashLock)
             {
+                if (_openPositions.TryGetValue(symbol, out var existingPosition))
+                {
+                    _logger.LogWarning("Failed to open position for {Symbol} as one already exists.", symbol);
+                    return Task.FromResult<Constellations.Models.Trading.Position?>(existingPosition);
+                }
+
+                decimal totalCashOutlay = (quantity * entryPrice) + totalEntryCost;
                 if (_currentCash < totalCashOutlay)
                 {
-                    _logger.LogWarning("Insufficient cash to open position for {Symbol}. Required: {Required:C}, Available: {Available:C}",
-                        symbol, totalCashOutlay, _currentCash);
                     return Task.FromResult<Constellations.Models.Trading.Position?>(null);
                 }
 
                 _currentCash -= totalCashOutlay;
-            }
 
-            var newPosition = new Constellations.Models.Trading.Position
-            {
-                Symbol = symbol,
-                Direction = direction,
-                Quantity = quantity,
-                AverageEntryPrice = entryPrice,
-                InitialEntryDate = entryDate,
-                TotalEntryCost = totalEntryCost
-            };
-
-            if (_openPositions.TryAdd(symbol, newPosition))
-            {
-                _logger.LogInformation("Successfully opened new position for {Symbol}.", symbol);
-                return Task.FromResult<Constellations.Models.Trading.Position?>(newPosition);
-            }
-            else
-            {
-                lock (_cashLock) { _currentCash += totalCashOutlay; }
-
-                if (_openPositions.TryGetValue(symbol, out var positionAfterRace))
+                var newPosition = new Constellations.Models.Trading.Position
                 {
-                    _logger.LogWarning("Lost concurrency race for {Symbol}. Cash rolled back. Returning winning existing position.", symbol);
-                    return Task.FromResult<Constellations.Models.Trading.Position?>(positionAfterRace);
-                }
+                    Symbol = symbol,
+                    Interval = interval,
+                    Direction = direction,
+                    Quantity = quantity,
+                    AverageEntryPrice = entryPrice,
+                    TotalEntryCost = totalEntryCost,
+                    InitialEntryDate = entryDate,
+                    HighestPriceSinceEntry = entryPrice,
+                    LowestPriceSinceEntry = entryPrice,
+                    CurrentMarketValue = quantity * entryPrice
+                };
 
-                _logger.LogError("CRITICAL CONCURRENCY ERROR: Position for {Symbol} exists but could not be retrieved for state continuity.", symbol);
-                return Task.FromResult<Constellations.Models.Trading.Position?>(null);
+                _openPositions.TryAdd(symbol, newPosition);
+
+                return Task.FromResult<Constellations.Models.Trading.Position?>(newPosition);
             }
         }
 
         public Constellations.Models.Trading.Position? GetOpenPosition(string symbol, string interval)
         {
-            var openPositions = GetOpenPositions();
-            if (openPositions.Count == 0)
-                return null;
-            return openPositions.Where(x => x.Symbol == symbol && x.Interval == interval).FirstOrDefault();
+            if (_openPositions.TryGetValue(symbol, out var pos) && pos.Interval == interval)
+                return pos;
+            return null;
         }
 
         public Task AddToPosition(string symbol, int quantityToAdd, decimal entryPrice, decimal transactionCost)
         {
-            if (!_openPositions.TryGetValue(symbol, out var existingPosition))
-            {
-                _logger.LogError("Attempted to add to a non-existent position for {Symbol}.", symbol);
-                return Task.CompletedTask;
-            }
+            if (!_openPositions.TryGetValue(symbol, out var existingPosition)) return Task.CompletedTask;
 
             decimal additionalCashOutlay = (quantityToAdd * entryPrice) + transactionCost;
+
             lock (_cashLock)
             {
-                if (_currentCash < additionalCashOutlay)
-                {
-                    _logger.LogWarning("Insufficient cash to add to position for {Symbol}", symbol);
-                    return Task.CompletedTask;
-                }
+                if (_currentCash < additionalCashOutlay) return Task.CompletedTask;
                 _currentCash -= additionalCashOutlay;
             }
 
-            decimal newTotalQuantity = existingPosition.Quantity + quantityToAdd;
-            decimal newTotalValue = (existingPosition.AverageEntryPrice * existingPosition.Quantity) + (entryPrice * quantityToAdd);
+            lock (_positionLock)
+            {
+                decimal newTotalQuantity = existingPosition.Quantity + quantityToAdd;
+                decimal newTotalValue = (existingPosition.AverageEntryPrice * existingPosition.Quantity) + (entryPrice * quantityToAdd);
 
-            existingPosition.AverageEntryPrice = newTotalValue / newTotalQuantity;
-            existingPosition.Quantity = (int)newTotalQuantity;
-            existingPosition.TotalEntryCost += transactionCost;
-            existingPosition.PyramidEntries++;
-
-            _logger.LogInformation("Added {Quantity} shares to {Symbol}. New Avg Price: {AvgPrice}, New Total Quantity: {TotalQuantity}",
-                quantityToAdd, symbol, existingPosition.AverageEntryPrice, existingPosition.Quantity);
+                existingPosition.AverageEntryPrice = newTotalValue / newTotalQuantity;
+                existingPosition.Quantity = (int)newTotalQuantity;
+                existingPosition.TotalEntryCost += transactionCost;
+                existingPosition.PyramidEntries++;
+            }
 
             return Task.CompletedTask;
         }
 
-        public async Task OpenPairPosition(string strategyName, string pairIdentifier, string interval, ActivePairTrade trade)
+        public Task OpenPairPosition(string strategyName, string pairIdentifier, string interval, ActivePairTrade trade)
         {
             lock (_cashLock)
             {
@@ -207,7 +226,9 @@ namespace Temperance.Services.Services.Implementations
                     Quantity = (int)trade.QuantityA,
                     Direction = trade.Direction == PositionDirection.Long ? PositionDirection.Long : PositionDirection.Short,
                     EntryPrice = trade.EntryPriceA,
+                    AverageEntryPrice = trade.EntryPriceA, // Added to prevent MTM bugs
                     EntryDate = trade.EntryDate,
+                    InitialEntryDate = trade.EntryDate
                 };
 
                 var positionB = new Constellations.Models.Trading.Position
@@ -216,29 +237,25 @@ namespace Temperance.Services.Services.Implementations
                     Quantity = (int)trade.QuantityB,
                     Direction = trade.Direction == PositionDirection.Long ? PositionDirection.Short : PositionDirection.Long,
                     EntryPrice = trade.EntryPriceB,
+                    AverageEntryPrice = trade.EntryPriceB, // Added to prevent MTM bugs
                     EntryDate = trade.EntryDate,
+                    InitialEntryDate = trade.EntryDate
                 };
 
-                _openPositions.AddOrUpdate(positionA.Symbol, positionA, (key, existingVal) =>
-                {
-                    return positionA;
-                });
-                _openPositions.AddOrUpdate(positionB.Symbol, positionB, (key, existingVal) =>
-                {
-                    return positionB;
-                });
-
-                decimal totalValue = (positionA.EntryPrice * positionA.Quantity) + (positionB.EntryPrice * positionB.Quantity);
-                _allocatedCapital += (trade.QuantityA * trade.EntryPriceA) + (trade.QuantityB * trade.EntryPriceB);
+                _openPositions.AddOrUpdate(positionA.Symbol, positionA, (key, existingVal) => positionA);
+                _openPositions.AddOrUpdate(positionB.Symbol, positionB, (key, existingVal) => positionB);
             }
+            return Task.CompletedTask;
         }
 
-        public Task<TradeSummary?> ClosePosition(string strategyName, string symbol, string interval, PositionDirection direction, 
+        public Task<TradeSummary?> ClosePosition(string strategyName, string symbol, string interval, PositionDirection direction,
             int quantity, decimal exitPrice, DateTime exitDate, decimal transactionCost, decimal profitLoss)
         {
             if (_openPositions.TryRemove(symbol, out var closedPosition))
             {
-                decimal proceeds = (quantity * exitPrice) - transactionCost;
+                decimal marginReleased = quantity * closedPosition.AverageEntryPrice;
+                decimal entryFeesReturned = closedPosition.TotalEntryCost;
+                decimal proceeds = marginReleased + entryFeesReturned + profitLoss;
 
                 lock (_cashLock)
                 {
@@ -264,55 +281,54 @@ namespace Temperance.Services.Services.Implementations
                 return Task.FromResult<TradeSummary?>(finalTradeSummary);
             }
 
-            _logger.LogWarning("Attempted to close position for {Symbol} but no open position found. This might indicate a logic error or out-of-sync state.", symbol);
             return Task.FromResult<TradeSummary?>(null);
         }
 
         public async Task<TradeSummary?> PartiallyClosePosition(string symbol, int quantityToClose, decimal exitPrice, DateTime exitDate, decimal transactionCost)
         {
-            if (!_openPositions.TryGetValue(symbol, out var position))
+            if (!_openPositions.TryGetValue(symbol, out var position)) return null;
+
+            lock (_positionLock)
             {
-                _logger.LogInformation("Attempted to partially close non-existent position for {Symbol}", symbol);
-                return null;
+                if (quantityToClose <= 0 || quantityToClose >= position.Quantity) return null;
+
+                decimal proportion = (decimal)quantityToClose / position.Quantity;
+                decimal allocatedEntryCost = position.TotalEntryCost * proportion;
+                decimal allocatedMargin = position.AverageEntryPrice * quantityToClose;
+
+                decimal grossPnL = position.Direction == PositionDirection.Long
+                     ? (exitPrice - position.AverageEntryPrice) * quantityToClose
+                     : (position.AverageEntryPrice - exitPrice) * quantityToClose;
+
+                decimal netPnL = grossPnL - transactionCost - allocatedEntryCost;
+                decimal proceeds = allocatedMargin + allocatedEntryCost + netPnL;
+
+                lock (_cashLock)
+                {
+                    _currentCash += proceeds;
+                }
+
+                position.Quantity -= quantityToClose;
+                position.TotalEntryCost -= allocatedEntryCost;
+
+                var partialTradeSummary = new TradeSummary()
+                {
+                    Id = Guid.NewGuid(),
+                    Symbol = position.Symbol,
+                    Direction = position.Direction.ToString(),
+                    EntryDate = position.InitialEntryDate,
+                    EntryPrice = position.AverageEntryPrice,
+                    ExitDate = exitDate,
+                    ExitPrice = exitPrice,
+                    Quantity = quantityToClose,
+                    ProfitLoss = netPnL,
+                    TotalTransactionCost = transactionCost + allocatedEntryCost,
+                    ExitReason = "Partial Profit Target Hit"
+                };
+
+                _completedTradesHistory.Add(partialTradeSummary);
+                return partialTradeSummary;
             }
-
-            if (quantityToClose <= 0 || quantityToClose >= position.Quantity)
-            {
-                _logger.LogError("Invalid quantity for partial close on {Symbol}. Qty: {Qty}", symbol, quantityToClose);
-                return null;
-            }
-
-            _logger.LogInformation("Partially closing {Qty} shares of {Symbol} at {Price}", quantityToClose, symbol, exitPrice);
-
-            decimal proceeds = (quantityToClose * exitPrice) - transactionCost;
-
-            lock (_cashLock) _currentCash += proceeds;
-
-            decimal profitLoss = 0;
-            if (position.Direction == PositionDirection.Long)
-                profitLoss = (exitPrice - position.AverageEntryPrice) * quantityToClose;
-            else
-                profitLoss = (position.AverageEntryPrice - exitPrice) * quantityToClose;
-
-            position.Quantity -= quantityToClose;
-
-            var partialTradeSummary = new TradeSummary()
-            {
-                Id = Guid.NewGuid(),
-                Symbol = position.Symbol,
-                Direction = position.Direction.ToString(),
-                EntryDate = position.InitialEntryDate,
-                EntryPrice = position.AverageEntryPrice,
-                ExitDate = exitDate,
-                ExitPrice = exitPrice,
-                Quantity = quantityToClose,
-                ProfitLoss = profitLoss - transactionCost,
-                TotalTransactionCost = transactionCost,
-                ExitReason = "Partial Profit Target Hit"
-            };
-
-            _completedTradesHistory.Add(partialTradeSummary);
-            return partialTradeSummary;
         }
 
         public Task<TradeSummary?> ClosePosition(TradeSummary completedTrade)
@@ -330,7 +346,6 @@ namespace Temperance.Services.Services.Implementations
                 return Task.FromResult<TradeSummary?>(completedTrade);
             }
 
-            _logger.LogWarning("Attempted to close position for {Symbol} but no open position found.", completedTrade.Symbol);
             return Task.FromResult<TradeSummary?>(null);
         }
 
@@ -349,8 +364,7 @@ namespace Temperance.Services.Services.Implementations
 
             if (positionA.Value == null || positionB.Value == null)
             {
-                _logger.LogError("Could not find one or both legs of the pair trade for {SymbolA}/{SymbolB} entered at {EntryDate} to close.",
-                    activeTrade.SymbolA, activeTrade.SymbolB, activeTrade.EntryDate);
+                _logger.LogError("Could not find one or both legs of the pair trade to close.");
                 return Task.FromResult<TradeSummary?>(null);
             }
 
@@ -359,7 +373,11 @@ namespace Temperance.Services.Services.Implementations
 
             decimal closingValueA = positionA.Value.Quantity * exitPriceA;
             decimal closingValueB = positionB.Value.Quantity * exitPriceB;
-            _currentCash += closingValueA + closingValueB - totalExitTransactionCost;
+
+            lock (_cashLock)
+            {
+                _currentCash += closingValueA + closingValueB - totalExitTransactionCost;
+            }
 
             var positionAValue = positionA.Value;
             var positionBValue = positionB.Value;
@@ -367,9 +385,11 @@ namespace Temperance.Services.Services.Implementations
             decimal pnlA = (positionAValue.Direction == PositionDirection.Long)
                 ? (exitPriceA - positionAValue.EntryPrice) * positionAValue.Quantity
                 : (positionAValue.EntryPrice - exitPriceA) * positionAValue.Quantity;
+
             decimal pnlB = (positionBValue.Direction == PositionDirection.Long)
                 ? (exitPriceB - positionBValue.EntryPrice) * positionBValue.Quantity
                 : (positionBValue.EntryPrice - exitPriceB) * positionBValue.Quantity;
+
             decimal totalTransactionCost = activeTrade.TotalEntryTransactionCost + totalExitTransactionCost;
             decimal netProfitLoss = (pnlA + pnlB) - totalTransactionCost;
 
@@ -401,40 +421,14 @@ namespace Temperance.Services.Services.Implementations
                 _openPositions.TryAdd(position.Symbol, position);
             }
             _completedTradesHistory.Clear();
-            _logger.LogInformation("PortfolioManager state hydrated with {Cash:C} cash and {PositionCount} open positions.", cash, openPositions.Count());
-        }
-
-        public Task UpdateMarketPricesAsync(DateTime timestamp, Dictionary<string, PriceModel> currentPrices)
-        {
-            foreach (var position in _openPositions.Values)
-            {
-                if (currentPrices.TryGetValue(position.Symbol, out var bar))
-                {
-                    // 1. Get the current price from the bar
-                    decimal currentPrice = bar.ClosePrice;
-
-                    // 2. Update the *only* property that needs to be set.
-                    // Your model calculates the rest automatically.
-                    position.CurrentMarketValue = currentPrice * position.Quantity;
-                }
-                // If no price is found, we hold the last known value,
-                // so no 'else' block is needed.
-            }
-
-            // You can optionally update the portfolio's total equity here
-            // _totalEquity = _cash + _openPositions.Values.Sum(p => p.UnrealizedPnL + p.CostBasis);
-            // Or, more simply, if UnrealizedPnL is correct:
-            // _totalEquity = _currentCash + _openPositions.Values.Sum(p => p.CurrentMarketValue);
-
-            return Task.CompletedTask;
         }
 
         public PortfolioStateModel GetPortfolioState()
         {
             return new PortfolioStateModel
             {
-                SessionId = _sessionId, 
-                Cash = _currentCash, 
+                SessionId = _sessionId,
+                Cash = _currentCash,
                 OpenPositionsJson = JsonConvert.SerializeObject(_openPositions.Values),
                 AsOfDate = DateTime.UtcNow,
             };
@@ -443,21 +437,20 @@ namespace Temperance.Services.Services.Implementations
         public PortfolioStateModel GetPortfolioState(Dictionary<string, decimal> currentPrices)
         {
             decimal totalUnrealizedPnL = 0;
-            decimal marketValueOfPositions = 0;
+            decimal totalMarginHeld = 0;
 
-            foreach (var position in _openPositions.Values)
+            lock (_positionLock)
             {
-                if (currentPrices.TryGetValue(position.Symbol, out var currentPrice))
+                foreach (var position in _openPositions.Values)
                 {
-                    var pnl = (currentPrice - position.EntryPrice) * position.Quantity;
-                    totalUnrealizedPnL += pnl;
+                    decimal currentPrice = currentPrices.TryGetValue(position.Symbol, out var price) ? price : position.AverageEntryPrice;
 
-                    marketValueOfPositions += (currentPrice * position.Quantity);
-                }
-                else
-                {
-                    marketValueOfPositions += (position.EntryPrice * position.Quantity);
-                    _logger.LogWarning("No current price found for {Symbol} during state snapshot.", position.Symbol);
+                    decimal pnl = position.Direction == PositionDirection.Long
+                        ? (currentPrice - position.AverageEntryPrice) * position.Quantity
+                        : (position.AverageEntryPrice - currentPrice) * position.Quantity;
+
+                    totalUnrealizedPnL += pnl;
+                    totalMarginHeld += (position.AverageEntryPrice * position.Quantity);
                 }
             }
 
@@ -467,17 +460,46 @@ namespace Temperance.Services.Services.Implementations
                 Cash = _currentCash,
                 OpenPositionsJson = JsonConvert.SerializeObject(_openPositions.Values),
                 AsOfDate = DateTime.UtcNow,
-
                 UnrealizedPnL = totalUnrealizedPnL,
-
-                TotalEquity = _currentCash + marketValueOfPositions
+                TotalEquity = _currentCash + totalMarginHeld + totalUnrealizedPnL
             };
         }
 
+        public PortfolioStateModel GetPortfolioState(Dictionary<string, PriceModel> currentPrices)
+        {
+            decimal totalUnrealizedPnL = 0;
+            decimal totalMarginHeld = 0;
+
+            lock (_positionLock)
+            {
+                foreach (var position in _openPositions.Values)
+                {
+                    // Extract the ClosePrice from the PriceModel, fallback to EntryPrice if missing
+                    decimal currentPrice = currentPrices.TryGetValue(position.Symbol, out var bar) ? bar.ClosePrice : position.AverageEntryPrice;
+
+                    decimal pnl = position.Direction == PositionDirection.Long
+                        ? (currentPrice - position.AverageEntryPrice) * position.Quantity
+                        : (position.AverageEntryPrice - currentPrice) * position.Quantity;
+
+                    totalUnrealizedPnL += pnl;
+                    totalMarginHeld += (position.AverageEntryPrice * position.Quantity);
+                }
+            }
+
+            return new PortfolioStateModel
+            {
+                SessionId = _sessionId,
+                Cash = _currentCash,
+                OpenPositionsJson = JsonConvert.SerializeObject(_openPositions.Values),
+                AsOfDate = DateTime.UtcNow,
+                UnrealizedPnL = totalUnrealizedPnL,
+                TotalEquity = _currentCash + totalMarginHeld + totalUnrealizedPnL
+            };
+        }
 
         public bool HasOpenPosition(string symbol)
         {
-            return _openPositions.Values.Any(p => p.Symbol == symbol);
+            return _openPositions.ContainsKey(symbol);
         }
     }
 }

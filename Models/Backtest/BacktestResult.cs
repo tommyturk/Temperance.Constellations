@@ -30,6 +30,11 @@ namespace Temperance.Constellations.Models
         public decimal KellyHalfFraction { get; set; }
         public decimal SharpeRatio { get; set; }
 
+        public decimal? EndingCash { get; set; }
+        public decimal? AllocatedCapital { get; set; }
+        public decimal? UnrealizedProfitLoss { get; set; }
+        public int? OpenTradesCount { get; set; }
+
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] // Avoid large payload unless requested
         public List<KeyValuePair<DateTime, decimal>>? EquityCurve { get; set; }
 

@@ -33,5 +33,6 @@ namespace Temperance.Constellations.Services.Interfaces
         Task<TradeSummary?> GetActiveTradeForPositionAsync(Guid positionId);
 
         Task SaveTradesBulkAsync(IEnumerable<TradeSummary> trades);
+        Task<IEnumerable<TradeSummary>> GetTradesByRunIdAsync(Guid lastActiveRunId);
     }
 }

@@ -17,6 +17,9 @@
         public DateTime CreatedDate { get; set; }
 
         public decimal? CommissionCost { get; set; }
+        public decimal DynamicIdm { get; set; }
+        public decimal MacroMultiplier { get; set; }
+        public decimal ConvictionMultiplier { get; set; }
         public decimal? SlippageCost { get; set; }
         public decimal? OtherTransactionCost { get; set; }
         public decimal? TotalTransactionCost { get; set; }
@@ -31,5 +34,7 @@
         public DateTime HoldingPeriod { get; set; }
         public decimal TransactionCost { get; set; }
 
+        public string EntryIndicatorsJson { get; set; }
+        public string ExitIndicatorsJson { get; set; }
     }
 }

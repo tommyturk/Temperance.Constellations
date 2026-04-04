@@ -29,7 +29,8 @@ public class PortfolioCommitteeService : IPortfolioCommitteeService
      string strategyName,
      string interval,
      DateTime cycleStartDate,
-     int maxActivePositions)
+     int maxActivePositions,
+     IReadOnlySet<string> allowedUniverse)
     {
         _logger.LogInformation("Holding Portfolio Committee for Session {SessionId} at {Date}", sessionId, cycleStartDate.ToShortDateString());
 
@@ -37,7 +38,14 @@ public class PortfolioCommitteeService : IPortfolioCommitteeService
         var shadowReports = await _shadowPerformanceRepository.Get(sessionId);
 
         // 2. Prediction: Get the parameters LUDUS generated that are valid for this cycle start date
-        var ludusPredictions = await _strategyOptimizedParameterRepository.GetParametersValidOnDateAsync(strategyName, interval, cycleStartDate);
+        var rawPredictions = await _strategyOptimizedParameterRepository.GetParametersValidOnDateAsync(strategyName, interval, cycleStartDate);
+
+        // THE FIX: Group by symbol, and only let the absolute best one into the debate.
+        var ludusPredictions = rawPredictions
+            .Where(p => allowedUniverse.Contains(p.Symbol))
+            .GroupBy(p => p.Symbol)
+            .Select(g => g.First())
+            .ToList();
 
         var candidates = new List<CandidateSleeve>();
 
@@ -69,20 +77,41 @@ public class PortfolioCommitteeService : IPortfolioCommitteeService
             };
 
             // 4. The Scoring Algorithm
-            if (candidate.ShadowWinRate < 0.35m || candidate.ShadowMaxDrawdown < -0.15m)
-                candidate.CompositeScore = -999;
-            else if (shadow == null || shadow.TotalTrades < 5)
-                candidate.CompositeScore = candidate.ExpectedSharpe * 0.5m;
+            //if (candidate.ShadowWinRate < 0.35m || candidate.ShadowMaxDrawdown < -0.15m)
+            //    candidate.CompositeScore = -999;
+            //else if (shadow == null || shadow.TotalTrades < 5)
+            //    candidate.CompositeScore = candidate.ExpectedSharpe * 0.5m;
+            //else
+            //    candidate.CompositeScore = (candidate.ShadowSharpe * 0.7m) + (candidate.ExpectedSharpe * 0.3m);
+
+            if (shadow == null || shadow.TotalTrades < 3)
+            {
+                // RELIANCE ON LUDUS EXPECTATION
+                // If we have no shadow data, trust the optimizer's expected win rate, not Sharpe.
+                decimal expectedDensity = Math.Min(metrics.TotalTrades / 50m, 1.0m);
+                candidate.CompositeScore = (metrics.WinRate * 0.70m) + (expectedDensity * 0.30m);
+                if (metrics.WinRate < 0.52m) candidate.CompositeScore = -9999m;
+            }
             else
-                candidate.CompositeScore = (candidate.ShadowSharpe * 0.7m) + (candidate.ExpectedSharpe * 0.3m);
+            {
+                if (candidate.ShadowWinRate < 0.52m)
+                {
+                    candidate.CompositeScore = -9999m;
+                }
+                else
+                {
+                    decimal normalizedDensity = Math.Min(shadow.TotalTrades / 50m, 1.0m);
+                    candidate.CompositeScore = (candidate.ShadowWinRate * 0.70m) + (normalizedDensity * 0.30m);
+                }
+            }
 
             candidates.Add(candidate);
         }
 
         // 5. The Draft Pick
         var draftedSymbols = candidates
+            .Where(c => c.CompositeScore > -9000m) // ENFORCE THE VETO
             .OrderByDescending(c => c.CompositeScore)
-            .Take(maxActivePositions)
             .Select(c => c.Symbol)
             .ToHashSet();
 

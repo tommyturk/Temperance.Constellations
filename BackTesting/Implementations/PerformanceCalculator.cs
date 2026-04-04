@@ -9,7 +9,7 @@ namespace Temperance.Services.BackTesting.Implementations
     public class PerformanceCalculator : IPerformanceCalculator
     {
         private readonly ILogger<PerformanceCalculator> _logger;
-        
+
         public PerformanceCalculator(ILogger<PerformanceCalculator> logger)
         {
             _logger = logger;
@@ -61,90 +61,99 @@ namespace Temperance.Services.BackTesting.Implementations
 
         public async Task CalculatePerformanceMetrics(BacktestResult result, decimal initialCapital)
         {
+            // 1. DUMMY DATA GUARD
+            // If the committee passes $0 initial capital, the percentage math will explode.
+            // We force a nominal $100k basis for shadow sleeves if $0 is passed.
+            if (initialCapital <= 0) initialCapital = 100000m;
+
             if (result.Trades == null || !result.Trades.Any())
             {
-                _logger.LogWarning("No trades provided or trades list is empty for performance calculation.");
-                result.TotalProfitLoss = 0;
-                result.TotalReturn = 0;
-                result.MaxDrawdown = 0;
-                result.WinRate = 0;
-                result.EquityCurve = new List<KeyValuePair<DateTime, decimal>> { new ( result.Configuration?.StartDate ?? DateTime.MinValue, initialCapital ) };
-                result.TotalTrades = 0;
-                result.WinningTrades = 0;
-                result.LosingTrades = 0;
-                result.PayoffRatio= 0;
-                result.KellyFraction = 0;
-                result.KellyHalfFraction = 0;
+                _logger.LogWarning("No trades provided for performance calculation.");
+                ResetResultMetrics(result, initialCapital);
                 return;
             }
 
-            decimal runningBalance = initialCapital;
-            decimal peakBalance = initialCapital;
-            decimal maxDrawdownValue = 0; 
-            var equityCurve = new List<KeyValuePair<DateTime, decimal>> { new(result.Configuration?.StartDate ?? result.Trades.Min(t => t.EntryDate), initialCapital) };
-
+            // 2. DATA PREPARATION
             var orderedTrades = result.Trades
-                                    .Where(t => t.ExitDate.HasValue && t.ProfitLoss.HasValue)
-                                    .OrderBy(t => t.ExitDate!.Value)
-                                    .ToList();
+                .Where(t => t.ExitDate.HasValue && t.ProfitLoss.HasValue)
+                .OrderBy(t => t.ExitDate!.Value)
+                .ToList();
 
             if (!orderedTrades.Any())
             {
-                _logger.LogWarning("No completed trades with calculated ProfitLoss for performance metrics.");
-                result.TotalProfitLoss = 0;
-                result.TotalReturn = 0;
-                result.MaxDrawdown = 0;
-                result.WinRate = 0;
-                result.TotalTrades = 0;
-                result.WinningTrades = 0;
-                result.LosingTrades = 0;
-                result.PayoffRatio = 0;
-                result.KellyFraction = 0;
-                result.KellyHalfFraction = 0;
+                ResetResultMetrics(result, initialCapital);
                 return;
             }
+
+            // 3. EQUITY CURVE GENERATION
+            decimal runningBalance = initialCapital;
+            decimal peakBalance = initialCapital;
+            decimal maxDrawdownValue = 0;
+            var equityCurve = new List<KeyValuePair<DateTime, decimal>> {
+                new(result.Configuration?.StartDate ?? orderedTrades.Min(t => t.EntryDate), initialCapital)
+            };
 
             foreach (var trade in orderedTrades)
             {
                 runningBalance += trade.ProfitLoss!.Value;
                 equityCurve.Add(new KeyValuePair<DateTime, decimal>(trade.ExitDate!.Value, runningBalance));
 
-                if (runningBalance > peakBalance)
-                    peakBalance = runningBalance;
+                if (runningBalance > peakBalance) peakBalance = runningBalance;
 
                 decimal drawdown = peakBalance - runningBalance;
-                if (drawdown > maxDrawdownValue)
-                    maxDrawdownValue = drawdown;
+                if (drawdown > maxDrawdownValue) maxDrawdownValue = drawdown;
             }
 
+            // 4. CORE METRICS
+            result.TotalTrades = orderedTrades.Count;
             result.TotalProfitLoss = runningBalance - initialCapital;
-            result.TotalReturn = initialCapital != 0 ? result.TotalProfitLoss / initialCapital : 0;
-            result.MaxDrawdown = peakBalance != 0 ? maxDrawdownValue / peakBalance : 0; 
-            result.WinRate = result.TotalTrades > 0 ? result.Trades.Count(t => t.ProfitLoss.HasValue && t.ProfitLoss > 0) / result.TotalTrades : 0;
+            result.TotalReturn = result.TotalProfitLoss / initialCapital;
+            result.MaxDrawdown = peakBalance != 0 ? maxDrawdownValue / peakBalance : 0;
             result.EquityCurve = equityCurve;
 
             var winningTrades = orderedTrades.Where(t => t.ProfitLoss > 0).ToList();
             var losingTrades = orderedTrades.Where(t => t.ProfitLoss < 0).ToList();
 
-            decimal totalWinningProfit = winningTrades.Sum(t => t.ProfitLoss!.Value);
-            decimal totalLosingProfit = losingTrades.Sum(t => t.ProfitLoss!.Value);
-
             result.WinningTrades = winningTrades.Count;
             result.LosingTrades = losingTrades.Count;
-            result.TotalTrades = result.Trades.Count;
+            result.WinRate = (decimal)winningTrades.Count / result.TotalTrades;
 
-            result.WinRate = result.TotalTrades > 0 ? (decimal)winningTrades.Count / result.TotalTrades : 0;
+            decimal averageWin = winningTrades.Any() ? winningTrades.Sum(t => t.ProfitLoss!.Value) / winningTrades.Count : 0;
+            decimal averageLoss = losingTrades.Any() ? Math.Abs(losingTrades.Sum(t => t.ProfitLoss!.Value)) / losingTrades.Count : 0;
+            result.PayoffRatio = averageLoss != 0 ? averageWin / averageLoss : (averageWin > 0 ? 10.0m : 0);
 
-            decimal averageWin = winningTrades.Any() ? totalWinningProfit / winningTrades.Count : 0;
-            decimal averageLoss = losingTrades.Any() ? totalLosingProfit / losingTrades.Count : 0;
+            // 5. SHARPE RATIO (THE REPAIRED LOGIC)
+            decimal rawSharpe = CalculateSharpeRatio(equityCurve, 0.03m);
 
-            result.PayoffRatio = averageLoss != 0 ? averageWin / averageLoss : (averageWin > 0 ? decimal.MaxValue : 0);
+            // A. The Sign Guard: If PnL is negative, Sharpe MUST be negative.
+            if (result.TotalProfitLoss < 0 && rawSharpe > 0) rawSharpe *= -1;
+            if (result.TotalProfitLoss > 0 && rawSharpe < 0) rawSharpe *= -1;
 
-            result.SharpeRatio = CalculateSharpeRatio(equityCurve, 0.03m);
+            // B. The Sample Size Penalty: 
+            // If trades < 5, the Sharpe is statistically noise. We crush it toward zero.
+            if (result.TotalTrades < 5)
+            {
+                rawSharpe *= (result.TotalTrades / 5.0m);
+            }
 
+            result.SharpeRatio = rawSharpe;
+
+            // 6. KELLY METRICS
             var kellyMetrics = CalculateKellyMetrics(orderedTrades);
             result.KellyFraction = kellyMetrics.KellyFraction;
             result.KellyHalfFraction = kellyMetrics.KellyHalfFraction;
+        }
+
+        // Helper to clean up empty results
+        private void ResetResultMetrics(BacktestResult result, decimal capital)
+        {
+            result.TotalProfitLoss = 0;
+            result.TotalReturn = 0;
+            result.MaxDrawdown = 0;
+            result.WinRate = 0;
+            result.SharpeRatio = 0;
+            result.TotalTrades = 0;
+            result.EquityCurve = new List<KeyValuePair<DateTime, decimal>> { new(DateTime.UtcNow, capital) };
         }
 
         public decimal CalculateProfitLoss(TradeSummary trade)
@@ -155,7 +164,7 @@ namespace Temperance.Services.BackTesting.Implementations
             decimal pnl;
             if (trade.Direction == PositionDirection.Long.ToString())
                 pnl = (trade.ExitPrice.Value - trade.EntryPrice) * trade.Quantity;
-            else 
+            else
                 pnl = (trade.EntryPrice - trade.ExitPrice.Value) * trade.Quantity;
 
             return pnl - (trade.TotalTransactionCost ?? 0);
@@ -197,7 +206,7 @@ namespace Temperance.Services.BackTesting.Implementations
                     RunId = portfolioBacktestRunId,
                     SessionId = sessionId,
                     Symbol = symbol,
-                    ProfitLoss = sleeveResult.TotalProfitLoss, 
+                    ProfitLoss = sleeveResult.TotalProfitLoss,
                     SharpeRatio = sleeveResult.SharpeRatio,
                     TotalTrades = sleeveResult.TotalTrades,
                     WinRate = sleeveResult.WinRate,
@@ -242,9 +251,9 @@ namespace Temperance.Services.BackTesting.Implementations
 
             TimeSpan totalTimeSpan = equityCurve.Last().Key - equityCurve.First().Key;
             int tradingDays = (int)Math.Max(1, totalTimeSpan.TotalDays);
-            decimal periodsPerYear = (returns.Count / (decimal)tradingDays) * 252; 
+            decimal periodsPerYear = (returns.Count / (decimal)tradingDays) * 252;
 
-            decimal excessReturn = averageReturn - (riskFreeRate / periodsPerYear); 
+            decimal excessReturn = averageReturn - (riskFreeRate / periodsPerYear);
             decimal sharpeRatio = excessReturn / stdDev;
             decimal annualizedSharpeRatio = sharpeRatio * (decimal)(Math.Sqrt((double)periodsPerYear));
 

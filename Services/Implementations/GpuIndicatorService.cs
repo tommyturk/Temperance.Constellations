@@ -11,104 +11,159 @@ namespace Temperance.Services.Services.Implementations
     public class GpuIndicatorService : IGpuIndicatorService, IDisposable
     {
         private readonly Accelerator _accelerator;
+        private readonly Action<Index1D, ArrayView<double>, ArrayView<double>, int> _smaKernel;
+        private readonly Action<Index1D, ArrayView<double>, ArrayView<double>, int> _stdDevKernel;
+        private readonly Action<Index1D, ArrayView<double>, ArrayView<double>, ArrayView<double>, ArrayView<double>> _trKernel;
+        private readonly Action<Index1D, ArrayView<double>, ArrayView<double>, int> _rsiKernel;
         private readonly ILogger<GpuIndicatorService> _logger;
 
         public GpuIndicatorService(ILogger<GpuIndicatorService> logger, Accelerator accelerator)
         {
             _accelerator = accelerator;
             _logger = logger;
+
+            // LOAD KERNELS ONCE AT STARTUP
+            _smaKernel = _accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<double>, ArrayView<double>, int>(SmaKernel);
+            _stdDevKernel = _accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<double>, ArrayView<double>, int>(StdDevKernel);
+            _trKernel = _accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<double>, ArrayView<double>, ArrayView<double>, ArrayView<double>>(TrueRangeKernel);
+            _rsiKernel = _accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<double>, ArrayView<double>, int>(RsiKernel);
+
+            _logger.LogInformation("GPU Kernels cached and ready for Warp Drive.");
         }
 
         // --- NEW BULK METHOD ---
         public async Task<Dictionary<DateTime, Dictionary<string, decimal>>> CalculateBulkIndicatorsAsync(
-            List<PriceModel> prices,
-            Dictionary<string, object> parameters)
+        ReadOnlyMemory<PriceModel> prices,
+        Dictionary<string, object> parameters)
         {
-            if (prices == null || prices.Count == 0) return new();
+            if (prices.IsEmpty) return new Dictionary<DateTime, Dictionary<string, decimal>>();
 
-            // The "Swiss Army Knife" of parsers
+            // 1. FAST PARSING
             T Parse<T>(T defaultValue, params string[] keys)
             {
                 foreach (var key in keys)
                 {
                     if (!parameters.TryGetValue(key, out var val) || val == null) continue;
-
                     if (val is System.Text.Json.JsonElement element)
                     {
                         if (typeof(T) == typeof(int)) return (T)(object)element.GetInt32();
                         if (typeof(T) == typeof(double)) return (T)(object)element.GetDouble();
                         if (typeof(T) == typeof(decimal)) return (T)(object)element.GetDecimal();
                     }
-
-                    try { return (T)Convert.ChangeType(val, typeof(T)); }
-                    catch { /* try next key */ }
+                    try { return (T)Convert.ChangeType(val, typeof(T)); } catch { }
                 }
                 return defaultValue;
             }
 
-            // --- MAPPING YOUR CPO KEYS TO GPU VARIABLES ---
-
-            // MaPeriod: checks "MovingAveragePeriod" then falls back to "MaPeriod"
             int maPeriod = Parse(20, "MovingAveragePeriod", "MaPeriod");
-
-            // StdDevMult: checks "StdDevMultiplier"
+            int maLongPeriod = 1300;
             double stdDevMult = Parse(2.0, "StdDevMultiplier");
-
-            // RsiPeriod: checks "RSIPeriod" (Note the casing!)
             int rsiPeriod = Parse(14, "RSIPeriod", "RsiPeriod");
-
-            // AtrPeriod: checks "AtrPeriod"
             int atrPeriod = Parse(14, "AtrPeriod");
 
-            // Other params from your list (in case you need them later)
-            double rsiOversold = Parse(30.0, "RSIOversold");
-            double rsiOverbought = Parse(70.0, "RSIOverbought");
-            double atrMult = Parse(2.5, "AtrMultiplier");
-            int n = prices.Count;
-            var timestamps = prices.Select(p => p.Timestamp).ToList();
+            int n = prices.Length;
 
-            var highD = prices.Select(p => (double)p.HighPrice).ToArray();
-            var lowD = prices.Select(p => (double)p.LowPrice).ToArray();
-            var closeD = prices.Select(p => (double)p.ClosePrice).ToArray();
+            // 2. HIGH PERFORMANCE DATA COPY (Avoids LINQ/Select overhead)
+            var highD = new double[n];
+            var lowD = new double[n];
+            var closeD = new double[n];
+            var timestamps = new DateTime[n];
 
+            var span = prices.Span;
+            
+            for (int i = 0; i < n; i++)
+            {
+                var p = span[i];
+                highD[i] = (double)p.HighPrice;
+                lowD[i] = (double)p.LowPrice;
+                closeD[i] = (double)p.ClosePrice;
+                timestamps[i] = p.Timestamp;
+            }
+
+            // 3. GPU ALLOCATIONS
             using var closeBuffer = _accelerator.Allocate1D(closeD);
             using var highBuffer = _accelerator.Allocate1D(highD);
             using var lowBuffer = _accelerator.Allocate1D(lowD);
             using var smaBuffer = _accelerator.Allocate1D<double>(n);
+            using var smaLongBuffer = _accelerator.Allocate1D<double>(n);
             using var stdDevBuffer = _accelerator.Allocate1D<double>(n);
             using var trBuffer = _accelerator.Allocate1D<double>(n);
             using var rsiBuffer = _accelerator.Allocate1D<double>(n);
 
-            var smaKernel = _accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<double>, ArrayView<double>, int>(SmaKernel);
-            var stdDevKernel = _accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<double>, ArrayView<double>, int>(StdDevKernel);
-            var trKernel = _accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<double>, ArrayView<double>, ArrayView<double>, ArrayView<double>>(TrueRangeKernel);
-            var rsiKernel = _accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<double>, ArrayView<double>, int>(RsiKernel);
-
-            smaKernel(n, closeBuffer.View, smaBuffer.View, maPeriod);
-            stdDevKernel(n, closeBuffer.View, stdDevBuffer.View, maPeriod);
-            trKernel(n, highBuffer.View, lowBuffer.View, closeBuffer.View, trBuffer.View);
-            rsiKernel(n, closeBuffer.View, rsiBuffer.View, rsiPeriod);
+            // 4. EXECUTION (Using cached delegates)
+            _smaKernel(n, closeBuffer.View, smaBuffer.View, maPeriod);
+            _smaKernel(n, closeBuffer.View, smaLongBuffer.View, maLongPeriod); // Now actually running SMA_Long
+            _stdDevKernel(n, closeBuffer.View, stdDevBuffer.View, maPeriod);
+            _trKernel(n, highBuffer.View, lowBuffer.View, closeBuffer.View, trBuffer.View);
+            _rsiKernel(n, closeBuffer.View, rsiBuffer.View, rsiPeriod);
 
             _accelerator.Synchronize();
 
+            // 5. DATA RETRIEVAL
             var sma = smaBuffer.GetAsArray1D();
+            var smaLong = smaLongBuffer.GetAsArray1D();
             var stdDev = stdDevBuffer.GetAsArray1D();
             var tr = trBuffer.GetAsArray1D();
             var rsi = rsiBuffer.GetAsArray1D();
             var atr = CalculateAtrSmoothing(tr, atrPeriod);
 
-            var results = new Dictionary<DateTime, Dictionary<string, decimal>>();
+            // 6. RESULT MAPPING
+            var results = new Dictionary<DateTime, Dictionary<string, decimal>>(n);
             for (int i = 0; i < n; i++)
             {
-                results[timestamps[i]] = new Dictionary<string, decimal>
+                // Grab previous values safely
+                decimal rsiPrev = i > 0 ? (decimal)rsi[i - 1] : 50m;
+                decimal closePrev = i > 0 ? (decimal)closeD[i - 1] : (decimal)closeD[i];
+
+                results[timestamps[i]] = new Dictionary<string, decimal>(8)
                 {
                     { "SMA", (decimal)sma[i] },
+                    { "SMA_Long", (decimal)smaLong[i] },
                     { "RSI", (decimal)rsi[i] },
+                    { "RSI_Prev", rsiPrev },             
+                    { "Close_Prev", closePrev },         
                     { "ATR", (decimal)atr[i] },
                     { "UpperBand", (decimal)(sma[i] + (stdDevMult * stdDev[i])) },
                     { "LowerBand", (decimal)(sma[i] - (stdDevMult * stdDev[i])) }
                 };
+                        }
+
+            return results;
+        }
+
+        public async Task<Dictionary<DateTime, decimal>> CalculateSmaOnlyAsync(
+            ReadOnlyMemory<PriceModel> prices,
+            int period)
+        {
+            if (prices.IsEmpty) return new();
+
+            int n = prices.Length;
+            var closeD = new double[n];
+            var timestamps = new DateTime[n];
+
+            var span = prices.Span;
+            // Fast copy
+            for (int i = 0; i < n; i++)
+            {
+                closeD[i] = (double)span[i].ClosePrice;
+                timestamps[i] = span[i].Timestamp;
             }
+
+            using var closeBuffer = _accelerator.Allocate1D(closeD);
+            using var smaBuffer = _accelerator.Allocate1D<double>(n);
+
+            // Use the cached SMA kernel from the constructor
+            _smaKernel(n, closeBuffer.View, smaBuffer.View, period);
+            _accelerator.Synchronize();
+
+            var smaResults = smaBuffer.GetAsArray1D();
+
+            var results = new Dictionary<DateTime, decimal>(n);
+            for (int i = 0; i < n; i++)
+            {
+                results[timestamps[i]] = (decimal)smaResults[i];
+            }
+
             return results;
         }
 
@@ -210,6 +265,6 @@ namespace Temperance.Services.Services.Implementations
                                      XMath.Abs(low[index] - close[index - 1])));
         }
 
-        public void Dispose() { _accelerator?.Dispose(); }
+        public void Dispose() {; }
     }
 }
