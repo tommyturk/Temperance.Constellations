@@ -411,7 +411,7 @@ namespace Temperance.Constellations.Services
                                         {
                                             decimal mfeInAtr = (position.HighestPriceSinceEntry - position.AverageEntryPrice) / atr;
 
-                                            if (mfeInAtr >= 3.0m) // TIER 3: The Parabolic Choke (NEW)
+                                            if (mfeInAtr >= 3.0m) // TIER 3: The Parabolic Choke
                                             {
                                                 decimal parabolicFloor = position.HighestPriceSinceEntry - (atr * 0.3m);
                                                 if (currentBar.ClosePrice <= parabolicFloor) exitReason = "Trailing Ratchet (Parabolic Secured)";
@@ -431,7 +431,7 @@ namespace Temperance.Constellations.Services
                                         {
                                             decimal mfeInAtr = (position.AverageEntryPrice - position.LowestPriceSinceEntry) / atr;
 
-                                            if (mfeInAtr >= 3.0m) // TIER 3: The Parabolic Choke (NEW)
+                                            if (mfeInAtr >= 3.0m) // TIER 3: The Parabolic Choke
                                             {
                                                 decimal parabolicCeiling = position.LowestPriceSinceEntry + (atr * 0.3m);
                                                 if (currentBar.ClosePrice >= parabolicCeiling) exitReason = "Trailing Ratchet (Parabolic Secured)";
@@ -450,10 +450,24 @@ namespace Temperance.Constellations.Services
                                     }
                                 }
 
-                                // PRIORITY 3: THE PROFIT TAKER (PURE LUDUS EXIT)
+                                bool isPartial = false;
+
                                 if (exitReason == "Hold")
                                 {
                                     var strategy = strategyPool[position.Symbol];
+
+                                    //// Check for the SMA Partial Scalpel FIRST
+                                    //if (strategy.ShouldTakePartialProfit(position, in currentBar, indicators))
+                                    //{
+                                    //    exitReason = "SMA Partial Profit (50%)";
+                                    //    isPartial = true;
+                                    //}
+                                    //else
+                                    //{
+                                    //    string proposedExit = strategy.GetExitReason(position, in currentBar, null, indicators);
+                                    //    if (proposedExit != "Hold") exitReason = proposedExit;
+                                    //}
+
                                     string proposedExit = strategy.GetExitReason(position, in currentBar, null, indicators);
                                     if (proposedExit != "Hold") exitReason = proposedExit;
                                 }
@@ -467,7 +481,8 @@ namespace Temperance.Constellations.Services
                                     Bar = currentBar,
                                     Indicators = indicators,
                                     ExitReason = exitReason,
-                                    StrategyName = strategyPool[position.Symbol].Name
+                                    StrategyName = strategyPool[position.Symbol].Name,
+                                    IsPartial = false // <--- PASS THE FLAG TO THE EXECUTION LOOP
                                 };
                             })
                             .Where(result => result != null)
@@ -481,6 +496,11 @@ namespace Temperance.Constellations.Services
                             // Ensure we haven't already processed an exit for this symbol on this bar
                             if (!symbolsExitedThisBar.Contains(exit.Position.Symbol))
                             {
+                                // Determine the slice size. If it's a partial, cut it in half.
+                                int? sliceQty = exit.IsPartial ? (int)Math.Floor(exit.Position.Quantity * 0.2) : null;
+
+                                // Safety check: Don't execute a partial if the math resulted in 0 shares
+                                if (exit.IsPartial && sliceQty <= 0) continue;
                                 var closedTrade = await ClosePositionAsync(
                                     realm.Manager,
                                     exit.Position,
@@ -489,7 +509,8 @@ namespace Temperance.Constellations.Services
                                     exit.StrategyName,
                                     exit.ExitReason,
                                     session.Interval,
-                                    exit.Indicators);
+                                    exit.Indicators,
+                                    sliceQty);
 
                                 if (closedTrade != null)
                                 {
@@ -815,7 +836,8 @@ namespace Temperance.Constellations.Services
 
                 if (nextCycleStart <= sessionEndDate)
                 {
-                    _logger.LogInformation("Drafting roster for next cycle starting {Date}", nextCycleStart);
+                    _logger.LogInformation("Scouting the universe for high-volatility candidates...");
+
                     await _committee.HoldPromotionCommitteeAsync(
                         sessionId,
                         session.StrategyName,
@@ -825,7 +847,7 @@ namespace Temperance.Constellations.Services
                         etfUniverse);
                 }
 
-                // ADVANCE TIME
+                // ADVANCE TIMEf
                 currentCycleStart = nextCycleStart;
             }
             // =========================================================================
@@ -927,8 +949,12 @@ namespace Temperance.Constellations.Services
             int activePortfolioSize,
             decimal currentLiveExposure) // The source of truth for this bar
         {
-            decimal rawEntryPrice = currentBar.ClosePrice;
             decimal atr = indicators["ATR"];
+            decimal lowerBand = indicators.TryGetValue("LowerBand", out var lb) ? lb : currentBar.ClosePrice;
+            decimal upperBand = indicators.TryGetValue("UpperBand", out var ub) ? ub : currentBar.ClosePrice;
+
+            // Default to the close price (Momentum Exhaustion Confirmation)
+            decimal rawEntryPrice = currentBar.ClosePrice;
 
             // 1. CARVER COST FILTER
             bool isViable = _transactionCostService.IsTradeEconomicallyViable(
@@ -1016,8 +1042,13 @@ namespace Temperance.Constellations.Services
             string strategyName,
             string exitReason,
             string interval,
-            Dictionary<string, decimal> indicators)
+            Dictionary<string, decimal> indicators,
+            int? overrideQuantity = null)
         {
+            // Determine if this is a full liquidation or a partial slice
+            int exitQty = overrideQuantity ?? position.Quantity;
+            if (exitQty <= 0) return null;
+
             decimal rawExitPrice = currentBar.ClosePrice;
             SignalDecision exitSignal = position.Direction == PositionDirection.Long ? SignalDecision.Sell : SignalDecision.Buy;
 
@@ -1033,6 +1064,7 @@ namespace Temperance.Constellations.Services
                 : (position.AverageEntryPrice - effectiveExitPrice) * position.Quantity;
 
             // 4. Net PnL (Deducting the combined explicit fees of both Entry and Exit)
+            decimal proRataEntryCost = position.TotalEntryCost * ((decimal)exitQty / position.Quantity);
             decimal totalTradeCosts = position.TotalEntryCost + totalExitCost;
             decimal netPnL = grossPnL - totalTradeCosts;
 
@@ -1196,6 +1228,29 @@ namespace Temperance.Constellations.Services
         private string GetSectorForSymbol(string symbol)
         {
             return _symbolToSectorMap.TryGetValue(symbol, out var sector) ? sector : "General";
+        }
+
+        private decimal CalculateRecentVolatility(ReadOnlyMemory<PriceModel> prices)
+        {
+            var span = prices.Span;
+            if (span.Length < 10) return 0m; // Not enough data to be statistically valid
+
+            var returns = new List<double>();
+            for (int i = 1; i < span.Length; i++)
+            {
+                if (span[i - 1].ClosePrice > 0 && span[i].ClosePrice > 0)
+                {
+                    returns.Add(Math.Log((double)(span[i].ClosePrice / span[i - 1].ClosePrice)));
+                }
+            }
+
+            if (returns.Count == 0) return 0m;
+
+            double avgReturn = returns.Average();
+            double variance = returns.Sum(r => Math.Pow(r - avgReturn, 2)) / returns.Count;
+
+            // Annualize the daily variance (assume 252 trading days)
+            return (decimal)(Math.Sqrt(variance) * Math.Sqrt(252));
         }
     }
 }

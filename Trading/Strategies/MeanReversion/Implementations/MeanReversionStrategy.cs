@@ -161,6 +161,7 @@ namespace Temperance.Services.Trading.Strategies.MeanReversion.Implementation
 
         public bool ShouldTakePartialProfit(Position position, in PriceModel currentBar, Dictionary<string, decimal> currentIndicatorValues)
         {
+            if (position.Quantity <= 10) return false;
             // We only take partial profit if we haven't already scaled out
             // (Assuming your Position model tracks if a partial exit has occurred)
             if (position.Quantity <= (position.Quantity / 2)) return false;
@@ -205,15 +206,15 @@ namespace Temperance.Services.Trading.Strategies.MeanReversion.Implementation
         }
 
         public decimal GetAllocationAmount(
-            in PriceModel currentBar,
-            IReadOnlyList<PriceModel> historicalDataWindow,
-            Dictionary<string, decimal> currentIndicatorValues,
-            decimal maxTradeAllocationInitialCapital,
-            decimal currentTotalEquity,
-            decimal expectedSharpe,
-            int rawMacroScore,
-            decimal dynamicIdm,
-            int activePortfolioSize)
+     in PriceModel currentBar,
+     IReadOnlyList<PriceModel> historicalDataWindow,
+     Dictionary<string, decimal> currentIndicatorValues,
+     decimal maxTradeAllocationInitialCapital,
+     decimal currentTotalEquity,
+     decimal expectedSharpe,
+     int rawMacroScore,
+     decimal dynamicIdm,
+     int activePortfolioSize)
         {
             decimal atr = currentIndicatorValues.TryGetValue("ATR", out var a) ? a : currentBar.ClosePrice * 0.02m;
             if (currentBar.ClosePrice <= 0 || atr <= 0) return 0m;
@@ -246,17 +247,40 @@ namespace Temperance.Services.Trading.Strategies.MeanReversion.Implementation
             if (currentRsi > 75m) convictionBoost = 1.5m; // Euphoria Boost
 
             // =====================================================================
-            // 3. THE ENVIRONMENT MULTIPLIER (Sigmoid)
+            // 3. MACRO-ASYMMETRIC TILTING (The Trend Filter)
+            // Aligning capital deployment with the path of least resistance
             // =====================================================================
-            double score = (double)rawMacroScore;
-            decimal marketMultiplier = (decimal)(1.5 / (1.0 + Math.Exp(-0.5 * score)));
+            decimal macroDirectionalTilt = 1.0m;
 
-            if (marketMultiplier <= 0.2m) return 0m;
+            // We need to know if this is a Buy or Sell signal based on the RSI
+            bool isLikelyLongSignal = currentRsi < 50m;
 
-            // Apply conviction and environment
-            decimal finalAllocation = rawDollarAllocation * marketMultiplier * convictionBoost;
+            // If we have a valid 200-SMA, check the asset's broad trend
+            if (currentIndicatorValues.TryGetValue("SMA_Long", out decimal longTermTrend) && longTermTrend > 0)
+            {
+                bool isAssetInBullMarket = currentBar.ClosePrice > longTermTrend;
 
-            // Safety Gates: Hard cap at 15% to prevent one bad ETF from ruining the run
+                if (isLikelyLongSignal && isAssetInBullMarket)
+                {
+                    macroDirectionalTilt = 1.2m; // 20% Boost for trading WITH the Long trend
+                }
+                else if (!isLikelyLongSignal && !isAssetInBullMarket)
+                {
+                    macroDirectionalTilt = 1.2m; // 20% Boost for trading WITH the Short trend
+                }
+                else
+                {
+                    macroDirectionalTilt = 0.8m; // 20% Penalty for fighting the primary trend
+                }
+            }
+
+            // Apply conviction and asymmetry (marketMultiplier removed to fix compilation error)
+            decimal finalAllocation = rawDollarAllocation * convictionBoost * macroDirectionalTilt;
+
+            // =====================================================================
+            // 4. MAXIMUM CONFIDENCE CAP (Risk Management)
+            // =====================================================================
+            // Safety Gates: Hard cap at 15%
             decimal maxCap = currentTotalEquity * 0.15m;
             finalAllocation = Math.Min(finalAllocation, maxCap);
 
